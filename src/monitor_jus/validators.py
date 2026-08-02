@@ -41,10 +41,17 @@ def validate_cnpj(cnpj: str) -> bool:
     return digits[-2:] == f"{d1}{d2}"
 
 
+def normalize_oab_numero(numero: str) -> str:
+    """Normaliza número OAB preservando sufixo alfabético (ex.: 2556A)."""
+    raw = (numero or "").strip().upper().replace(" ", "")
+    return re.sub(r"[^0-9A-Z]", "", raw)
+
+
 def validate_oab(numero: str, seccional: str) -> bool:
-    num = only_digits(numero)
+    num = normalize_oab_numero(numero)
+    digits = only_digits(num)
     sec = (seccional or "").strip().upper()
-    return bool(num) and 3 <= len(num) <= 7 and len(sec) == 2 and sec.isalpha()
+    return bool(digits) and 3 <= len(digits) <= 7 and len(sec) == 2 and sec.isalpha()
 
 
 _CNJ_MASKED = re.compile(

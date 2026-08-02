@@ -15,7 +15,7 @@ from monitor_jus.logging_setup import get_logger
 from monitor_jus.models import NotifyStatus
 from monitor_jus.pipeline.discovery import run_discovery
 from monitor_jus.security import only_digits
-from monitor_jus.validators import normalize_cnj, validate_cpf, validate_oab
+from monitor_jus.validators import normalize_cnj, normalize_oab_numero, validate_cpf, validate_oab
 
 logger = get_logger(__name__)
 
@@ -88,10 +88,15 @@ def sync_criteria_from_config(session: Session, settings: Settings | None = None
         created += 1
 
     for oab in mon.get("oabs") or []:
-        numero = str(oab.get("numero", ""))
+        numero = normalize_oab_numero(str(oab.get("numero", "")))
         sec = str(oab.get("seccional", "")).upper()
         if validate_oab(numero, sec):
-            upsert("OAB", f"{sec}:{only_digits(numero)}", oab.get("responsavel"), {"seccional": sec})
+            upsert(
+                "OAB",
+                f"{sec}:{numero}",
+                oab.get("responsavel"),
+                {"seccional": sec, "numero": numero},
+            )
 
     for item in mon.get("cpfs") or []:
         cpf = only_digits(str(item.get("cpf", "")))

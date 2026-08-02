@@ -43,6 +43,7 @@ def test_validate_cnpj():
 
 def test_validate_oab():
     assert validate_oab("123456", "SP") is True
+    assert validate_oab("2556A", "RJ") is True
     assert validate_oab("12", "SP") is False
 
 
