@@ -1,0 +1,115 @@
+# Aliases da API Pública DataJud (CNJ)
+# https://datajud-wiki.cnj.jus.br/api-publica/endpoints/
+
+tribunais:
+  # Superiores (sem STF na API pública)
+  stj: { alias: api_publica_stj, nome: "Superior Tribunal de Justiça" }
+  tst: { alias: api_publica_tst, nome: "Tribunal Superior do Trabalho" }
+  tse: { alias: api_publica_tse, nome: "Tribunal Superior Eleitoral" }
+  stm: { alias: api_publica_stm, nome: "Superior Tribunal Militar" }
+
+  # Justiça Federal
+  trf1: { alias: api_publica_trf1, nome: "TRF 1ª Região" }
+  trf2: { alias: api_publica_trf2, nome: "TRF 2ª Região" }
+  trf3: { alias: api_publica_trf3, nome: "TRF 3ª Região" }
+  trf4: { alias: api_publica_trf4, nome: "TRF 4ª Região" }
+  trf5: { alias: api_publica_trf5, nome: "TRF 5ª Região" }
+  trf6: { alias: api_publica_trf6, nome: "TRF 6ª Região" }
+
+  # Justiça Estadual
+  tjac: { alias: api_publica_tjac, nome: "TJAC" }
+  tjal: { alias: api_publica_tjal, nome: "TJAL" }
+  tjam: { alias: api_publica_tjam, nome: "TJAM" }
+  tjap: { alias: api_publica_tjap, nome: "TJAP" }
+  tjba: { alias: api_publica_tjba, nome: "TJBA" }
+  tjce: { alias: api_publica_tjce, nome: "TJCE" }
+  tjdft: { alias: api_publica_tjdft, nome: "TJDFT" }
+  tjes: { alias: api_publica_tjes, nome: "TJES" }
+  tjgo: { alias: api_publica_tjgo, nome: "TJGO" }
+  tjma: { alias: api_publica_tjma, nome: "TJMA" }
+  tjmg: { alias: api_publica_tjmg, nome: "TJMG" }
+  tjms: { alias: api_publica_tjms, nome: "TJMS" }
+  tjmt: { alias: api_publica_tjmt, nome: "TJMT" }
+  tjpa: { alias: api_publica_tjpa, nome: "TJPA" }
+  tjpb: { alias: api_publica_tjpb, nome: "TJPB" }
+  tjpe: { alias: api_publica_tjpe, nome: "TJPE" }
+  tjpi: { alias: api_publica_tjpi, nome: "TJPI" }
+  tjpr: { alias: api_publica_tjpr, nome: "TJPR" }
+  tjrj: { alias: api_publica_tjrj, nome: "TJRJ" }
+  tjrn: { alias: api_publica_tjrn, nome: "TJRN" }
+  tjro: { alias: api_publica_tjro, nome: "TJRO" }
+  tjrr: { alias: api_publica_tjrr, nome: "TJRR" }
+  tjrs: { alias: api_publica_tjrs, nome: "TJRS" }
+  tjsc: { alias: api_publica_tjsc, nome: "TJSC" }
+  tjse: { alias: api_publica_tjse, nome: "TJSE" }
+  tjsp: { alias: api_publica_tjsp, nome: "TJSP" }
+  tjto: { alias: api_publica_tjto, nome: "TJTO" }
+
+# Mapa segmento CNJ (J) + tribunal (TR) -> chave em tribunais
+# Formato número CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO
+segmento_tribunal:
+  "8.26": tjsp
+  "8.19": tjrj
+  "8.13": tjmg
+  "8.09": tjgo
+  "8.07": tjdft
+  "8.11": tjmt
+  "8.21": tjrs
+  "8.01": tjac
+  "8.02": tjal
+  "8.04": tjam
+  "8.03": tjap
+  "8.05": tjba
+  "8.06": tjce
+  "8.08": tjes
+  "8.10": tjma
+  "8.12": tjms
+  "8.14": tjpa
+  "8.15": tjpb
+  "8.16": tjpe
+  "8.17": tjpi
+  "8.18": tjpr
+  "8.20": tjrn
+  "8.22": tjro
+  "8.23": tjrr
+  "8.24": tjsc
+  "8.25": tjse
+  "8.27": tjto
+  "4.01": trf1
+  "4.02": trf2
+  "4.03": trf3
+  "4.04": trf4
+  "4.05": trf5
+  "4.06": trf6
+  "3.00": stj
+  "5.01": trt1
+  "5.02": trt2
+  "5.03": trt3
+  "5.15": trt15
+
+# TRT aliases extras
+tribunais_extras:
+  trt1: { alias: api_publica_trt1, nome: "TRT 1" }
+  trt2: { alias: api_publica_trt2, nome: "TRT 2" }
+  trt3: { alias: api_publica_trt3, nome: "TRT 3" }
+  trt4: { alias: api_publica_trt4, nome: "TRT 4" }
+  trt5: { alias: api_publica_trt5, nome: "TRT 5" }
+  trt6: { alias: api_publica_trt6, nome: "TRT 6" }
+  trt7: { alias: api_publica_trt7, nome: "TRT 7" }
+  trt8: { alias: api_publica_trt8, nome: "TRT 8" }
+  trt9: { alias: api_publica_trt9, nome: "TRT 9" }
+  trt10: { alias: api_publica_trt10, nome: "TRT 10" }
+  trt11: { alias: api_publica_trt11, nome: "TRT 11" }
+  trt12: { alias: api_publica_trt12, nome: "TRT 12" }
+  trt13: { alias: api_publica_trt13, nome: "TRT 13" }
+  trt14: { alias: api_publica_trt14, nome: "TRT 14" }
+  trt15: { alias: api_publica_trt15, nome: "TRT 15" }
+  trt16: { alias: api_publica_trt16, nome: "TRT 16" }
+  trt17: { alias: api_publica_trt17, nome: "TRT 17" }
+  trt18: { alias: api_publica_trt18, nome: "TRT 18" }
+  trt19: { alias: api_publica_trt19, nome: "TRT 19" }
+  trt20: { alias: api_publica_trt20, nome: "TRT 20" }
+  trt21: { alias: api_publica_trt21, nome: "TRT 21" }
+  trt22: { alias: api_publica_trt22, nome: "TRT 22" }
+  trt23: { alias: api_publica_trt23, nome: "TRT 23" }
+  trt24: { alias: api_publica_trt24, nome: "TRT 24" }

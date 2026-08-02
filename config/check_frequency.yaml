@@ -1,0 +1,21 @@
+# Frequências em dias
+default_days: 1
+
+regras:
+  - id: audiencia_proxima
+    days: 1
+    when: audiencia_proxima
+
+  - id: ativo_recente
+    days: 1
+    when: ativo_com_movimentacao_recente
+    recent_days: 30
+
+  - id: ocioso
+    days: 7
+    when: sem_movimentacao_longa
+    idle_days: 90
+
+  - id: arquivado
+    days: 7
+    when: arquivado_ou_baixado

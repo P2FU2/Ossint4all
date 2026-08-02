@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Relatório diário — Monitor Judicial</title>
+  <style>
+    body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; background: #f7f4ef; margin: 0; padding: 24px; }
+    .wrap { max-width: 860px; margin: 0 auto; background: #fffdf8; border: 1px solid #e4ddd0; padding: 28px; }
+    h1 { font-size: 22px; margin: 0 0 8px; color: #2c1810; }
+    h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ddd2c2; padding-bottom: 6px; }
+    .muted { color: #666; font-size: 13px; }
+    .stats { display: block; margin: 16px 0; }
+    .badge { display: inline-block; padding: 2px 8px; background: #f0e6da; margin-right: 6px; font-size: 12px; }
+    .alta { background: #f3d6d0; }
+    .item { margin: 14px 0; padding: 12px 0; border-bottom: 1px solid #eee6da; }
+    .cov li { margin: 4px 0; }
+    .disclaimer { font-size: 12px; color: #555; margin-top: 32px; line-height: 1.45; }
+    a { color: #6b3e2e; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Monitor Judicial — Relatório diário</h1>
+    <p class="muted">Consulta consolidada em {{ generated_at }} ({{ tz }})</p>
+
+    <div class="stats">
+      <span class="badge">Total: {{ total }}</span>
+      <span class="badge alta">Urgentes: {{ urgent_count }}</span>
+      <span class="badge">Quarentena: {{ quarantine_count }}</span>
+    </div>
+
+    <h2>Cobertura ativa nesta instalação</h2>
+    <ul class="cov">
+      {% for row in coverage %}
+      <li>{{ '✓' if row.enabled else '✗' }} {{ row.label }}{% if not row.enabled %} — {{ row.reason }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+
+    {% if totals_by_tribunal %}
+    <h2>Por tribunal</h2>
+    <p>{% for k,v in totals_by_tribunal.items() %}<span class="badge">{{ k }}: {{ v }}</span>{% endfor %}</p>
+    {% endif %}
+
+    {% if urgent %}
+    <h2>Itens urgentes</h2>
+    {% for e in urgent %}
+    <div class="item">
+      <strong>{{ e.numero_cnj or 'Sem CNJ' }}</strong> — {{ e.tribunal or '—' }}
+      <div class="muted">{{ e.event_type }} · prioridade {{ e.priority }} · {{ e.tipo_movimentacao or '—' }}</div>
+      <div>{{ e.summary or e.description }}</div>
+      {% if e.possible_deadline_flag %}<div><em>Possível prazo identificado. Necessária validação jurídica na publicação oficial.</em></div>{% endif %}
+      {% if e.official_link %}<div><a href="{{ e.official_link }}">Consulta oficial</a></div>{% endif %}
+      {% if e.criterion_refs %}<div class="muted">Critérios: {{ e.criterion_refs | join(', ') }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% for section_name, items in sections %}
+    <h2>{{ section_name }}</h2>
+    {% if not items %}
+    <p class="muted">Nenhum item.</p>
+    {% endif %}
+    {% for e in items %}
+    <div class="item">
+      <strong>{{ e.numero_cnj or 'Sem CNJ' }}</strong> — {{ e.tribunal or '—' }} · {{ e.priority }}
+      <div class="muted">{{ e.title }}</div>
+      <div>{{ e.summary or e.description }}</div>
+      {% if e.requires_name_validation %}<div class="muted">Correspondência por nome — requer validação.</div>{% endif %}
+      {% if e.official_link %}<div><a href="{{ e.official_link }}">Consulta oficial</a></div>{% endif %}
+    </div>
+    {% endfor %}
+    {% endfor %}
+
+    {% if skipped %}
+    <h2>Cobertura não habilitada</h2>
+    <ul>{% for s in skipped %}<li>{{ s }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    {% if failures %}
+    <h2>Fontes temporariamente indisponíveis</h2>
+    <ul>{% for f in failures %}<li>{{ f }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <p class="disclaimer">
+      O sistema consolida os eventos encontrados nas fontes habilitadas. A disponibilidade e o horário dos dados
+      dependem da publicação e do processamento de cada tribunal e fornecedor. Publicações via DJEN e o início
+      do monitoramento podem ter latência (incluindo até ~48h após o cadastro em alguns fluxos). Não há garantia
+      de cobertura instantânea ou absoluta de todas as comunicações processuais.
+    </p>
+  </div>
+</body>
+</html>

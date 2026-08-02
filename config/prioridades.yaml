@@ -1,0 +1,74 @@
+# Prioridade determinística (IA não redefine)
+# Níveis: alta | media | baixa
+
+regras:
+  - id: prazo_explicito
+    prioridade: alta
+    keywords:
+      - prazo
+      - "prazo de"
+      - "dentro de"
+      - "dias úteis"
+      - "dias uteis"
+
+  - id: intimacao
+    prioridade: alta
+    keywords:
+      - intimação
+      - intimacao
+      - intimado
+      - "ciência"
+      - ciencia
+
+  - id: audiencia_futura
+    prioridade: alta
+    keywords:
+      - audiência
+      - audiencia
+      - designada
+      - redesignada
+
+  - id: sentenca_com_intimacao
+    prioridade: alta
+    requires_all:
+      - sentenca_ou_acordao: true
+      - intimacao: true
+
+  - id: sentenca_isolada
+    prioridade: media
+    keywords:
+      - sentença
+      - sentenca
+      - acórdão
+      - acordao
+      - julgado
+
+  - id: despacho
+    prioridade: media
+    keywords:
+      - despacho
+      - decisão
+      - decisao
+
+  - id: atualizacao_cadastral
+    prioridade: baixa
+    keywords:
+      - redistribuição
+      - redistribuicao
+      - alteração de classe
+      - alteracao de classe
+      - atualização cadastral
+      - atualizacao cadastral
+
+  - id: adversidade
+    prioridade: alta
+    keywords:
+      - indeferido
+      - improcedente
+      - penhora
+      - bloqueio
+      - arresto
+      - liminar
+      - tutela
+
+default_prioridade: media

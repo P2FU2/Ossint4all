@@ -1,0 +1,30 @@
+monitoramentos:
+  oabs:
+    - numero: "123456"
+      seccional: "SP"
+      responsavel: "Advogado 1"
+
+    - numero: "654321"
+      seccional: "DF"
+      responsavel: "Advogado 2"
+
+  cpfs:
+    - cpf: "00000000000"
+      nome: "Pessoa 1"
+
+    - cpf: "11111111111"
+      nome: "Pessoa 2"
+
+  nomes:
+    - "Nome Completo 1"
+    - "Nome Completo 2"
+
+  processos:
+    - "0000000-00.0000.0.00.0000"
+
+  empresas:
+    - nome: "Empresa Exemplo Ltda."
+      cnpj: "00000000000100"
+
+# Opcional: restringe fallback DataJud a estes aliases
+tribunais_ativos: []

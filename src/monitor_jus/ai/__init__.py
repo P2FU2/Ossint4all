@@ -1,0 +1,1 @@
+"""Resumos por IA / determinísticos."""

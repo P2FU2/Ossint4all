@@ -1,0 +1,40 @@
+services:
+  web:
+    build: .
+    command: ["python", "-m", "monitor_jus.main", "serve"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/monitor.db
+      ENV: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./templates:/app/templates
+
+  worker:
+    build: .
+    command: ["python", "-m", "monitor_jus.main", "worker"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/monitor.db
+      ENV: development
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./templates:/app/templates
+
+  scheduler:
+    build: .
+    command: ["python", "-m", "monitor_jus.main", "schedule"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/monitor.db
+      ENV: development
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config

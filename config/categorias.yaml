@@ -1,0 +1,55 @@
+areas_juridicas:
+  - id: trabalhista
+    keywords: ["trabalh", "CLT", "reclamação trabalhista", "reclamacao trabalhista"]
+  - id: tributario
+    keywords: ["tribut", "fiscal", "execução fiscal", "execucao fiscal", "ICMS", "ISS", "IRPF"]
+  - id: criminal
+    keywords: ["penal", "crime", "criminal", "inquérito", "inquerito"]
+  - id: familia
+    keywords: ["família", "familia", "alimentos", "divórcio", "divorcio", "sucess"]
+  - id: consumidor
+    keywords: ["consumidor", "CDC", "relação de consumo", "relacao de consumo"]
+  - id: empresarial
+    keywords: ["empresarial", "societário", "societario", "falência", "falencia"]
+  - id: recuperacao_judicial
+    keywords: ["recuperação judicial", "recuperacao judicial", "RJ"]
+  - id: previdenciario
+    keywords: ["previden", "INSS", "benefício", "beneficio", "aposentadoria"]
+  - id: administrativo
+    keywords: ["administrativ", "mandado de segurança", "mandado de seguranca"]
+  - id: execucao
+    keywords: ["execução", "execucao", "cumprimento de sentença", "cumprimento de sentenca"]
+  - id: civel
+    keywords: ["cível", "civel", "procedimento comum"]
+  - id: outros
+    keywords: []
+
+tipos_movimentacao:
+  - id: intimacao
+    keywords: ["intimação", "intimacao"]
+  - id: despacho
+    keywords: ["despacho"]
+  - id: decisao
+    keywords: ["decisão", "decisao"]
+  - id: sentenca
+    keywords: ["sentença", "sentenca"]
+  - id: acordao
+    keywords: ["acórdão", "acordao"]
+  - id: audiencia
+    keywords: ["audiência", "audiencia"]
+  - id: distribuicao
+    keywords: ["distribuição", "distribuicao", "distribuído", "distribuido"]
+  - id: recurso
+    keywords: ["recurso", "apelação", "apelacao", "agravo"]
+  - id: execucao
+    keywords: ["execução", "execucao"]
+  - id: arquivamento
+    keywords: ["arquiv"]
+  - id: baixa
+    keywords: ["baixa"]
+  - id: atualizacao_cadastral
+    keywords: ["cadastral", "redistrib"]
+  - id: publicacao
+    keywords: ["publicação", "publicacao", "DJEN", "diário", "diario"]
+  - id: outros
+    keywords: []
