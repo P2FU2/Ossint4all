@@ -7,7 +7,7 @@ import io
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from monitor_jus.db.models import (
     Communication,
@@ -18,8 +18,15 @@ from monitor_jus.db.models import (
     ProcessMovement,
 )
 from monitor_jus.official_portal import resolve_official_link
-from monitor_jus.pipeline.portfolio import build_portfolio, classify_outcome
+from monitor_jus.pipeline.portfolio import (
+    classify_outcome,
+    load_process_criteria,
+    serialize_process_row,
+)
 from monitor_jus.security import redact_text
+
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
 
 
 def _fmt(dt: Any) -> str:
@@ -31,7 +38,33 @@ def _fmt(dt: Any) -> str:
         return str(dt)[:16]
 
 
-def list_processes(
+def _light_processes(session: Session) -> list[Process]:
+    """Carrega processos sem coluna payload (JSON pesado)."""
+    return list(
+        session.scalars(
+            select(Process)
+            .options(
+                load_only(
+                    Process.id,
+                    Process.numero_cnj,
+                    Process.tribunal,
+                    Process.classe,
+                    Process.assunto,
+                    Process.situacao,
+                    Process.grau,
+                    Process.orgao_julgador,
+                    Process.data_distribuicao,
+                    Process.last_checked_at,
+                    Process.last_movement_at,
+                    Process.baseline,
+                )
+            )
+            .order_by(Process.numero_cnj.asc())
+        ).all()
+    )
+
+
+def _filtered_process_rows(
     session: Session,
     *,
     q: str = "",
@@ -39,18 +72,22 @@ def list_processes(
     oab: str = "",
     outcome: str = "",
     pending_only: bool = False,
-) -> dict[str, Any]:
-    portfolio = build_portfolio(session)
-    rows = portfolio["processes"]
+) -> tuple[list[dict[str, Any]], list[str], int]:
+    """Retorna (linhas filtradas, tribunais, total_acervo) sem payload JSON."""
+    _, process_criteria = load_process_criteria(session)
+    procs = _light_processes(session)
 
     pending_cnjs: set[str] = set()
     if pending_only:
         pending_cnjs = {
             e.numero_cnj
             for e in session.scalars(
-                select(Event).where(Event.notify_status == "PENDING_NOTIFY", Event.numero_cnj.is_not(None))
+                select(Event.numero_cnj).where(
+                    Event.notify_status == "PENDING_NOTIFY",
+                    Event.numero_cnj.is_not(None),
+                )
             ).all()
-            if e.numero_cnj
+            if e
         }
 
     q_norm = (q or "").strip().lower()
@@ -59,7 +96,13 @@ def list_processes(
     outcome_norm = (outcome or "").strip().lower()
 
     filtered: list[dict[str, Any]] = []
-    for row in rows:
+    tribunals: set[str] = set()
+    for proc in procs:
+        if proc.tribunal:
+            tribunals.add(proc.tribunal)
+        crits = process_criteria.get(proc.id) or ["—"]
+        row = serialize_process_row(proc, criteria_labels=crits, include_payload=False)
+
         if q_norm and q_norm not in row["numero_cnj"].lower() and q_norm not in (row.get("classe") or "").lower():
             if q_norm not in (row.get("assunto") or "").lower():
                 continue
@@ -73,11 +116,48 @@ def list_processes(
             continue
         filtered.append(row)
 
-    tribunals = sorted({r["tribunal"] for r in rows if r.get("tribunal")})
+    return filtered, sorted(tribunals), len(procs)
+
+
+def list_processes(
+    session: Session,
+    *,
+    q: str = "",
+    tribunal: str = "",
+    oab: str = "",
+    outcome: str = "",
+    pending_only: bool = False,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+) -> dict[str, Any]:
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE))
+
+    filtered, tribunals, total_all = _filtered_process_rows(
+        session,
+        q=q,
+        tribunal=tribunal,
+        oab=oab,
+        outcome=outcome,
+        pending_only=pending_only,
+    )
+
+    total = len(filtered)
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    if page > total_pages:
+        page = total_pages
+    start = (page - 1) * page_size
+    page_rows = filtered[start : start + page_size]
+
     return {
-        "processes": filtered,
-        "total": len(filtered),
-        "total_all": len(rows),
+        "processes": page_rows,
+        "total": total,
+        "total_all": total_all,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
         "tribunals": tribunals,
         "filters": {
             "q": q,
@@ -86,12 +166,14 @@ def list_processes(
             "outcome": outcome,
             "pending_only": pending_only,
         },
-        "by_outcome": portfolio.get("by_outcome") or {},
     }
 
 
 def processes_csv(session: Session, **filters: Any) -> str:
-    data = list_processes(session, **filters)
+    filters.pop("page", None)
+    filters.pop("page_size", None)
+    all_rows, _, _ = _filtered_process_rows(session, **filters)
+
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(
@@ -109,7 +191,7 @@ def processes_csv(session: Session, **filters: Any) -> str:
             "baseline",
         ]
     )
-    for r in data["processes"]:
+    for r in all_rows:
         writer.writerow(
             [
                 r["numero_cnj"],

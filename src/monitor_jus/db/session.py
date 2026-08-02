@@ -87,6 +87,7 @@ def _ensure_schema_compat(engine: Engine) -> None:
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_stage VARCHAR(64)",
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_message VARCHAR(512)",
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eta_seconds DOUBLE PRECISION",
+                "ALTER TABLE digests ADD COLUMN IF NOT EXISTS pdf_path VARCHAR(512)",
             ]
         )
     elif dialect == "sqlite":
@@ -99,6 +100,7 @@ def _ensure_schema_compat(engine: Engine) -> None:
                 "ALTER TABLE jobs ADD COLUMN progress_stage VARCHAR(64)",
                 "ALTER TABLE jobs ADD COLUMN progress_message VARCHAR(512)",
                 "ALTER TABLE jobs ADD COLUMN eta_seconds REAL",
+                "ALTER TABLE digests ADD COLUMN pdf_path VARCHAR(512)",
             ]
         )
     if not statements:

@@ -3,12 +3,13 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Histórico de consultas</h1>
+    <h1>Histórico</h1>
     <p>Digests consolidados e entregas de e-mail · {{ total }} registro(s).</p>
   </div>
 </div>
 
 <div class="panel">
+  <div class="table-wrap">
   <table class="data">
     <thead>
       <tr>
@@ -29,13 +30,17 @@
         <td>{{ d.total_events }}</td>
         <td class="muted">{{ d.window_start }} → {{ d.window_end }}</td>
         <td class="muted">{{ d.sent_at }}</td>
-        <td>{{ d.recipient }}<div class="muted">{{ d.notification_status }}</div></td>
+        <td title="{{ d.recipient }}">
+          <div class="cell-clamp">{{ d.recipient }}</div>
+          <div class="muted">{{ d.notification_status }}</div>
+        </td>
         <td><a href="/app/historico/{{ d.id }}">Detalhe</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="muted">Nenhum digest ainda. Dispare um DAILY_DIGEST.</td></tr>
+      <tr><td colspan="7" class="muted">Nenhum digest ainda.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

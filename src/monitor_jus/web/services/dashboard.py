@@ -17,11 +17,12 @@ from monitor_jus.db.models import (
     Job,
     JobDeadLetter,
     Notification,
+    User,
     WebhookRaw,
 )
 from monitor_jus.db.repository import utcnow
 from monitor_jus.models import DigestStatus, JobStatus, NotifyStatus, Priority
-from monitor_jus.pipeline.portfolio import build_portfolio
+from monitor_jus.pipeline.portfolio import build_portfolio_stats
 from monitor_jus.web.services.progress_board import build_progress_board
 
 
@@ -34,8 +35,15 @@ def _fmt(dt: Any) -> str:
         return str(dt)[:16]
 
 
-def build_dashboard(session: Session, settings: Settings) -> dict[str, Any]:
-    portfolio = build_portfolio(session)
+def build_dashboard(
+    session: Session,
+    settings: Settings,
+    *,
+    user: User | None = None,
+) -> dict[str, Any]:
+    # Stats leves — sem lista completa / sem payload JSON
+    portfolio = build_portfolio_stats(session)
+    is_admin = bool(user and user.role == "admin")
 
     pending_notify = int(
         session.scalar(
@@ -68,64 +76,108 @@ def build_dashboard(session: Session, settings: Settings) -> dict[str, Any]:
         )
 
     bootstrap = session.get(BootstrapState, 1)
-    job_counts = {
-        status: int(
-            session.scalar(select(func.count()).select_from(Job).where(Job.status == status)) or 0
-        )
-        for status in (
-            JobStatus.PENDING.value,
-            JobStatus.RUNNING.value,
-            JobStatus.DEAD.value,
-            JobStatus.RETRY.value,
-        )
-    }
-
-    quarantine_open = int(
-        session.scalar(
-            select(func.count())
-            .select_from(EventQuarantine)
-            .where(EventQuarantine.resolved_at.is_(None))
-        )
-        or 0
-    )
-    dead_letters = int(session.scalar(select(func.count()).select_from(JobDeadLetter)) or 0)
-
-    stale_cutoff = utcnow() - timedelta(hours=6)
-    stale_webhooks = int(
-        session.scalar(
-            select(func.count())
-            .select_from(WebhookRaw)
-            .where(WebhookRaw.status == "PENDING", WebhookRaw.received_at < stale_cutoff)
-        )
-        or 0
-    )
 
     recent_events = list(
-        session.scalars(select(Event).order_by(Event.created_at.desc()).limit(10)).all()
+        session.scalars(select(Event).order_by(Event.created_at.desc()).limit(8)).all()
     )
 
+    # Operacional só para admin (evita queries extras no viewer)
+    job_counts = {
+        JobStatus.PENDING.value: 0,
+        JobStatus.RUNNING.value: 0,
+        JobStatus.DEAD.value: 0,
+        JobStatus.RETRY.value: 0,
+    }
     attention: list[dict[str, str]] = []
-    if quarantine_open:
-        attention.append(
-            {"level": "warn", "text": f"{quarantine_open} item(ns) em quarentena aberta"}
-        )
-    if dead_letters:
-        attention.append({"level": "error", "text": f"{dead_letters} job(s) em dead letter"})
-    if last_digest and last_digest.status == DigestStatus.FAILED.value:
-        attention.append({"level": "error", "text": "Último digest falhou"})
-    if stale_webhooks:
-        attention.append(
-            {"level": "warn", "text": f"{stale_webhooks} webhook(s) PENDING há mais de 6h"}
-        )
-    if bootstrap and not bootstrap.completed:
-        attention.append({"level": "warn", "text": "Bootstrap ainda não concluído"})
-    if not attention:
-        attention.append({"level": "ok", "text": "Nenhum alerta operacional no momento"})
+    live: dict[str, Any] = {
+        "headline": None,
+        "active_count": 0,
+        "running_count": 0,
+        "pending_count": 0,
+    }
+    health = {
+        "judit_flags_on": 0,
+        "judit_flags_total": 0,
+        "email_to": settings.email_to or "—",
+        "openrouter": bool(settings.openrouter_api_key),
+        "datajud": bool(settings.datajud_enable and settings.datajud_api_key),
+    }
 
-    flags = settings.judit_flags()
-    judit_on = sum(1 for v in flags.values() if v)
+    if is_admin:
+        job_counts = {
+            status: int(
+                session.scalar(select(func.count()).select_from(Job).where(Job.status == status))
+                or 0
+            )
+            for status in (
+                JobStatus.PENDING.value,
+                JobStatus.RUNNING.value,
+                JobStatus.DEAD.value,
+                JobStatus.RETRY.value,
+            )
+        }
+        quarantine_open = int(
+            session.scalar(
+                select(func.count())
+                .select_from(EventQuarantine)
+                .where(EventQuarantine.resolved_at.is_(None))
+            )
+            or 0
+        )
+        dead_letters = int(session.scalar(select(func.count()).select_from(JobDeadLetter)) or 0)
+        stale_cutoff = utcnow() - timedelta(hours=6)
+        stale_webhooks = int(
+            session.scalar(
+                select(func.count())
+                .select_from(WebhookRaw)
+                .where(WebhookRaw.status == "PENDING", WebhookRaw.received_at < stale_cutoff)
+            )
+            or 0
+        )
+        flags = settings.judit_flags()
+        health["judit_flags_on"] = sum(1 for v in flags.values() if v)
+        health["judit_flags_total"] = len(flags)
+        live = build_progress_board(session)
 
-    live = build_progress_board(session)
+        if quarantine_open:
+            attention.append(
+                {"level": "warn", "text": f"{quarantine_open} item(ns) em quarentena aberta"}
+            )
+        if dead_letters:
+            if bootstrap and bootstrap.completed:
+                attention.append(
+                    {
+                        "level": "warn",
+                        "text": (
+                            f"{dead_letters} job(s) em dead letter — "
+                            "há bootstrap concluído depois; pode ser falha antiga"
+                        ),
+                    }
+                )
+            else:
+                attention.append(
+                    {"level": "error", "text": f"{dead_letters} job(s) em dead letter"}
+                )
+        if last_digest and last_digest.status == DigestStatus.FAILED.value:
+            attention.append({"level": "error", "text": "Último digest falhou"})
+        if stale_webhooks:
+            attention.append(
+                {"level": "warn", "text": f"{stale_webhooks} webhook(s) PENDING há mais de 6h"}
+            )
+        if bootstrap and not bootstrap.completed:
+            attention.append({"level": "warn", "text": "Bootstrap ainda não concluído"})
+        if live.get("running_count", 0) > 1:
+            attention.append(
+                {
+                    "level": "warn",
+                    "text": (
+                        f"{live['running_count']} jobs RUNNING juntos — "
+                        "verifique se há mais de 1 réplica de worker"
+                    ),
+                }
+            )
+        if not attention:
+            attention.append({"level": "ok", "text": "Nenhum alerta operacional no momento"})
 
     return {
         "portfolio": portfolio,
@@ -151,7 +203,7 @@ def build_dashboard(session: Session, settings: Settings) -> dict[str, Any]:
             {
                 "id": e.id,
                 "title": e.title or e.event_type,
-                "summary": (e.summary or e.description or "")[:220],
+                "summary": (e.summary or e.description or "")[:180],
                 "priority": e.priority,
                 "numero_cnj": e.numero_cnj or "—",
                 "notify_status": e.notify_status,
@@ -159,11 +211,5 @@ def build_dashboard(session: Session, settings: Settings) -> dict[str, Any]:
             }
             for e in recent_events
         ],
-        "health": {
-            "judit_flags_on": judit_on,
-            "judit_flags_total": len(flags),
-            "email_to": settings.email_to or "—",
-            "openrouter": bool(settings.openrouter_api_key),
-            "datajud": bool(settings.datajud_enable and settings.datajud_api_key),
-        },
+        "health": health,
     }

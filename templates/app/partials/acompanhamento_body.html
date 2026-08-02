@@ -12,10 +12,16 @@
   </p>
 
   <div class="kpi-grid">
-    <div class="kpi"><div class="label">Ativos</div><div class="value">{{ active_count }}</div></div>
-    <div class="kpi"><div class="label">Running</div><div class="value">{{ running_count }}</div></div>
-    <div class="kpi"><div class="label">Pending</div><div class="value">{{ pending_count }}</div></div>
+    <div class="kpi"><div class="label">Na fila</div><div class="value">{{ active_count }}</div></div>
+    <div class="kpi"><div class="label">Em execução</div><div class="value">{{ running_count }}</div></div>
+    <div class="kpi"><div class="label">Aguardando</div><div class="value">{{ pending_count }}</div></div>
   </div>
+
+  {% if running_count > 1 %}
+  <div class="callout warn">
+    Há {{ running_count }} jobs RUNNING ao mesmo tempo. Em produção, use 1 réplica de worker para evitar discovery/bootstrap concorrentes.
+  </div>
+  {% endif %}
 
   {% if headline %}
   <div class="panel">
@@ -31,13 +37,13 @@
         {{ progress_row(j) }}
       {% endfor %}
     {% else %}
-      <p class="muted">Nenhum job ativo no momento. A fila está ociosa.</p>
+      <p class="muted">Nenhum job ativo. A fila está ociosa.</p>
     {% endif %}
   </div>
 
-  {% if is_admin %}
   <div class="panel">
     <h2>Disparar</h2>
+    <p class="muted" style="margin-top:-6px;margin-bottom:12px">Bootstrap e Discovery são bloqueados se já houver um em andamento.</p>
     <div class="actions">
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -61,7 +67,6 @@
       </form>
     </div>
   </div>
-  {% endif %}
 
   <div class="panel">
     <h2>Recentes</h2>

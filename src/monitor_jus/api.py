@@ -44,9 +44,18 @@ app.add_middleware(
 )
 register_ui_exception_handlers(app)
 
+class _CachedStaticFiles(StaticFiles):
+    """Static com cache longo (CSS/JS do painel)."""
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):  # type: ignore[no-untyped-def]
+        resp = super().file_response(full_path, stat_result, scope, status_code)
+        resp.headers["Cache-Control"] = "public, max-age=86400, immutable"
+        return resp
+
+
 _static_dir = Path("static")
 if _static_dir.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    app.mount("/static", _CachedStaticFiles(directory=str(_static_dir)), name="static")
 
 app.include_router(ui_router)
 
@@ -115,6 +124,17 @@ def enqueue_run(
 ) -> dict[str, Any]:
     settings = get_settings()
     with session_scope() as session:
+        from monitor_jus.web.services.actions import (
+            assert_heavy_job_allowed,
+            cancel_stale_pending_jobs,
+        )
+
+        cancel_stale_pending_jobs(session, hours=2.0)
+        try:
+            assert_heavy_job_allowed(session, body.run_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
         repo = Repository(session)
         run = repo.create_run(
             body.run_type,

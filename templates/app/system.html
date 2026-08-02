@@ -9,18 +9,22 @@
 </div>
 
 <div class="panel">
-  <h2>Mapa do painel (rotas ativas)</h2>
+  <h2>Mapa do painel</h2>
+  <div class="section-label">Consulta</div>
   <div class="routes-grid">
     <a class="route-chip" href="/app"><strong>Visão geral</strong><small>/app</small></a>
-    <a class="route-chip" href="/app/acompanhamento"><strong>Acompanhamento</strong><small>/app/acompanhamento · % · ETA</small></a>
-    <a class="route-chip" href="/app/status"><strong>Status & etapas</strong><small>/app/status</small></a>
-    <a class="route-chip" href="/app/processos"><strong>Acervo</strong><small>/app/processos</small></a>
+    <a class="route-chip" href="/app/processos"><strong>Processos</strong><small>/app/processos</small></a>
     <a class="route-chip" href="/app/eventos"><strong>Novidades</strong><small>/app/eventos</small></a>
     <a class="route-chip" href="/app/historico"><strong>Histórico</strong><small>/app/historico</small></a>
+  </div>
+  <div class="section-label" style="margin-top:16px">Administração</div>
+  <div class="routes-grid">
+    <a class="route-chip" href="/app/acompanhamento"><strong>Acompanhamento</strong><small>% · ETA · fila</small></a>
+    <a class="route-chip" href="/app/status"><strong>Pipeline</strong><small>/app/status</small></a>
     <a class="route-chip" href="/app/criterios"><strong>Critérios</strong><small>/app/criterios</small></a>
     <a class="route-chip" href="/app/sistema"><strong>Sistema</strong><small>/app/sistema</small></a>
   </div>
-  <p class="muted" style="margin-top:12px">API máquina: <code>GET /health</code> · <code>GET /ready</code> · <code>POST /run</code> · <code>GET /runs/{id}</code> (com progresso) · <code>POST /webhooks/judit</code> · <code>GET /metrics</code> (Bearer)</p>
+  <p class="muted" style="margin-top:14px;overflow-wrap:anywhere">API máquina: <code>GET /health</code> · <code>GET /ready</code> · <code>POST /run</code> · <code>GET /runs/{id}</code> · <code>POST /webhooks/judit</code> · <code>GET /metrics</code></p>
 </div>
 
 <div class="panel-grid">
@@ -28,23 +32,24 @@
     <h2>Configuração</h2>
     <p><strong>Timezone:</strong> {{ tz }}</p>
     <p><strong>Cron:</strong> <span class="mono">{{ schedule_cron }}</span></p>
-    <p><strong>E-mail from:</strong> {{ email_from }}</p>
-    <p><strong>E-mail to:</strong> {{ email_to }}</p>
+    <p><strong>E-mail from:</strong> <span class="cell-clamp">{{ email_from }}</span></p>
+    <p><strong>E-mail to:</strong> <span class="cell-clamp">{{ email_to }}</span></p>
     <p><strong>DataJud:</strong> {{ 'ligado' if datajud_enable else 'desligado' }} · {{ datajud_mode }}</p>
     <p><strong>OpenRouter:</strong> {{ 'configurado' if openrouter_configured else 'não' }} · {{ openrouter_model }}</p>
   </div>
   <div class="panel">
     <h2>Flags Judit</h2>
-    <p>
+    <div class="chip-cloud">
       {% for k, v in flags.items() %}
       <span class="badge {% if v %}ok{% else %}warn{% endif %}">{{ k }}: {{ 'on' if v else 'off' }}</span>
       {% endfor %}
-    </p>
+    </div>
   </div>
 </div>
 
 <div class="panel">
   <h2>Capabilities</h2>
+  <div class="table-wrap">
   <table class="data">
     <thead><tr><th>Fonte</th><th>Capability</th><th>Enabled</th><th>Contracted</th><th>Notas</th></tr></thead>
     <tbody>
@@ -52,20 +57,22 @@
       <tr>
         <td>{{ c.source }}</td>
         <td>{{ c.capability }}</td>
-        <td>{% if c.enabled %}<span class="badge ok">sim</span>{% else %}<span class="badge">não</span>{% endif %}</td>
-        <td>{% if c.contracted %}<span class="badge ok">sim</span>{% else %}<span class="badge">não</span>{% endif %}</td>
-        <td class="muted">{{ c.notes }}</td>
+        <td>{% if c.enabled %}<span class="badge ok">sim</span>{% else %}<span class="badge soft">não</span>{% endif %}</td>
+        <td>{% if c.contracted %}<span class="badge ok">sim</span>{% else %}<span class="badge soft">não</span>{% endif %}</td>
+        <td class="muted cell-clamp">{{ c.notes }}</td>
       </tr>
       {% else %}
       <tr><td colspan="5" class="muted">Sem capabilities.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 <div class="panel">
   <h2>Checkpoints</h2>
   {% if checkpoints %}
+  <div class="table-wrap">
   <table class="data">
     <thead><tr><th>Fonte</th><th>Key</th><th>Atualizado</th></tr></thead>
     <tbody>
@@ -78,6 +85,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p class="muted">Nenhum checkpoint.</p>
   {% endif %}
@@ -85,18 +93,20 @@
 
 <div class="panel">
   <h2>Métricas (processo web)</h2>
-  <pre style="font-size:0.85rem;white-space:pre-wrap">{{ metrics }}</pre>
+  <p class="muted" style="margin-top:0">Contadores deste processo HTTP — não incluem o worker.</p>
+  <pre style="font-size:0.85rem;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto">{{ metrics }}</pre>
 </div>
 
 <div class="panel">
   <h2>Usuários</h2>
+  <div class="table-wrap">
   <table class="data">
     <thead><tr><th>Usuário</th><th>Papel</th><th>Ativo</th><th>Último login</th><th></th></tr></thead>
     <tbody>
       {% for u in users %}
       <tr>
         <td>{{ u.username }}</td>
-        <td><span class="badge">{{ u.role }}</span></td>
+        <td><span class="badge soft">{{ u.role }}</span></td>
         <td>{% if u.active %}<span class="badge ok">sim</span>{% else %}<span class="badge warn">não</span>{% endif %}</td>
         <td class="muted">{{ u.last_login_at }}</td>
         <td>
@@ -114,6 +124,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <h2 style="margin-top:22px">Criar usuário</h2>
   <form class="form-inline" method="post" action="/app/actions/users/create">

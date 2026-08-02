@@ -24,11 +24,11 @@ SECTION_ORDER = [
 ]
 
 OUTCOME_LABELS = {
-    "ativo": "Em andamento",
+    "ativo": "Em tramitação",
     "exito": "Êxito (estimado)",
     "derrota": "Desfecho desfavorável (estimado)",
     "encerrado": "Encerrado / arquivado",
-    "indefinido": "Status não classificado",
+    "indefinido": "Sem status claro",
 }
 
 
@@ -101,11 +101,8 @@ def render_digest_html(
     portfolio = portfolio or {
         "total_processes": 0,
         "active_count": 0,
+        "undefined_count": 0,
         "closed_count": 0,
-        "win_count": 0,
-        "loss_count": 0,
-        "decided_count": 0,
-        "win_rate": None,
         "by_oab": {},
         "by_tribunal": {},
         "by_outcome": {},

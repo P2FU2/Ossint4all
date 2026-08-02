@@ -106,7 +106,7 @@ def logout(
 def app_dashboard(request: Request, user: User = Depends(require_user)):
     settings = get_settings()
     with session_scope() as session:
-        data = dashboard_svc.build_dashboard(session, settings)
+        data = dashboard_svc.build_dashboard(session, settings, user=user)
     return render(
         request,
         "app/dashboard.html",
@@ -114,12 +114,14 @@ def app_dashboard(request: Request, user: User = Depends(require_user)):
         flash=_pop_flash(request),
         **data,
         nav="dashboard",
+        nav_group="consulta",
     )
 
 
 @router.get("/app/acompanhamento", response_model=None)
-def app_acompanhamento(request: Request, user: User = Depends(require_user)):
+def app_acompanhamento(request: Request, user: User = Depends(require_admin)):
     with session_scope() as session:
+        action_svc.cancel_stale_pending_jobs(session, hours=2.0)
         data = progress_svc.build_progress_board(session)
     return render(
         request,
@@ -128,11 +130,12 @@ def app_acompanhamento(request: Request, user: User = Depends(require_user)):
         flash=_pop_flash(request),
         **data,
         nav="acompanhamento",
+        nav_group="admin",
     )
 
 
 @router.get("/app/acompanhamento/partial", response_model=None)
-def app_acompanhamento_partial(request: Request, user: User = Depends(require_user)):
+def app_acompanhamento_partial(request: Request, user: User = Depends(require_admin)):
     with session_scope() as session:
         data = progress_svc.build_progress_board(session)
     return render(
@@ -141,13 +144,15 @@ def app_acompanhamento_partial(request: Request, user: User = Depends(require_us
         user,
         **data,
         nav="acompanhamento",
+        nav_group="admin",
     )
 
 
 @router.get("/app/status", response_model=None)
-def app_status(request: Request, user: User = Depends(require_user)):
+def app_status(request: Request, user: User = Depends(require_admin)):
     settings = get_settings()
     with session_scope() as session:
+        action_svc.cancel_stale_pending_jobs(session, hours=2.0)
         data = status_svc.build_pipeline_status(session, settings)
     return render(
         request,
@@ -156,15 +161,23 @@ def app_status(request: Request, user: User = Depends(require_user)):
         flash=_pop_flash(request),
         **data,
         nav="status",
+        nav_group="admin",
     )
 
 
 @router.get("/app/status/partial", response_model=None)
-def app_status_partial(request: Request, user: User = Depends(require_user)):
+def app_status_partial(request: Request, user: User = Depends(require_admin)):
     settings = get_settings()
     with session_scope() as session:
         data = status_svc.build_pipeline_status(session, settings)
-    return render(request, "app/partials/status_body.html", user, **data, nav="status")
+    return render(
+        request,
+        "app/partials/status_body.html",
+        user,
+        **data,
+        nav="status",
+        nav_group="admin",
+    )
 
 
 @router.get("/app/processos", response_model=None)
@@ -176,6 +189,8 @@ def app_processes(
     oab: str = Query(""),
     outcome: str = Query(""),
     pending_only: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=10, le=200),
 ):
     with session_scope() as session:
         data = processes_svc.list_processes(
@@ -185,6 +200,8 @@ def app_processes(
             oab=oab,
             outcome=outcome,
             pending_only=pending_only,
+            page=page,
+            page_size=page_size,
         )
     return render(
         request,
@@ -193,6 +210,7 @@ def app_processes(
         flash=_pop_flash(request),
         **data,
         nav="processos",
+        nav_group="consulta",
     )
 
 
@@ -228,7 +246,14 @@ def app_process_detail(request: Request, process_id: str, user: User = Depends(r
         data = processes_svc.get_process_detail(session, process_id)
     if not data:
         raise StarletteHTTPException(status_code=404, detail="Processo não encontrado")
-    return render(request, "app/process_detail.html", user, process=data, nav="processos")
+    return render(
+        request,
+        "app/process_detail.html",
+        user,
+        process=data,
+        nav="processos",
+        nav_group="consulta",
+    )
 
 
 @router.get("/app/eventos", response_model=None)
@@ -257,6 +282,7 @@ def app_events(
         flash=_pop_flash(request),
         **data,
         nav="eventos",
+        nav_group="consulta",
     )
 
 
@@ -266,7 +292,14 @@ def app_event_detail(request: Request, event_id: str, user: User = Depends(requi
         data = events_svc.get_event_detail(session, event_id)
     if not data:
         raise StarletteHTTPException(status_code=404, detail="Evento não encontrado")
-    return render(request, "app/event_detail.html", user, event=data, nav="eventos")
+    return render(
+        request,
+        "app/event_detail.html",
+        user,
+        event=data,
+        nav="eventos",
+        nav_group="consulta",
+    )
 
 
 @router.get("/app/historico", response_model=None)
@@ -280,6 +313,7 @@ def app_history(request: Request, user: User = Depends(require_user)):
         flash=_pop_flash(request),
         **data,
         nav="historico",
+        nav_group="consulta",
     )
 
 
@@ -297,6 +331,7 @@ def app_history_detail(request: Request, digest_id: str, user: User = Depends(re
         flash=_pop_flash(request),
         digest=data,
         nav="historico",
+        nav_group="consulta",
     )
 
 
@@ -311,8 +346,24 @@ def app_history_html(request: Request, digest_id: str, user: User = Depends(requ
     return FileResponse(path, media_type="text/html")
 
 
+@router.get("/app/historico/{digest_id}/pdf")
+def app_history_pdf(request: Request, digest_id: str, user: User = Depends(require_user)):
+    settings = get_settings()
+    with session_scope() as session:
+        data = history_svc.get_digest_detail(session, digest_id, settings)
+    if not data or not data.get("pdf_exists"):
+        raise StarletteHTTPException(status_code=404, detail="PDF do digest indisponível")
+    path = Path(data["pdf_path"])
+    filename = f"monitor-judicial-{data.get('reference_date') or digest_id[:8]}.pdf"
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=filename,
+    )
+
+
 @router.get("/app/criterios", response_model=None)
-def app_criteria(request: Request, user: User = Depends(require_user)):
+def app_criteria(request: Request, user: User = Depends(require_admin)):
     with session_scope() as session:
         data = criteria_svc.list_criteria(session)
     return render(
@@ -322,6 +373,7 @@ def app_criteria(request: Request, user: User = Depends(require_user)):
         flash=_pop_flash(request),
         **data,
         nav="criterios",
+        nav_group="admin",
     )
 
 
@@ -337,6 +389,7 @@ def app_system(request: Request, user: User = Depends(require_admin)):
         flash=_pop_flash(request),
         **data,
         nav="sistema",
+        nav_group="admin",
     )
 
 

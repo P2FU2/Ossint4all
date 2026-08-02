@@ -11,11 +11,15 @@
   </p>
 
   <div class="kpi-grid">
-    <div class="kpi"><div class="label">PENDING</div><div class="value">{{ job_counts.PENDING }}</div></div>
-    <div class="kpi"><div class="label">RUNNING</div><div class="value">{{ job_counts.RUNNING }}</div></div>
-    <div class="kpi"><div class="label">RETRY</div><div class="value">{{ job_counts.RETRY }}</div></div>
-    <div class="kpi"><div class="label">DEAD</div><div class="value">{{ job_counts.DEAD }}</div></div>
+    <div class="kpi"><div class="label">Aguardando</div><div class="value">{{ job_counts.PENDING }}</div></div>
+    <div class="kpi"><div class="label">Em execução</div><div class="value">{{ job_counts.RUNNING }}</div></div>
+    <div class="kpi"><div class="label">Retry</div><div class="value">{{ job_counts.RETRY }}</div></div>
+    <div class="kpi"><div class="label">Dead</div><div class="value">{{ job_counts.DEAD }}</div></div>
   </div>
+
+  {% if tracking_hint %}
+  <div class="callout warn">{{ tracking_hint }}</div>
+  {% endif %}
 
   {% if live and live.headline %}
   {% from "app/partials/progress_bars.html" import progress_row %}
@@ -34,16 +38,16 @@
       {% for s in stages %}
       <div class="stage">
         <span class="badge {{ s.status }}">{{ s.status }}</span>
-        <div class="stage-label">{{ s.label }}</div>
-        <div class="stage-detail">{{ s.detail }}</div>
+        <div class="stage-label" title="{{ s.label }}">{{ s.label }}</div>
+        <div class="stage-detail" title="{{ s.detail }}">{{ s.detail }}</div>
       </div>
       {% endfor %}
     </div>
   </div>
 
-  {% if is_admin %}
   <div class="panel">
     <h2>Ações</h2>
+    <p class="muted" style="margin-top:-6px;margin-bottom:12px">Não dispare Bootstrap enquanto Discovery estiver rodando.</p>
     <div class="actions">
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -67,10 +71,10 @@
       </form>
     </div>
   </div>
-  {% endif %}
 
   <div class="panel">
     <h2>Runs recentes</h2>
+    <div class="table-wrap">
     <table class="data">
       <thead>
         <tr>
@@ -87,7 +91,7 @@
         <tr>
           <td><span class="mono">{{ r.run_type }}</span></td>
           <td>{{ r.trigger_type }}</td>
-          <td><span class="badge {% if r.status == 'SUCCESS' %}ok{% elif r.status == 'FAILED' %}error{% else %}warn{% endif %}">{{ r.status }}</span></td>
+          <td><span class="badge {% if r.status == 'SUCCESS' %}ok{% elif r.status == 'FAILED' or r.status == 'CANCELLED' %}error{% else %}warn{% endif %}">{{ r.status }}</span></td>
           <td>{{ r.duration }}</td>
           <td class="muted">{{ r.created_at }}</td>
           <td>
@@ -99,17 +103,17 @@
                   <span class="mono">{{ j.job_type }}</span>
                   <span class="badge">{{ j.status }}</span>
                   · <strong>{{ j.progress_pct }}%</strong> · ETA {{ j.eta_label }}
-                  · tentativa {{ j.attempt_count }}/{{ j.max_attempts }}
+                  {% if j.progress_summary %}<div class="progress-summary">{{ j.progress_summary }}</div>{% endif %}
                   <div class="progress-track" style="margin:6px 0;max-width:280px">
                     <div class="progress-fill" style="width:{{ j.progress_pct }}%"></div>
                   </div>
-                  {% if j.progress_message %}<div class="muted">{{ j.progress_stage }} — {{ j.progress_message }}</div>{% endif %}
-                  {% if j.last_error %}<div class="muted">{{ j.last_error }}</div>{% endif %}
+                  {% if j.progress_message %}<div class="muted cell-clamp">{{ j.progress_stage }} — {{ j.progress_message }}</div>{% endif %}
+                  {% if j.last_error %}<div class="muted cell-clamp">{{ j.last_error }}</div>{% endif %}
                 </li>
                 {% endfor %}
               </ul>
             </details>
-            {% if r.error_summary %}<div class="muted">{{ r.error_summary }}</div>{% endif %}
+            {% if r.error_summary %}<div class="muted cell-clamp">{{ r.error_summary }}</div>{% endif %}
           </td>
         </tr>
         {% else %}
@@ -117,6 +121,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 
   <div class="panel-grid">
@@ -128,8 +133,12 @@
         <li>
           <span class="mono">{{ d.job_type }}</span>
           <span class="badge error">{{ d.error_code }}</span>
+          {% if d.superseded %}<span class="badge warn">falha antiga</span>{% endif %}
           <div class="muted">{{ d.created_at }}</div>
-          <div>{{ d.error_message }}</div>
+          <div class="cell-clamp">{{ d.error_message }}</div>
+          {% if d.superseded %}
+          <div class="muted" style="margin-top:4px">Há bootstrap concluído depois — provavelmente já superado.</div>
+          {% endif %}
         </li>
         {% endfor %}
       </ul>
@@ -140,6 +149,7 @@
     <div class="panel">
       <h2>Subscriptions Judit</h2>
       {% if subscriptions %}
+      <div class="table-wrap">
       <table class="data">
         <thead><tr><th>Tipo</th><th>Status</th><th>Último webhook</th></tr></thead>
         <tbody>
@@ -152,8 +162,9 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% else %}
-      <p class="muted">Nenhuma subscription registrada.</p>
+      <p class="muted">Nenhuma subscription registrada. Use Refresh / tracking para ativar acompanhamento contínuo.</p>
       {% endif %}
     </div>
   </div>

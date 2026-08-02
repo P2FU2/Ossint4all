@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,9 @@ from monitor_jus.db.session import get_engine
 from monitor_jus.logging_setup import get_logger
 
 logger = get_logger(__name__)
+
+_RE_CRIT = re.compile(r"crit[eé]rio\s+(\d+)\s*/\s*(\d+)", re.I)
+_RE_CNJ = re.compile(r"CNJ\s+(\d+)\s*/\s*(\d+)", re.I)
 
 _current_job_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "progress_job_id", default=None
@@ -229,6 +233,31 @@ def _persist(
         )
 
 
+def format_progress_summary(
+    *,
+    done: float | None,
+    total: float | None,
+    message: str | None,
+) -> str:
+    """Rótulo legível (critério X/Y · CNJ A/B) em vez de frações cruas."""
+    msg = (message or "").strip()
+    parts: list[str] = []
+    m_crit = _RE_CRIT.search(msg)
+    m_cnj = _RE_CNJ.search(msg)
+    if m_crit:
+        parts.append(f"Critério {m_crit.group(1)}/{m_crit.group(2)}")
+    elif done is not None and total is not None and total > 0:
+        # progresso fracionário por critério (ex.: 0.34 / 4)
+        if total == int(total) and (done != int(done) or total > 1):
+            crit_idx = min(int(done) + 1, int(total))
+            parts.append(f"Critério {crit_idx}/{int(total)}")
+        else:
+            parts.append(f"{int(round(done))}/{int(round(total))}")
+    if m_cnj:
+        parts.append(f"CNJ {m_cnj.group(1)}/{m_cnj.group(2)}")
+    return " · ".join(parts) if parts else ""
+
+
 def job_progress_dict(job: Any) -> dict[str, Any]:
     """Serializa campos de progresso de um Job ORM."""
     pct = int(job.progress_pct or 0) if getattr(job, "progress_pct", None) is not None else 0
@@ -239,12 +268,17 @@ def job_progress_dict(job: Any) -> dict[str, Any]:
         eta = 0.0
     elif status in ("PENDING", "RETRY") and not getattr(job, "started_at", None):
         pct = 0
+    done = getattr(job, "progress_done", None)
+    total = getattr(job, "progress_total", None)
+    message = getattr(job, "progress_message", None) or ""
+    summary = format_progress_summary(done=done, total=total, message=message)
     return {
         "progress_pct": pct,
-        "progress_done": getattr(job, "progress_done", None),
-        "progress_total": getattr(job, "progress_total", None),
+        "progress_done": done,
+        "progress_total": total,
         "progress_stage": getattr(job, "progress_stage", None) or "—",
-        "progress_message": getattr(job, "progress_message", None) or "",
+        "progress_message": message,
+        "progress_summary": summary,
         "eta_seconds": eta,
         "eta_label": format_eta(float(eta) if eta is not None else None),
         "bar": format_bar(pct),

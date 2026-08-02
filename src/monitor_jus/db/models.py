@@ -337,6 +337,7 @@ class Digest(Base):
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     html_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     total_events: Mapped[int] = mapped_column(Integer, default=0)
     run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

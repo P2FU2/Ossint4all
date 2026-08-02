@@ -22,11 +22,11 @@ TEMPLATES_DIR = Path("templates")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 OUTCOME_LABELS = {
-    "ativo": "Em andamento",
-    "exito": "Êxito",
-    "derrota": "Desfavorável",
+    "ativo": "Em tramitação",
+    "exito": "Êxito (estimado)",
+    "derrota": "Desfavorável (estimado)",
     "encerrado": "Encerrado",
-    "indefinido": "Indefinido",
+    "indefinido": "Sem status claro",
 }
 
 

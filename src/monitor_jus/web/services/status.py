@@ -241,6 +241,7 @@ def build_pipeline_status(session: Session, settings: Settings) -> dict[str, Any
     dead = list(
         session.scalars(select(JobDeadLetter).order_by(JobDeadLetter.created_at.desc()).limit(20)).all()
     )
+    bootstrap_ok_at = bootstrap.baseline_at if bootstrap and bootstrap.completed else None
     subs = list(
         session.scalars(
             select(ProviderSubscription).order_by(ProviderSubscription.created_at.desc()).limit(40)
@@ -271,9 +272,21 @@ def build_pipeline_status(session: Session, settings: Settings) -> dict[str, Any
                 "error_code": d.error_code or "—",
                 "error_message": (d.error_message or "")[:400],
                 "created_at": _fmt(d.created_at),
+                "superseded": bool(
+                    bootstrap_ok_at
+                    and d.created_at
+                    and d.job_type == "BOOTSTRAP"
+                    and d.created_at < bootstrap_ok_at
+                ),
             }
             for d in dead
         ],
+        "tracking_hint": (
+            "Nenhuma assinatura Judit ativa — novidades em tempo real só aparecem "
+            "após PROCESS_REFRESH / tracking com webhooks."
+            if sub_counts.get("ACTIVE", 0) == 0
+            else ""
+        ),
         "subscriptions": [
             {
                 "id": s.id,

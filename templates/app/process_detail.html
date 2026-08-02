@@ -16,20 +16,20 @@
 
 <div class="kpi-grid">
   <div class="kpi">
-    <div class="label">Outcome</div>
-    <div class="value" style="font-size:1.15rem">{{ outcome_labels.get(process.outcome, process.outcome) }}</div>
+    <div class="label">Resultado estimado</div>
+    <div class="value wrap">{{ outcome_labels.get(process.outcome, process.outcome) }}</div>
   </div>
   <div class="kpi">
-    <div class="label">Situação</div>
-    <div class="value" style="font-size:1rem">{{ process.situacao }}</div>
+    <div class="label">Situação na capa</div>
+    <div class="value wrap" title="{{ process.situacao }}">{{ process.situacao }}</div>
   </div>
   <div class="kpi">
     <div class="label">Distribuição</div>
-    <div class="value" style="font-size:1rem">{{ process.data_distribuicao }}</div>
+    <div class="value wrap">{{ process.data_distribuicao }}</div>
   </div>
   <div class="kpi">
     <div class="label">Última checagem</div>
-    <div class="value" style="font-size:1rem">{{ process.last_checked_at }}</div>
+    <div class="value wrap">{{ process.last_checked_at }}</div>
   </div>
 </div>
 
@@ -39,14 +39,14 @@
     <p><strong>Assunto:</strong> {{ process.assunto }}</p>
     <p><strong>Órgão:</strong> {{ process.orgao_julgador }}</p>
     <p><strong>Última movimentação:</strong> {{ process.last_movement_at }}</p>
-    {% if process.baseline %}<p><span class="badge">Baseline (bootstrap)</span></p>{% endif %}
+    {% if process.baseline %}<p><span class="badge soft">Baseline (bootstrap)</span></p>{% endif %}
     <h2 style="margin-top:18px">Critérios</h2>
     {% if process.criteria %}
-    <p>
+    <div class="chip-cloud">
       {% for c in process.criteria %}
-      <span class="badge">{{ c.type }} · {{ c.label }}</span>
+      <span class="badge soft">{{ c.type }} · {{ c.label }}</span>
       {% endfor %}
-    </p>
+    </div>
     {% else %}
     <p class="muted">Sem vínculo de critério.</p>
     {% endif %}
@@ -59,9 +59,9 @@
       <li>
         <a href="/app/eventos/{{ e.id }}">{{ e.title or e.event_type }}</a>
         <span class="badge {{ e.priority }}">{{ e.priority }}</span>
-        <span class="badge">{{ e.notify_status }}</span>
+        <span class="badge soft">{{ e.notify_status }}</span>
         <div class="muted">{{ e.created_at }}</div>
-        {% if e.summary %}<div>{{ e.summary }}</div>{% endif %}
+        {% if e.summary %}<div class="cell-clamp">{{ e.summary }}</div>{% endif %}
       </li>
       {% endfor %}
     </ul>
@@ -79,7 +79,7 @@
     <li>
       <div class="when">{{ t.when_fmt }} · {{ t.kind }} · {{ t.source }}
         {% if t.priority %}<span class="badge {{ t.priority }}">{{ t.priority }}</span>{% endif %}
-        {% if t.notify_status %}<span class="badge">{{ t.notify_status }}</span>{% endif %}
+        {% if t.notify_status %}<span class="badge soft">{{ t.notify_status }}</span>{% endif %}
       </div>
       <div class="title">
         {% if t.event_id %}<a href="/app/eventos/{{ t.event_id }}">{{ t.title }}</a>{% else %}{{ t.title }}{% endif %}
@@ -96,7 +96,7 @@
 {% if process.payload_preview %}
 <details class="panel">
   <summary><strong>Payload (resumo)</strong></summary>
-  <pre style="white-space:pre-wrap;font-size:0.8rem;color:var(--muted)">{{ process.payload_preview }}</pre>
+  <pre style="white-space:pre-wrap;font-size:0.8rem;color:var(--muted);overflow-wrap:anywhere">{{ process.payload_preview }}</pre>
 </details>
 {% endif %}
 {% endblock %}

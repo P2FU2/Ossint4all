@@ -14,6 +14,7 @@ from monitor_jus.db.repository import Repository
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.pipeline.normalize import normalize_datajud_source
+from monitor_jus.pipeline.portfolio import criterion_display_label
 from monitor_jus.progress import report as report_progress
 from monitor_jus.sources.datajud import DataJudClient
 from monitor_jus.sources.judit.lawsuits import JuditLawsuitsService
@@ -126,12 +127,13 @@ def run_discovery(
     )
 
     for crit_i, crit in enumerate(criteria):
-        label = crit.label or f"{crit.criterion_type}:{crit.value}"
+        label = criterion_display_label(crit)
+        crit_prefix = f"critério {crit_i + 1}/{n_crit}"
         report_progress(
             stage="discovery_search",
             done=crit_i,
             total=n_crit,
-            message=f"Buscando {label}",
+            message=f"{crit_prefix} · Buscando {label}",
         )
         try:
             page_items: list[dict[str, Any]] = []
@@ -147,11 +149,19 @@ def run_discovery(
             elif crit.criterion_type == "PROCESSO":
                 parts = normalize_cnj(crit.value)
                 if not parts:
-                    report_progress(done=crit_i + 1, total=n_crit, message=f"Pulado {label}")
+                    report_progress(
+                        done=crit_i + 1,
+                        total=n_crit,
+                        message=f"{crit_prefix} · Pulado {label}",
+                    )
                     continue
                 resp = {"page_data": [{"response_data": {"code": parts.numero_formatado}}]}
             else:
-                report_progress(done=crit_i + 1, total=n_crit, message=f"Tipo ignorado {label}")
+                report_progress(
+                    done=crit_i + 1,
+                    total=n_crit,
+                    message=f"{crit_prefix} · Tipo ignorado {label}",
+                )
                 continue
 
             if isinstance(resp, dict):
@@ -177,7 +187,10 @@ def run_discovery(
                     stage="discovery_enrich",
                     done=frac,
                     total=n_crit,
-                    message=f"{label} · CNJ {cnj_i + 1}/{len(cnjs)} · {parts.numero_formatado}",
+                    message=(
+                        f"{crit_prefix} · {label} · "
+                        f"CNJ {cnj_i + 1}/{len(cnjs)} · {parts.numero_formatado}"
+                    ),
                 )
                 full: dict[str, Any] = {}
                 try:
@@ -216,7 +229,10 @@ def run_discovery(
                 stage="discovery",
                 done=crit_i + 1,
                 total=n_crit,
-                message=f"OK {label} · {len(cnjs)} CNJ(s) · total descobertos {discovered}",
+                message=(
+                    f"{crit_prefix} · OK {label} · {len(cnjs)} CNJ(s) · "
+                    f"total descobertos {discovered}"
+                ),
             )
         except SourceOutcomeError as exc:
             outcomes.append(
@@ -231,7 +247,7 @@ def run_discovery(
             report_progress(
                 done=crit_i + 1,
                 total=n_crit,
-                message=f"Falha/skip {label}: {exc.code}",
+                message=f"{crit_prefix} · Falha/skip {label}: {exc.code}",
             )
 
     report_progress(

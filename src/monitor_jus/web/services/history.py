@@ -46,6 +46,7 @@ def list_digests(session: Session) -> dict[str, Any]:
                 "provider_message_id": (notif.provider_message_id if notif else None) or "—",
                 "notification_status": notif.status if notif else "—",
                 "html_path": d.html_path,
+                "pdf_path": getattr(d, "pdf_path", None),
             }
         )
     return {"digests": rows, "total": len(rows)}
@@ -77,9 +78,9 @@ def get_digest_detail(session: Session, digest_id: str, settings: Settings) -> d
     notifications = list(
         session.scalars(select(Notification).where(Notification.digest_id == d.id)).all()
     )
-    html_exists = False
-    if d.html_path:
-        html_exists = Path(d.html_path).is_file()
+    html_exists = bool(d.html_path and Path(d.html_path).is_file())
+    pdf_path = getattr(d, "pdf_path", None)
+    pdf_exists = bool(pdf_path and Path(pdf_path).is_file())
 
     return {
         "id": d.id,
@@ -91,7 +92,9 @@ def get_digest_detail(session: Session, digest_id: str, settings: Settings) -> d
         "generated_at": _fmt(d.generated_at),
         "sent_at": _fmt(d.sent_at),
         "html_path": d.html_path,
+        "pdf_path": pdf_path,
         "html_exists": html_exists,
+        "pdf_exists": pdf_exists,
         "events": events,
         "notifications": [
             {

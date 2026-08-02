@@ -17,11 +17,7 @@ def register_ui_exception_handlers(app: FastAPI) -> None:
         accept = request.headers.get("accept", "")
         wants_html = "text/html" in accept
         ui_path = path.startswith("/app") or path in ("/login", "/logout", "/")
-        if (
-            exc.status_code in (401, 403)
-            and ui_path
-            and wants_html
-        ):
+        if exc.status_code == 401 and ui_path and wants_html:
             return RedirectResponse(url="/login", status_code=303)
         if wants_html and ui_path and exc.status_code >= 400:
             from monitor_jus.web.deps import render

@@ -7,6 +7,7 @@ from monitor_jus.progress import (
     clear_job,
     format_bar,
     format_eta,
+    format_progress_summary,
     report,
 )
 
@@ -17,6 +18,16 @@ def test_format_bar_and_eta():
     assert format_eta(0) == "0s"
     assert format_eta(90).startswith("1m")
     assert format_eta(None) == "—"
+
+
+def test_format_progress_summary_from_message():
+    s = format_progress_summary(
+        done=0.34,
+        total=4.0,
+        message="critério 1/4 · OAB 138094/SP · CNJ 114/330 · 1052670-48.2014.8.26.0053",
+    )
+    assert "Critério 1/4" in s
+    assert "CNJ 114/330" in s
 
 
 def test_report_without_bind_is_noop():

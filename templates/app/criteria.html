@@ -3,19 +3,18 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Critérios / monitoramentos</h1>
-    <p>{{ active }} ativo(s) de {{ total }} · leitura do YAML sincronizado no banco.</p>
+    <h1>Critérios</h1>
+    <p>{{ active }} ativo(s) de {{ total }} · sincronizados do YAML no banco.</p>
   </div>
-  {% if is_admin %}
   <form method="post" action="/app/actions/sync-criteria">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <button class="btn" type="submit" data-confirm="Sincronizar critérios do YAML?">Sincronizar YAML</button>
   </form>
-  {% endif %}
 </div>
 
 <div class="panel">
-  <p class="muted">A edição dos critérios continua em <code>config/monitoramentos.yaml</code> no deploy. A UI apenas consulta e sincroniza.</p>
+  <p class="muted" style="margin-top:0">A edição continua em <code>config/monitoramentos.yaml</code> no deploy. Esta tela só consulta e sincroniza.</p>
+  <div class="table-wrap">
   <table class="data">
     <thead>
       <tr>
@@ -30,9 +29,9 @@
     <tbody>
       {% for c in criteria %}
       <tr>
-        <td><span class="badge">{{ c.type }}</span></td>
+        <td><span class="badge soft">{{ c.type }}</span></td>
         <td class="mono">{{ c.value }}</td>
-        <td>{{ c.label }}</td>
+        <td class="cell-clamp">{{ c.label }}</td>
         <td>{% if c.active %}<span class="badge ok">sim</span>{% else %}<span class="badge warn">não</span>{% endif %}</td>
         <td>{{ c.process_count }}</td>
         <td class="muted">{{ c.created_at }}</td>
@@ -42,5 +41,6 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

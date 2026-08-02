@@ -8,7 +8,10 @@
   </div>
   <div class="actions">
     {% if digest.html_exists %}
-    <a class="btn secondary" href="/app/historico/{{ digest.id }}/html" target="_blank">Ver HTML enviado</a>
+    <a class="btn secondary" href="/app/historico/{{ digest.id }}/html" target="_blank">Ver HTML</a>
+    {% endif %}
+    {% if digest.pdf_exists %}
+    <a class="btn secondary" href="/app/historico/{{ digest.id }}/pdf">Baixar PDF</a>
     {% endif %}
     {% if is_admin %}
     <form method="post" action="/app/actions/enqueue">
