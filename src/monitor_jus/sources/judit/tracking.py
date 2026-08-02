@@ -7,6 +7,7 @@ from typing import Any
 from monitor_jus.config import Settings, get_settings
 from monitor_jus.exceptions import SkippedDisabled
 from monitor_jus.sources.judit.client import JuditClient
+from monitor_jus.sources.judit.requests import oab_search_key
 
 
 class JuditTrackingService:
@@ -41,8 +42,7 @@ class JuditTrackingService:
             "tracking_type": "oab",
             "search": {
                 "search_type": "oab",
-                "lawyer_oab": numero,
-                "lawyer_state": seccional.upper(),
+                "search_key": oab_search_key(numero, seccional),
             },
             "recurrence": recurrence,
         }

@@ -7,6 +7,12 @@ from typing import Any
 from monitor_jus.config import Settings, get_settings
 from monitor_jus.exceptions import SkippedDisabled
 from monitor_jus.sources.judit.client import JuditClient
+from monitor_jus.validators import normalize_oab_numero
+
+
+def oab_search_key(numero: str, seccional: str) -> str:
+    """Formato Judit: {numero}{UF}, ex.: 138094SP."""
+    return f"{normalize_oab_numero(numero)}{(seccional or '').strip().upper()}"
 
 
 class JuditRequestsService:
@@ -19,13 +25,10 @@ class JuditRequestsService:
             raise SkippedDisabled("JUDIT_ENABLE_OAB=false")
         if not self.settings.judit_enable_historical_search:
             raise SkippedDisabled("JUDIT_ENABLE_HISTORICAL_SEARCH=false")
-        # Payload genérico — validar/ajustar no Postman do contrato Judit
         body = {
             "search": {
                 "search_type": "oab",
-                "oab": f"{numero}/{seccional}",
-                "lawyer_oab": numero,
-                "lawyer_state": seccional.upper(),
+                "search_key": oab_search_key(numero, seccional),
             },
             "with_attachments": bool(self.settings.judit_enable_attachments),
         }
