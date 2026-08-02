@@ -22,6 +22,14 @@ SECTION_ORDER = [
     ("Informações atualizadas pela fonte", EventType.EVENTO_CORRIGIDO.value),
 ]
 
+OUTCOME_LABELS = {
+    "ativo": "Em andamento",
+    "exito": "Êxito (estimado)",
+    "derrota": "Desfecho desfavorável (estimado)",
+    "encerrado": "Encerrado / arquivado",
+    "indefinido": "Status não classificado",
+}
+
 
 def build_coverage(settings: Settings) -> list[dict[str, Any]]:
     flags = settings.judit_flags()
@@ -79,6 +87,7 @@ def render_digest_html(
     failures: list[str] | None = None,
     settings: Settings | None = None,
     zero: bool = False,
+    portfolio: dict[str, Any] | None = None,
 ) -> str:
     settings = settings or get_settings()
     templates_dir = Path("templates")
@@ -88,19 +97,24 @@ def render_digest_html(
     )
     coverage = build_coverage(settings)
     generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
-    if zero or not events:
-        tmpl = env.get_template("email_zero_results.html")
-        return tmpl.render(
-            generated_at=generated_at,
-            tz=settings.tz,
-            coverage=coverage,
-        )
+    portfolio = portfolio or {
+        "total_processes": 0,
+        "active_count": 0,
+        "closed_count": 0,
+        "win_count": 0,
+        "loss_count": 0,
+        "decided_count": 0,
+        "win_rate": None,
+        "by_oab": {},
+        "by_tribunal": {},
+        "by_outcome": {},
+        "processes": [],
+        "oab_criteria_count": 0,
+    }
 
     urgent = [e for e in events if e.priority == Priority.ALTA.value]
     sections = []
     for title, etype in SECTION_ORDER:
-        items = [e for e in events if e.event_type == etype and e.priority != Priority.ALTA.value]
-        # urgentes já listados; ainda incluímos nas seções se quiser — plano: urgentes separados
         items = [e for e in events if e.event_type == etype]
         sections.append((title, items))
 
@@ -108,6 +122,10 @@ def render_digest_html(
     for e in events:
         key = e.tribunal or "N/D"
         totals_by_tribunal[key] = totals_by_tribunal.get(key, 0) + 1
+
+    outcome_labels = {
+        k: OUTCOME_LABELS.get(k, k) for k in (portfolio.get("by_outcome") or {})
+    }
 
     tmpl = env.get_template("email_report.html")
     return tmpl.render(
@@ -122,4 +140,7 @@ def render_digest_html(
         totals_by_tribunal=totals_by_tribunal,
         skipped=skipped or [],
         failures=failures or [],
+        zero=zero or not events,
+        portfolio=portfolio,
+        outcome_labels=outcome_labels,
     )

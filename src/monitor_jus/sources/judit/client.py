@@ -39,6 +39,15 @@ class JuditClient(FonteJudicial):
         if not self.settings.judit_api_key:
             raise SkippedDisabled("JUDIT_API_KEY não configurada")
 
+    def _json_or_fail(self, resp: Any, operation: str) -> dict[str, Any]:
+        from monitor_jus.exceptions import FailedSource
+
+        if resp.status_code >= 400:
+            body = (resp.text or "")[:500]
+            raise FailedSource(f"judit {operation} HTTP {resp.status_code}: {body}")
+        data = resp.json()
+        return data if isinstance(data, dict) else {"data": data}
+
     def create_request(self, body: dict[str, Any]) -> dict[str, Any]:
         self._require(self.settings.judit_enable_historical_search or True, "requests")
         # historical flag gated by caller for OAB/CPF; base requests endpoint always needs key
@@ -46,16 +55,26 @@ class JuditClient(FonteJudicial):
             raise SkippedDisabled("JUDIT_API_KEY não configurada")
         url = f"{self.settings.judit_requests_base_url.rstrip('/')}/requests"
         resp = self.http.request("POST", url, json=body, operation="create_request")
-        resp.raise_for_status()
-        return resp.json()
+        return self._json_or_fail(resp, "create_request")
 
     def get_request(self, request_id: str) -> dict[str, Any]:
         if not self.settings.judit_api_key:
             raise SkippedDisabled("JUDIT_API_KEY não configurada")
         url = f"{self.settings.judit_requests_base_url.rstrip('/')}/requests/{request_id}"
         resp = self.http.request("GET", url, operation="get_request")
-        resp.raise_for_status()
-        return resp.json()
+        return self._json_or_fail(resp, "get_request")
+
+    def list_responses(self, request_id: str, *, page: int = 1, page_size: int = 100) -> dict[str, Any]:
+        if not self.settings.judit_api_key:
+            raise SkippedDisabled("JUDIT_API_KEY não configurada")
+        url = f"{self.settings.judit_requests_base_url.rstrip('/')}/responses"
+        resp = self.http.request(
+            "GET",
+            url,
+            params={"request_id": request_id, "page": page, "page_size": page_size},
+            operation="list_responses",
+        )
+        return self._json_or_fail(resp, "list_responses")
 
     def get_lawsuit(self, numero_cnj: str) -> dict[str, Any]:
         if not self.settings.judit_api_key:

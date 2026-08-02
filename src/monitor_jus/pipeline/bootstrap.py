@@ -33,13 +33,13 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
     settings = settings or get_settings()
     repo = Repository(session)
     state = ensure_bootstrap_row(session)
-    if state.completed and state.baseline_at:
-        return {"status": "already_done", "baseline_at": state.baseline_at.isoformat()}
+    first_run = not (state.completed and state.baseline_at)
 
+    # Sempre redescobre/atualiza o acervo; só na 1ª execução move o cursor do digest
     result = run_discovery(session, settings=settings, bootstrap_mode=True)
     # Marca eventos criados no bootstrap como IGNORED (não vão para digest)
     from monitor_jus.db.models import Event
-    from sqlalchemy import select, update
+    from sqlalchemy import update
 
     session.execute(
         update(Event)
@@ -48,14 +48,18 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
     )
 
     now = datetime.now(timezone.utc)
-    state.baseline_at = now
-    state.completed = True
-    # cursor do digest começa no baseline
-    cursor = repo.get_digest_cursor()
-    cursor.last_successful_digest_at = now
+    if first_run:
+        state.baseline_at = now
+        state.completed = True
+        cursor = repo.get_digest_cursor()
+        cursor.last_successful_digest_at = now
     session.flush()
     logger.info("bootstrap_completed", extra={"extra": result})
-    return {"status": "completed", "baseline_at": now.isoformat(), "discovery": result}
+    return {
+        "status": "completed" if first_run else "refreshed",
+        "baseline_at": (state.baseline_at or now).isoformat(),
+        "discovery": result,
+    }
 
 
 def sync_criteria_from_config(session: Session, settings: Settings | None = None) -> int:

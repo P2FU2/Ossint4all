@@ -2,32 +2,107 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Relatório diário — Monitor Judicial</title>
+  <title>Relatório — Monitor Judicial</title>
   <style>
     body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; background: #f7f4ef; margin: 0; padding: 24px; }
-    .wrap { max-width: 860px; margin: 0 auto; background: #fffdf8; border: 1px solid #e4ddd0; padding: 28px; }
+    .wrap { max-width: 920px; margin: 0 auto; background: #fffdf8; border: 1px solid #e4ddd0; padding: 28px; }
     h1 { font-size: 22px; margin: 0 0 8px; color: #2c1810; }
     h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ddd2c2; padding-bottom: 6px; }
     .muted { color: #666; font-size: 13px; }
-    .stats { display: block; margin: 16px 0; }
-    .badge { display: inline-block; padding: 2px 8px; background: #f0e6da; margin-right: 6px; font-size: 12px; }
+    .stats { margin: 16px 0; }
+    .badge { display: inline-block; padding: 4px 10px; background: #f0e6da; margin: 0 6px 6px 0; font-size: 12px; }
     .alta { background: #f3d6d0; }
+    .ok { background: #dceee2; }
     .item { margin: 14px 0; padding: 12px 0; border-bottom: 1px solid #eee6da; }
     .cov li { margin: 4px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+    th, td { border-bottom: 1px solid #eee6da; padding: 8px 6px; text-align: left; vertical-align: top; }
+    th { color: #5a4638; font-weight: 600; }
     .disclaimer { font-size: 12px; color: #555; margin-top: 32px; line-height: 1.45; }
     a { color: #6b3e2e; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Monitor Judicial — Relatório diário</h1>
+    <h1>Monitor Judicial — Relatório</h1>
     <p class="muted">Consulta consolidada em {{ generated_at }} ({{ tz }})</p>
 
     <div class="stats">
-      <span class="badge">Total: {{ total }}</span>
+      <span class="badge ok">Processos no acervo: {{ portfolio.total_processes }}</span>
+      <span class="badge">Em andamento / indefinidos: {{ portfolio.active_count }}</span>
+      <span class="badge">Encerrados: {{ portfolio.closed_count }}</span>
+      <span class="badge">Novidades do período: {{ total }}</span>
       <span class="badge alta">Urgentes: {{ urgent_count }}</span>
-      <span class="badge">Quarentena: {{ quarantine_count }}</span>
+      {% if portfolio.win_rate is not none %}
+      <span class="badge ok">Taxa de êxito estimada: {{ portfolio.win_rate }}% ({{ portfolio.win_count }}/{{ portfolio.decided_count }})</span>
+      {% else %}
+      <span class="badge">Taxa de êxito: n/d (sem desfechos classificados)</span>
+      {% endif %}
     </div>
+
+    <h2>Estatísticas por OAB</h2>
+    {% if portfolio.by_oab %}
+    <p>
+      {% for k, v in portfolio.by_oab.items() %}
+      <span class="badge">{{ k }}: {{ v }} processo{{ 's' if v != 1 else '' }}</span>
+      {% endfor %}
+    </p>
+    {% else %}
+    <p class="muted">Nenhum processo vinculado a OAB ainda. Rode o bootstrap após a correção da Judit.</p>
+    {% endif %}
+
+    <h2>Por tribunal (acervo)</h2>
+    {% if portfolio.by_tribunal %}
+    <p>
+      {% for k, v in portfolio.by_tribunal.items() %}
+      <span class="badge">{{ k }}: {{ v }}</span>
+      {% endfor %}
+    </p>
+    {% else %}
+    <p class="muted">Sem processos no acervo.</p>
+    {% endif %}
+
+    <h2>Distribuição por status (estimado)</h2>
+    {% if portfolio.by_outcome %}
+    <p>
+      {% for k, v in portfolio.by_outcome.items() %}
+      <span class="badge">{{ outcome_labels.get(k, k) }}: {{ v }}</span>
+      {% endfor %}
+    </p>
+    <p class="muted">A taxa de êxito é estimada por palavras-chave no status/fase do processo (ex.: procedente, acordo, improcedente). Não substitui análise jurídica.</p>
+    {% else %}
+    <p class="muted">Sem dados de status.</p>
+    {% endif %}
+
+    <h2>Processos monitorados (acervo completo)</h2>
+    {% if portfolio.processes %}
+    <table>
+      <thead>
+        <tr>
+          <th>CNJ</th>
+          <th>Tribunal</th>
+          <th>Status</th>
+          <th>Classe / Assunto</th>
+          <th>Critério</th>
+          <th>Última mov.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in portfolio.processes %}
+        <tr>
+          <td><strong>{{ p.numero_cnj }}</strong></td>
+          <td>{{ p.tribunal }}</td>
+          <td>{{ p.situacao }}<br><span class="muted">{{ outcome_labels.get(p.outcome, p.outcome) }}</span></td>
+          <td>{{ p.classe }}<br><span class="muted">{{ p.assunto }}</span></td>
+          <td>{{ p.criteria }}</td>
+          <td>{{ p.last_movement_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Ainda não há processos cadastrados no banco. Execute BOOTSTRAP para popular o acervo.</p>
+    {% endif %}
 
     <h2>Cobertura ativa nesta instalação</h2>
     <ul class="cov">
@@ -36,8 +111,13 @@
       {% endfor %}
     </ul>
 
+    {% if zero %}
+    <h2>Novidades do período</h2>
+    <p><strong>Nenhuma nova movimentação foi identificada nesta janela.</strong> O acervo acima continua sendo monitorado.</p>
+    {% else %}
+
     {% if totals_by_tribunal %}
-    <h2>Por tribunal</h2>
+    <h2>Novidades por tribunal</h2>
     <p>{% for k,v in totals_by_tribunal.items() %}<span class="badge">{{ k }}: {{ v }}</span>{% endfor %}</p>
     {% endif %}
 
@@ -59,7 +139,7 @@
     <h2>{{ section_name }}</h2>
     {% if not items %}
     <p class="muted">Nenhum item.</p>
-    {% endif %}
+    {% else %}
     {% for e in items %}
     <div class="item">
       <strong>{{ e.numero_cnj or 'Sem CNJ' }}</strong> — {{ e.tribunal or '—' }} · {{ e.priority }}
@@ -69,7 +149,9 @@
       {% if e.official_link %}<div><a href="{{ e.official_link }}">Consulta oficial</a></div>{% endif %}
     </div>
     {% endfor %}
+    {% endif %}
     {% endfor %}
+    {% endif %}
 
     {% if skipped %}
     <h2>Cobertura não habilitada</h2>
@@ -82,10 +164,10 @@
     {% endif %}
 
     <p class="disclaimer">
-      O sistema consolida os eventos encontrados nas fontes habilitadas. A disponibilidade e o horário dos dados
-      dependem da publicação e do processamento de cada tribunal e fornecedor. Publicações via DJEN e o início
-      do monitoramento podem ter latência (incluindo até ~48h após o cadastro em alguns fluxos). Não há garantia
-      de cobertura instantânea ou absoluta de todas as comunicações processuais.
+      O sistema consolida os eventos e o acervo encontrados nas fontes habilitadas. Status e taxa de êxito são
+      estimativas textuais e podem estar incompletos quando a fonte não informa fase/resultado. A disponibilidade
+      dos dados depende da publicação e do processamento de cada tribunal e fornecedor. Não há garantia de
+      cobertura instantânea ou absoluta.
     </p>
   </div>
 </body>

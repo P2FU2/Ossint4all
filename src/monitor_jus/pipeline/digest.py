@@ -11,11 +11,12 @@ from sqlalchemy.orm import Session
 from monitor_jus.ai.summarizer import summarize_event
 from monitor_jus.config import Settings, get_settings
 from monitor_jus.db.repository import Repository
-from monitor_jus.exceptions import FailedSource, PermanentJobError, RecoverableJobError
+from monitor_jus.exceptions import PermanentJobError, RecoverableJobError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.mail.resend_mailer import send_html_email
 from monitor_jus.metrics import incr, set_gauge
 from monitor_jus.models import DigestStatus
+from monitor_jus.pipeline.portfolio import build_portfolio
 from monitor_jus.report.html_report import render_digest_html
 
 logger = get_logger(__name__)
@@ -47,6 +48,7 @@ def build_and_send_digest(
     since = cursor.last_successful_digest_at
     events = repo.pending_notify_events(since)
     now = datetime.now(timezone.utc)
+    portfolio = build_portfolio(session)
 
     digest = repo.create_digest(
         reference_date=now.date().isoformat(),
@@ -69,6 +71,7 @@ def build_and_send_digest(
         quarantine_count=quarantine_count,
         settings=settings,
         zero=not events,
+        portfolio=portfolio,
     )
     outbox = Path(settings.outbox_dir) / f"{digest.id}.html"
     outbox.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +83,7 @@ def build_and_send_digest(
     session.flush()
 
     incr("digest_events_total", float(len(events)))
-    return _deliver(session, repo, digest, html, settings, run_id)
+    return _deliver(session, repo, digest, html, settings, run_id, portfolio=portfolio)
 
 
 def _deliver(
@@ -90,11 +93,16 @@ def _deliver(
     html: str,
     settings: Settings,
     run_id: str | None,
+    portfolio: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     digest.status = DigestStatus.DELIVERY_PENDING.value
     session.flush()
     subject_date = digest.reference_date or datetime.now().date().isoformat()
-    subject = f"[Monitor Judicial] Relatório {subject_date} ({digest.total_events} novidades)"
+    total_proc = int((portfolio or {}).get("total_processes") or 0)
+    subject = (
+        f"[Monitor Judicial] Relatório {subject_date} — "
+        f"{total_proc} processos · {digest.total_events} novidades"
+    )
     notification = repo.create_notification(
         run_id=run_id,
         digest_id=digest.id,
@@ -122,6 +130,7 @@ def _deliver(
             "digest_id": digest.id,
             "status": "SENT",
             "total_events": digest.total_events,
+            "total_processes": total_proc,
             "message_id": result.get("message_id"),
         }
     except Exception as exc:  # noqa: BLE001

@@ -10,6 +10,7 @@ from sqlalchemy import Select, and_, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from monitor_jus.db.models import (
+    CriterionLink,
     Digest,
     DigestCursor,
     DigestItem,
@@ -405,6 +406,27 @@ class Repository:
                 setattr(proc, k, v)
         self.session.flush()
         return proc
+
+    def link_criterion_process(self, criterion_id: str, process_id: str) -> CriterionLink:
+        existing = self.session.scalar(
+            select(CriterionLink).where(
+                CriterionLink.criterion_id == criterion_id,
+                CriterionLink.process_id == process_id,
+            )
+        )
+        if existing:
+            return existing
+        link = CriterionLink(
+            id=str(uuid4()),
+            criterion_id=criterion_id,
+            process_id=process_id,
+        )
+        self.session.add(link)
+        self.session.flush()
+        return link
+
+    def list_processes(self) -> list[Process]:
+        return list(self.session.scalars(select(Process).order_by(Process.numero_cnj.asc())).all())
 
     def processes_due(self, now: datetime | None = None) -> list[Process]:
         now = now or utcnow()
