@@ -832,17 +832,35 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.05em;
-  height: 1.05em;
-  margin-left: 4px;
-  font-size: 0.78em;
-  font-weight: 600;
-  line-height: 1;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  padding: 0;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
   color: var(--muted);
   cursor: help;
   vertical-align: middle;
-  border-radius: 999px;
   user-select: none;
+  /* evita herdar uppercase / letter-spacing dos labels KPI */
+  text-transform: none;
+  letter-spacing: 0;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.tip-mark {
+  display: block;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  transform: translateY(0.5px); /* alinha o “i” no centro óptico do círculo */
 }
 .tip:hover,
 .tip:focus {
@@ -880,7 +898,8 @@ h1 .tip,
 h2 .tip,
 .section-label .tip,
 label .tip {
-  font-size: 0.85em;
+  width: 14px;
+  height: 14px;
 }
 .tip-note {
   margin-top: 12px;
