@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from monitor_jus.config import Settings, get_settings, load_monitoramentos
-from monitor_jus.db.models import BootstrapState
+from monitor_jus.db.models import BootstrapState, Criterion, CriterionLink
 from monitor_jus.db.repository import Repository
-from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.models import NotifyStatus
+from monitor_jus.oab_match import oab_identity, parse_oab_criterion_value
 from monitor_jus.pipeline.discovery import run_discovery
 from monitor_jus.progress import report as report_progress
 from monitor_jus.security import only_digits
-from monitor_jus.oab_match import oab_identity, parse_oab_criterion_value
 from monitor_jus.validators import normalize_cnj, normalize_oab_numero, validate_cpf, validate_oab
 
 logger = get_logger(__name__)
@@ -79,117 +80,211 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
     }
 
 
-def sync_criteria_from_config(session: Session, settings: Settings | None = None) -> int:
-    """Carrega critérios do YAML para a tabela criteria."""
-    from monitor_jus.db.models import Criterion
-    from sqlalchemy import select
-    from uuid import uuid4
-
-    settings = settings or get_settings()
-    cfg = load_monitoramentos(settings)
-    mon = cfg.get("monitoramentos") or {}
-    created = 0
-
-    def upsert(ctype: str, value: str, label: str | None = None, meta: dict | None = None) -> None:
-        nonlocal created
-        existing = session.scalar(
-            select(Criterion).where(Criterion.criterion_type == ctype, Criterion.value == value)
+def _upsert_simple(
+    session: Session,
+    *,
+    ctype: str,
+    value: str,
+    label: str | None = None,
+    meta: dict | None = None,
+) -> bool:
+    existing = session.scalar(
+        select(Criterion).where(Criterion.criterion_type == ctype, Criterion.value == value)
+    )
+    if existing:
+        existing.active = True
+        if label:
+            existing.label = label
+        if meta is not None:
+            existing.meta = meta
+        return False
+    session.add(
+        Criterion(
+            id=str(uuid4()),
+            criterion_type=ctype,
+            value=value,
+            label=label,
+            meta=meta,
+            active=True,
         )
-        if existing:
-            return
+    )
+    return True
+
+
+def _sync_oab_criterion(
+    session: Session,
+    *,
+    numero: str,
+    sec: str,
+    label: str | None,
+    meta: dict[str, Any],
+) -> dict[str, str]:
+    """
+    Garante um único critério OAB ativo por (dígitos, UF).
+    Ex.: YAML 2556/RJ migra RJ:2556A → RJ:2556 e desativa duplicatas.
+    """
+    value = f"{sec}:{numero}"
+    target = oab_identity(numero, sec)
+    siblings = list(session.scalars(select(Criterion).where(Criterion.criterion_type == "OAB")).all())
+    matching = [
+        s
+        for s in siblings
+        if (parsed := parse_oab_criterion_value(s.value))
+        and oab_identity(parsed[0], parsed[1]) == target
+    ]
+
+    if not matching:
         session.add(
             Criterion(
                 id=str(uuid4()),
-                criterion_type=ctype,
+                criterion_type="OAB",
                 value=value,
                 label=label,
                 meta=meta,
+                active=True,
             )
         )
-        created += 1
+        session.flush()
+        return {"action": "created", "value": value}
 
-    from monitor_jus.db.models import CriterionLink
+    canonical = next((c for c in matching if c.value == value), None)
+    if canonical is None:
+        exact = next((c for c in siblings if c.value == value), None)
+        if exact:
+            canonical = exact
+            if exact not in matching:
+                matching.append(exact)
+        else:
+            canonical = matching[0]
+
+    action = "unchanged"
+    if canonical.value != value:
+        old = canonical.value
+        canonical.value = value
+        action = "updated"
+        logger.info(
+            "oab_criterion_renamed",
+            extra={"extra": {"from": old, "to": value}},
+        )
+
+    canonical.active = True
+    if label:
+        canonical.label = label
+    canonical.meta = meta
+
+    deactivated = 0
+    for other in matching:
+        if other.id == canonical.id:
+            continue
+        links = list(
+            session.scalars(select(CriterionLink).where(CriterionLink.criterion_id == other.id)).all()
+        )
+        for link in links:
+            exists = session.scalar(
+                select(CriterionLink).where(
+                    CriterionLink.criterion_id == canonical.id,
+                    CriterionLink.process_id == link.process_id,
+                )
+            )
+            if exists or not link.process_id:
+                session.delete(link)
+            else:
+                link.criterion_id = canonical.id
+        other.active = False
+        deactivated += 1
+
+    session.flush()
+    if deactivated:
+        action = "merged"
+    return {
+        "action": action,
+        "value": value,
+        "deactivated": str(deactivated),
+    }
+
+
+def sync_criteria_from_config(session: Session, settings: Settings | None = None) -> int:
+    """Compat: retorna só contagem de alterações (int)."""
+    return int(sync_criteria_detailed(session, settings)["changes"])
+
+
+def sync_criteria_detailed(
+    session: Session, settings: Settings | None = None
+) -> dict[str, Any]:
+    """Carrega critérios do YAML; migra variantes OAB (2556A→2556)."""
+    settings = settings or get_settings()
+    cfg = load_monitoramentos(settings)
+    mon = cfg.get("monitoramentos") or {}
+    yaml_path = str(settings.monitoramentos_path)
+    changes = 0
+    oab_actions: list[dict[str, str]] = []
+    yaml_oabs: list[str] = []
 
     for oab in mon.get("oabs") or []:
         numero = normalize_oab_numero(str(oab.get("numero", "")))
         sec = str(oab.get("seccional", "")).upper()
         if not validate_oab(numero, sec):
             continue
-        value = f"{sec}:{numero}"
-        label = oab.get("responsavel")
-        meta = {"seccional": sec, "numero": numero}
-        target_id = oab_identity(numero, sec)
-
-        # Une variantes (ex.: RJ:2556A → RJ:2556) preservando CriterionLink
-        siblings = list(
-            session.scalars(select(Criterion).where(Criterion.criterion_type == "OAB")).all()
+        yaml_oabs.append(f"{sec}:{numero}")
+        result = _sync_oab_criterion(
+            session,
+            numero=numero,
+            sec=sec,
+            label=oab.get("responsavel"),
+            meta={"seccional": sec, "numero": numero},
         )
-        matching = []
-        for sibling in siblings:
-            parsed = parse_oab_criterion_value(sibling.value)
-            if parsed and oab_identity(parsed[0], parsed[1]) == target_id:
-                matching.append(sibling)
-
-        if not matching:
-            upsert("OAB", value, label, meta)
-            continue
-
-        canonical = next((c for c in matching if c.value == value), matching[0])
-        if canonical.value != value:
-            # Se já existe outro com o valor alvo, usa esse como canônico
-            exact = session.scalar(
-                select(Criterion).where(Criterion.criterion_type == "OAB", Criterion.value == value)
-            )
-            if exact and exact.id != canonical.id:
-                matching.append(exact)
-                canonical = exact
-            else:
-                canonical.value = value
-                created += 1
-        canonical.active = True
-        if label:
-            canonical.label = label
-        canonical.meta = meta
-
-        for other in matching:
-            if other.id == canonical.id:
-                continue
-            links = list(
-                session.scalars(
-                    select(CriterionLink).where(CriterionLink.criterion_id == other.id)
-                ).all()
-            )
-            for link in links:
-                exists = session.scalar(
-                    select(CriterionLink).where(
-                        CriterionLink.criterion_id == canonical.id,
-                        CriterionLink.process_id == link.process_id,
-                    )
-                )
-                if exists or not link.process_id:
-                    session.delete(link)
-                else:
-                    link.criterion_id = canonical.id
-            other.active = False
-            created += 1
+        oab_actions.append(result)
+        if result.get("action") in {"created", "updated", "merged"}:
+            changes += 1
 
     for item in mon.get("cpfs") or []:
         cpf = only_digits(str(item.get("cpf", "")))
-        if validate_cpf(cpf):
-            upsert("CPF", cpf, item.get("nome"))
+        if validate_cpf(cpf) and _upsert_simple(
+            session, ctype="CPF", value=cpf, label=item.get("nome")
+        ):
+            changes += 1
 
     for nome in mon.get("nomes") or []:
-        upsert("NOME", str(nome).strip(), str(nome).strip())
+        text = str(nome).strip()
+        if text and _upsert_simple(session, ctype="NOME", value=text, label=text):
+            changes += 1
 
     for proc in mon.get("processos") or []:
         parts = normalize_cnj(str(proc))
-        if parts:
-            upsert("PROCESSO", parts.numero_digits, parts.numero_formatado)
+        if parts and _upsert_simple(
+            session,
+            ctype="PROCESSO",
+            value=parts.numero_digits,
+            label=parts.numero_formatado,
+        ):
+            changes += 1
 
     for emp in mon.get("empresas") or []:
         cnpj = only_digits(str(emp.get("cnpj", "")))
-        if cnpj:
-            upsert("CNPJ", cnpj, emp.get("nome"), {"nome": emp.get("nome")})
+        if cnpj and _upsert_simple(
+            session,
+            ctype="CNPJ",
+            value=cnpj,
+            label=emp.get("nome"),
+            meta={"nome": emp.get("nome")},
+        ):
+            changes += 1
 
     session.flush()
-    return created
+    logger.info(
+        "criteria_synced",
+        extra={
+            "extra": {
+                "yaml_path": yaml_path,
+                "yaml_oabs": yaml_oabs,
+                "changes": changes,
+                "oab_actions": oab_actions,
+            }
+        },
+    )
+    return {
+        "changes": changes,
+        "yaml_path": yaml_path,
+        "yaml_oabs": yaml_oabs,
+        "oab_actions": oab_actions,
+    }

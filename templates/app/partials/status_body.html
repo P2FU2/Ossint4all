@@ -85,6 +85,7 @@
           <th>Duração</th>
           <th>Criado</th>
           <th>Jobs</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -110,15 +111,33 @@
                   </div>
                   {% if j.progress_message %}<div class="muted cell-clamp">{{ j.progress_stage }} — {{ j.progress_message }}</div>{% endif %}
                   {% if j.last_error %}<div class="muted cell-clamp">{{ j.last_error }}</div>{% endif %}
+                  {% if j.can_cancel %}
+                  <form method="post" action="/app/actions/cancel-job" style="margin-top:6px">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="job_id" value="{{ j.id }}" />
+                    <input type="hidden" name="next" value="/app/status" />
+                    <button class="btn ghost" type="submit" data-confirm="Cancelar job {{ j.job_type }}?">Cancelar job</button>
+                  </form>
+                  {% endif %}
                 </li>
                 {% endfor %}
               </ul>
             </details>
             {% if r.error_summary %}<div class="muted cell-clamp">{{ r.error_summary }}</div>{% endif %}
           </td>
+          <td>
+            {% if r.can_cancel %}
+            <form method="post" action="/app/actions/cancel-run">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="run_id" value="{{ r.id }}" />
+              <input type="hidden" name="next" value="/app/status" />
+              <button class="btn ghost" type="submit" data-confirm="Cancelar run {{ r.run_type }} e seus jobs?">Cancelar</button>
+            </form>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="muted">Nenhum run ainda.</td></tr>
+        <tr><td colspan="7" class="muted">Nenhum run ainda.</td></tr>
         {% endfor %}
       </tbody>
     </table>

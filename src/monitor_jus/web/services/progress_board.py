@@ -70,12 +70,18 @@ def _serialize_job(job: Job, run: Run | None = None) -> dict[str, Any]:
     status_label = _STATUS_LABELS.get(status, status)
     if stale:
         status_label = "Travado"
+    can_cancel = status in (
+        JobStatus.PENDING.value,
+        JobStatus.RUNNING.value,
+        JobStatus.RETRY.value,
+    )
     return {
         "id": job.id,
         "job_type": job.job_type,
         "status": status,
         "status_label": status_label,
         "stale": stale,
+        "can_cancel": can_cancel,
         "run_id": job.run_id,
         "run_type": run.run_type if run else "—",
         "trigger_type": run.trigger_type if run else "—",

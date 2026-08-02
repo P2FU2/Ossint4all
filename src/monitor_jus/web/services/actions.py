@@ -33,7 +33,13 @@ _HEAVY_RUN_TYPES = {RunType.BOOTSTRAP.value, RunType.HISTORICAL_DISCOVERY.value}
 _ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value, JobStatus.RETRY.value)
 
 
-def _cancel_job(session: Session, job: Job, reason: str) -> None:
+def _cancel_job(
+    session: Session,
+    job: Job,
+    reason: str,
+    *,
+    touch_run: bool = True,
+) -> None:
     now = utcnow()
     job.status = JobStatus.CANCELLED.value
     job.last_error_message = reason[:512]
@@ -42,7 +48,7 @@ def _cancel_job(session: Session, job: Job, reason: str) -> None:
     job.progress_stage = "cancelled"
     if not job.progress_message:
         job.progress_message = reason[:512]
-    if job.run_id:
+    if touch_run and job.run_id:
         run = session.get(Run, job.run_id)
         if run and run.status in (RunStatus.PENDING.value, RunStatus.RUNNING.value):
             run.status = RunStatus.CANCELLED.value
@@ -219,6 +225,86 @@ def enqueue_from_ui(
         details={"run_type": run_type, "run_id": run.id, "payload": payload or {}},
     )
     return {"run_id": run.id, "status": "accepted"}
+
+
+_CANCELABLE = (JobStatus.PENDING.value, JobStatus.RUNNING.value, JobStatus.RETRY.value)
+
+
+def cancel_run(
+    session: Session,
+    *,
+    run_id: str,
+    username: str,
+) -> dict[str, Any]:
+    """Cancela um run e todos os jobs ainda ativos (PENDING/RUNNING/RETRY)."""
+    run = session.get(Run, run_id)
+    if not run:
+        raise ValueError("Run não encontrado")
+    jobs = list(session.scalars(select(Job).where(Job.run_id == run_id)).all())
+    active = [j for j in jobs if j.status in _CANCELABLE]
+    if not active and run.status not in (RunStatus.PENDING.value, RunStatus.RUNNING.value):
+        raise ValueError(f"Run {run.run_type} já está {run.status} — nada a cancelar")
+
+    reason = f"Cancelado pelo admin ({username})"
+    for job in active:
+        _cancel_job(session, job, reason, touch_run=False)
+    if run.status in (RunStatus.PENDING.value, RunStatus.RUNNING.value) or active:
+        run.status = RunStatus.CANCELLED.value
+        run.finished_at = utcnow()
+        run.error_summary = reason
+    session.flush()
+    write_audit(
+        session,
+        "run.cancel",
+        username=username,
+        details={"run_id": run_id, "run_type": run.run_type, "jobs": len(active)},
+    )
+    return {
+        "run_id": run_id,
+        "run_type": run.run_type,
+        "jobs_cancelled": len(active),
+        "status": run.status,
+    }
+
+
+def cancel_job(
+    session: Session,
+    *,
+    job_id: str,
+    username: str,
+) -> dict[str, Any]:
+    """Cancela um job individual (e o run, se não restar nenhum ativo)."""
+    job = session.get(Job, job_id)
+    if not job:
+        raise ValueError("Job não encontrado")
+    if job.status not in _CANCELABLE:
+        raise ValueError(f"Job {job.job_type} já está {job.status} — nada a cancelar")
+    reason = f"Cancelado pelo admin ({username})"
+    _cancel_job(session, job, reason, touch_run=False)
+    if job.run_id:
+        still_active = session.scalar(
+            select(Job).where(
+                Job.run_id == job.run_id,
+                Job.status.in_(_CANCELABLE),
+                Job.id != job.id,
+            )
+        )
+        run = session.get(Run, job.run_id)
+        if run and not still_active and run.status in (
+            RunStatus.PENDING.value,
+            RunStatus.RUNNING.value,
+        ):
+            run.status = RunStatus.CANCELLED.value
+            run.finished_at = utcnow()
+            run.error_summary = reason
+    session.flush()
+    write_audit(
+        session,
+        "job.cancel",
+        username=username,
+        details={"job_id": job_id, "job_type": job.job_type, "run_id": job.run_id},
+    )
+    return {"job_id": job_id, "job_type": job.job_type, "status": job.status}
 
 
 def enqueue_report_email(

@@ -11,7 +11,12 @@ from uuid import uuid4
 from monitor_jus.config import get_settings
 from monitor_jus.db.repository import Repository
 from monitor_jus.db.session import init_db, session_scope
-from monitor_jus.exceptions import PermanentJobError, RecoverableJobError, SourceOutcomeError
+from monitor_jus.exceptions import (
+    JobCancelledError,
+    PermanentJobError,
+    RecoverableJobError,
+    SourceOutcomeError,
+)
 from monitor_jus.logging_setup import get_logger, setup_logging
 from monitor_jus.metrics import incr
 from monitor_jus.models import JobStatus, JobType, RunStatus
@@ -37,6 +42,10 @@ def process_job(job_id: str) -> None:
         bind_job(job.id, job.run_id)
         try:
             result = _dispatch(session, job.job_type, job.payload or {}, job.run_id)
+            session.refresh(job)
+            if job.status == JobStatus.CANCELLED.value:
+                logger.info("job_cancelled_after_work", extra={"job_id": job.id})
+                return
             progress_complete("Concluído")
             repo.complete_job(job)
             if job.run_id:
@@ -60,6 +69,15 @@ def process_job(job_id: str) -> None:
                 if not pending:
                     repo.finish_run(job.run_id, RunStatus.SUCCESS.value)
             logger.info("job_success", extra={"job_id": job.id, "extra": result})
+        except JobCancelledError as exc:
+            session.refresh(job)
+            if job.status != JobStatus.CANCELLED.value:
+                from monitor_jus.web.services.actions import _cancel_job
+
+                _cancel_job(session, job, exc.message or "Cancelado")
+                session.flush()
+            progress_fail(exc.message or "Cancelado")
+            logger.info("job_cancelled", extra={"job_id": job.id, "extra": {"msg": exc.message}})
         except RecoverableJobError as exc:
             progress_fail(exc.message or str(exc))
             incr("jobs_failed")

@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from monitor_jus.config import Settings
+from monitor_jus.config import Settings, load_monitoramentos
 from monitor_jus.db.models import Criterion, CriterionLink
-from monitor_jus.pipeline.bootstrap import sync_criteria_from_config
+from monitor_jus.logging_setup import get_logger
+from monitor_jus.pipeline.bootstrap import sync_criteria_detailed
 from monitor_jus.security import mask_cnpj, mask_cpf
+from monitor_jus.validators import normalize_oab_numero, validate_oab
+
+logger = get_logger(__name__)
 
 
 def _display_value(crit: Criterion) -> str:
@@ -23,8 +28,32 @@ def _display_value(crit: Criterion) -> str:
     return crit.value
 
 
-def list_criteria(session: Session) -> dict[str, Any]:
-    criteria = list(session.scalars(select(Criterion).order_by(Criterion.criterion_type, Criterion.value)).all())
+def _yaml_preview(settings: Settings) -> dict[str, Any]:
+    path = Path(settings.monitoramentos_path)
+    cfg = load_monitoramentos(settings)
+    mon = cfg.get("monitoramentos") or {}
+    oabs = []
+    for oab in mon.get("oabs") or []:
+        numero = normalize_oab_numero(str(oab.get("numero", "")))
+        sec = str(oab.get("seccional", "")).upper()
+        if validate_oab(numero, sec):
+            oabs.append(
+                {
+                    "value": f"{sec}:{numero}",
+                    "label": oab.get("responsavel") or "—",
+                }
+            )
+    return {
+        "yaml_path": str(path),
+        "yaml_exists": path.exists(),
+        "yaml_oabs": oabs,
+    }
+
+
+def list_criteria(session: Session, settings: Settings | None = None) -> dict[str, Any]:
+    criteria = list(
+        session.scalars(select(Criterion).order_by(Criterion.criterion_type, Criterion.value)).all()
+    )
     rows = []
     for c in criteria:
         proc_count = int(
@@ -46,12 +75,39 @@ def list_criteria(session: Session) -> dict[str, Any]:
                 "created_at": c.created_at.astimezone().strftime("%d/%m/%Y") if c.created_at else "—",
             }
         )
-    return {"criteria": rows, "total": len(rows), "active": sum(1 for r in rows if r["active"])}
+    out: dict[str, Any] = {
+        "criteria": rows,
+        "total": len(rows),
+        "active": sum(1 for r in rows if r["active"]),
+    }
+    if settings is not None:
+        out.update(_yaml_preview(settings))
+    return out
 
 
-def sync_criteria(session: Session, settings: Settings) -> int:
-    n = sync_criteria_from_config(session, settings)
-    from monitor_jus.pipeline.discovery import backfill_oab_links_from_payloads
+def sync_criteria(session: Session, settings: Settings) -> dict[str, Any]:
+    """
+    Sincroniza YAML → banco. Backfill de vínculos OAB é best-effort
+    (falha no backfill NÃO desfaz a sync).
+    """
+    result = sync_criteria_detailed(session, settings)
+    session.flush()
 
-    backfill_oab_links_from_payloads(session)
-    return n
+    backfilled = 0
+    backfill_error = None
+    try:
+        from monitor_jus.pipeline.discovery import backfill_oab_links_from_payloads
+
+        # SAVEPOINT: falha no backfill não desfaz a sync do YAML
+        with session.begin_nested():
+            backfilled = backfill_oab_links_from_payloads(session)
+    except Exception as exc:  # noqa: BLE001
+        backfill_error = str(exc)[:240]
+        logger.warning(
+            "criteria_sync_backfill_failed",
+            extra={"extra": {"error": backfill_error}},
+        )
+
+    result["oab_links_backfilled"] = backfilled
+    result["backfill_error"] = backfill_error
+    return result

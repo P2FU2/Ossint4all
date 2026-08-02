@@ -21,7 +21,7 @@ from monitor_jus.db.models import (
     WebhookRaw,
 )
 from monitor_jus.db.repository import utcnow
-from monitor_jus.models import JobStatus, NotifyStatus
+from monitor_jus.models import JobStatus, NotifyStatus, RunStatus
 from monitor_jus.progress import job_progress_dict
 from monitor_jus.web.services.progress_board import build_progress_board
 
@@ -210,6 +210,15 @@ def build_pipeline_status(session: Session, settings: Settings) -> dict[str, Any
         jobs = list(
             session.scalars(select(Job).where(Job.run_id == run.id).order_by(Job.created_at)).all()
         )
+        active_statuses = {
+            JobStatus.PENDING.value,
+            JobStatus.RUNNING.value,
+            JobStatus.RETRY.value,
+        }
+        can_cancel = run.status in (
+            RunStatus.PENDING.value,
+            RunStatus.RUNNING.value,
+        ) or any(j.status in active_statuses for j in jobs)
         run_rows.append(
             {
                 "id": run.id,
@@ -222,11 +231,13 @@ def build_pipeline_status(session: Session, settings: Settings) -> dict[str, Any
                 "finished_at": _fmt(run.finished_at),
                 "duration": _duration(run.started_at or run.created_at, run.finished_at),
                 "error_summary": (run.error_summary or "")[:300],
+                "can_cancel": can_cancel,
                 "jobs": [
                     {
                         "id": j.id,
                         "job_type": j.job_type,
                         "status": j.status,
+                        "can_cancel": j.status in active_statuses,
                         "attempt_count": j.attempt_count,
                         "max_attempts": j.max_attempts,
                         "available_at": _fmt(j.available_at),

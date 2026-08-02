@@ -39,5 +39,13 @@
   {% if j.last_error and j.status in ['FAILED', 'DEAD', 'CANCELLED'] %}
   <p class="muted cell-clamp" style="margin:6px 0 0;font-size:0.8rem">{{ j.last_error }}</p>
   {% endif %}
+  {% if j.can_cancel %}
+  <form method="post" action="/app/actions/cancel-job" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="job_id" value="{{ j.id }}" />
+    <input type="hidden" name="next" value="/app/acompanhamento" />
+    <button class="btn ghost" type="submit" data-confirm="Cancelar {{ j.job_type }}? O worker para no próximo passo.">Cancelar</button>
+  </form>
+  {% endif %}
 </div>
 {% endmacro %}

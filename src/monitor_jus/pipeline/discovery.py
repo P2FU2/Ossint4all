@@ -21,7 +21,7 @@ from monitor_jus.oab_match import (
 )
 from monitor_jus.pipeline.portfolio import criterion_display_label
 from monitor_jus.pipeline.status_oficial import clean_status_text, extract_status_from_payload
-from monitor_jus.progress import report as report_progress
+from monitor_jus.progress import raise_if_cancelled, report as report_progress
 from monitor_jus.sources.datajud import DataJudClient
 from monitor_jus.sources.judit.lawsuits import JuditLawsuitsService
 from monitor_jus.sources.judit.requests import JuditRequestsService
@@ -174,6 +174,7 @@ def run_discovery(
     )
 
     for crit_i, crit in enumerate(criteria):
+        raise_if_cancelled()
         label = criterion_display_label(crit)
         crit_prefix = f"critério {crit_i + 1}/{n_crit}"
         report_progress(
@@ -225,6 +226,7 @@ def run_discovery(
 
             n_cnj = max(len(cnjs), 1)
             for cnj_i, cnj in enumerate(cnjs):
+                raise_if_cancelled()
                 parts = normalize_cnj(cnj)
                 if not parts:
                     continue

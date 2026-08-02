@@ -377,8 +377,9 @@ def app_history_pdf(request: Request, digest_id: str, user: User = Depends(requi
 
 @router.get("/app/criterios", response_model=None)
 def app_criteria(request: Request, user: User = Depends(require_admin)):
+    settings = get_settings()
     with session_scope() as session:
-        data = criteria_svc.list_criteria(session)
+        data = criteria_svc.list_criteria(session, settings)
     return render(
         request,
         "app/criteria.html",
@@ -434,6 +435,52 @@ def app_enqueue(
     return RedirectResponse(url="/app/acompanhamento", status_code=303)
 
 
+@router.post("/app/actions/cancel-run")
+def app_cancel_run(
+    request: Request,
+    user: User = Depends(require_admin),
+    csrf_token: str = Form(""),
+    run_id: str = Form(...),
+    next: str = Form("/app/status"),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    redirect_to = next if next.startswith("/app/") else "/app/status"
+    try:
+        with session_scope() as session:
+            result = action_svc.cancel_run(
+                session, run_id=run_id, username=user.username
+            )
+        _flash(
+            request,
+            f"Run {result['run_type']} cancelado · {result['jobs_cancelled']} job(s)",
+            "ok",
+        )
+    except ValueError as exc:
+        _flash(request, str(exc), "error")
+    return RedirectResponse(url=redirect_to, status_code=303)
+
+
+@router.post("/app/actions/cancel-job")
+def app_cancel_job(
+    request: Request,
+    user: User = Depends(require_admin),
+    csrf_token: str = Form(""),
+    job_id: str = Form(...),
+    next: str = Form("/app/acompanhamento"),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    redirect_to = next if next.startswith("/app/") else "/app/acompanhamento"
+    try:
+        with session_scope() as session:
+            result = action_svc.cancel_job(
+                session, job_id=job_id, username=user.username
+            )
+        _flash(request, f"Job {result['job_type']} cancelado", "ok")
+    except ValueError as exc:
+        _flash(request, str(exc), "error")
+    return RedirectResponse(url=redirect_to, status_code=303)
+
+
 @router.post("/app/actions/send-report")
 def app_send_report(
     request: Request,
@@ -470,14 +517,30 @@ def app_sync_criteria(
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     settings = get_settings()
-    with session_scope() as session:
-        n = criteria_svc.sync_criteria(session, settings)
-        write_audit(session, "criteria.sync", username=user.username, details={"created": n})
-    _flash(
-        request,
-        f"Critérios sincronizados ({n} alteração(ões)) · vínculos OAB atualizados pelas partes",
-        "ok",
-    )
+    try:
+        with session_scope() as session:
+            result = criteria_svc.sync_criteria(session, settings)
+            write_audit(
+                session,
+                "criteria.sync",
+                username=user.username,
+                details=result,
+            )
+        oabs = ", ".join(result.get("yaml_oabs") or []) or "—"
+        msg = (
+            f"YAML sync: {result.get('changes', 0)} alteração(ões) · "
+            f"OABs no arquivo: {oabs}"
+        )
+        if result.get("backfill_error"):
+            msg += " · aviso: backfill de vínculos falhou (critérios já salvos)"
+            _flash(request, msg, "warn")
+        else:
+            bf = result.get("oab_links_backfilled") or 0
+            if bf:
+                msg += f" · {bf} vínculo(s) OAB"
+            _flash(request, msg, "ok")
+    except Exception as exc:  # noqa: BLE001
+        _flash(request, f"Falha ao sincronizar YAML: {exc}", "error")
     return RedirectResponse(url="/app/criterios", status_code=303)
 
 

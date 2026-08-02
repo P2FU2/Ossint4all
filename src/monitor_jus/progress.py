@@ -174,6 +174,25 @@ def report(
     return extra
 
 
+def raise_if_cancelled() -> None:
+    """Interrompe o job se a UI marcou CANCELLED (checagem rápida no DB)."""
+    from monitor_jus.exceptions import JobCancelledError
+    from monitor_jus.models import JobStatus
+
+    job_id = _current_job_id.get()
+    if not job_id:
+        return
+    engine = get_engine()
+    sql = text("SELECT status FROM jobs WHERE id = :id")
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(sql, {"id": job_id}).first()
+    except Exception:  # noqa: BLE001
+        return
+    if row and str(row[0]) == JobStatus.CANCELLED.value:
+        raise JobCancelledError("Job cancelado pelo administrador")
+
+
 def complete(message: str = "Concluído") -> None:
     report(stage="done", done=1, total=1, message=message, force=True)
 

@@ -9,12 +9,32 @@
   </div>
   <form method="post" action="/app/actions/sync-criteria">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-    <button class="btn" type="submit" data-confirm="Sincronizar critérios do YAML?">Sincronizar YAML</button>
+    <button class="btn" type="submit" data-confirm="Sincronizar critérios do YAML? Variantes OAB (ex.: 2556A→2556) serão unificadas.">Sincronizar YAML</button>
   </form>
 </div>
 
 <div class="panel">
-  <p class="muted" style="margin-top:0">A edição continua em <code>config/monitoramentos.yaml</code> no deploy. Esta tela só consulta e sincroniza.</p>
+  <h2>Arquivo YAML {{ tip("Valores lidos do disco neste deploy. Se RJ ainda aparecer com A no banco, rode Sincronizar YAML após o deploy com numero: \"2556\".") }}</h2>
+  <p class="muted" style="margin-top:-6px">
+    Caminho: <code class="mono">{{ yaml_path or '—' }}</code>
+    {% if yaml_exists is defined %}
+      · {% if yaml_exists %}<span class="badge ok">encontrado</span>{% else %}<span class="badge error">não encontrado</span>{% endif %}
+    {% endif %}
+  </p>
+  {% if yaml_oabs %}
+  <div class="chip-cloud" style="margin-top:10px">
+    {% for o in yaml_oabs %}
+    <span class="badge soft" title="{{ o.label }}">{{ o.value }}</span>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Nenhuma OAB no YAML (ou arquivo ausente).</p>
+  {% endif %}
+  <p class="muted tip-note">A edição do arquivo continua em <code>config/monitoramentos.yaml</code> no deploy. Esta tela consulta o banco e aplica o sync.</p>
+</div>
+
+<div class="panel">
+  <h2>No banco</h2>
   <div class="table-wrap">
   <table class="data">
     <thead>

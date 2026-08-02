@@ -59,6 +59,12 @@ class PermanentJobError(MonitorJusError):
     recoverable = False
 
 
+class JobCancelledError(MonitorJusError):
+    """Job cancelado pela UI/admin — não vai para DEAD nem RETRY."""
+
+    code = "CANCELLED"
+
+
 class RecoverableJobError(MonitorJusError):
     """Erro recuperável — job pode ir para RETRY."""
 
