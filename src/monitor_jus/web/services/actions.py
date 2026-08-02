@@ -33,6 +33,23 @@ _HEAVY_RUN_TYPES = {RunType.BOOTSTRAP.value, RunType.HISTORICAL_DISCOVERY.value}
 _ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value, JobStatus.RETRY.value)
 
 
+def _cancel_job(session: Session, job: Job, reason: str) -> None:
+    now = utcnow()
+    job.status = JobStatus.CANCELLED.value
+    job.last_error_message = reason[:512]
+    job.finished_at = now
+    job.locked_by = None
+    job.progress_stage = "cancelled"
+    if not job.progress_message:
+        job.progress_message = reason[:512]
+    if job.run_id:
+        run = session.get(Run, job.run_id)
+        if run and run.status in (RunStatus.PENDING.value, RunStatus.RUNNING.value):
+            run.status = RunStatus.CANCELLED.value
+            run.finished_at = now
+            run.error_summary = reason[:512]
+
+
 def cancel_stale_pending_jobs(
     session: Session,
     *,
@@ -52,19 +69,72 @@ def cancel_stale_pending_jobs(
             )
         ).all()
     )
-    cancelled = 0
     for job in stale:
-        job.status = JobStatus.CANCELLED.value
-        job.last_error_message = "Cancelado automaticamente: PENDING antigo (fila suja)"
-        job.finished_at = utcnow()
-        if job.run_id:
-            run = session.get(Run, job.run_id)
-            if run and run.status in (RunStatus.PENDING.value, RunStatus.RUNNING.value):
-                run.status = RunStatus.CANCELLED.value
-                run.finished_at = utcnow()
-                run.error_summary = "Cancelado: PENDING antigo"
-        cancelled += 1
-    return cancelled
+        _cancel_job(session, job, "Cancelado automaticamente: PENDING antigo (fila suja)")
+    if stale:
+        session.flush()
+    return len(stale)
+
+
+def reap_stale_running_jobs(
+    session: Session,
+    *,
+    heartbeat_minutes: float = 30.0,
+    never_started_minutes: float = 20.0,
+) -> int:
+    """
+    Marca RUNNING sem heartbeat como CANCELLED (worker morto/redeploy).
+
+    Discovery pode durar horas — só ceifa se o heartbeat parou.
+    Jobs em 0% sem nenhuma atualização caem mais cedo (never_started).
+    """
+    now = utcnow()
+    hb_cutoff = now - timedelta(minutes=heartbeat_minutes)
+    never_cutoff = now - timedelta(minutes=never_started_minutes)
+    running = list(
+        session.scalars(select(Job).where(Job.status == JobStatus.RUNNING.value)).all()
+    )
+    reaped = 0
+    for job in running:
+        hb = job.heartbeat_at or job.started_at or job.created_at
+        if not hb:
+            continue
+        pct = int(job.progress_pct or 0)
+        stage = (job.progress_stage or "").strip().lower()
+        never_progressed = pct <= 0 and stage in ("", "starting", "—", "-")
+        if never_progressed and hb < never_cutoff:
+            _cancel_job(
+                session,
+                job,
+                (
+                    "Cancelado: RUNNING sem progresso/heartbeat "
+                    f"(>{never_started_minutes:.0f} min) — worker provavelmente reiniciou"
+                ),
+            )
+            reaped += 1
+            continue
+        if hb < hb_cutoff:
+            _cancel_job(
+                session,
+                job,
+                (
+                    "Cancelado: heartbeat expirado "
+                    f"(>{heartbeat_minutes:.0f} min sem atualização) — worker morto/redeploy"
+                ),
+            )
+            reaped += 1
+    if reaped:
+        session.flush()
+    return reaped
+
+
+def cleanup_stale_jobs(session: Session) -> dict[str, int]:
+    """Limpa PENDING antigos + RUNNING zumbis. Seguro chamar a cada refresh da UI."""
+    pending = cancel_stale_pending_jobs(session, hours=2.0)
+    running = reap_stale_running_jobs(session)
+    if pending or running:
+        session.flush()
+    return {"pending_cancelled": pending, "running_reaped": running}
 
 
 def _active_heavy_jobs(session: Session) -> list[Job]:
@@ -120,8 +190,8 @@ def enqueue_from_ui(
     if run_type not in ALLOWED_RUN_TYPES:
         raise ValueError(f"run_type não permitido: {run_type}")
 
-    # Limpa PENDING antigos antes de enfileirar
-    cancel_stale_pending_jobs(session, hours=2.0)
+    # Limpa fila suja / zumbis antes de enfileirar
+    cleanup_stale_jobs(session)
     assert_heavy_job_allowed(session, run_type)
 
     repo = Repository(session)

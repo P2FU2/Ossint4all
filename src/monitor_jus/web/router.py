@@ -122,8 +122,9 @@ def app_dashboard(request: Request, user: User = Depends(require_user)):
 def app_acompanhamento(request: Request, user: User = Depends(require_admin)):
     settings = get_settings()
     with session_scope() as session:
-        action_svc.cancel_stale_pending_jobs(session, hours=2.0)
+        cleaned = action_svc.cleanup_stale_jobs(session)
         data = progress_svc.build_progress_board(session)
+        data["cleaned"] = cleaned
     return render(
         request,
         "app/acompanhamento.html",
@@ -140,7 +141,9 @@ def app_acompanhamento(request: Request, user: User = Depends(require_admin)):
 def app_acompanhamento_partial(request: Request, user: User = Depends(require_admin)):
     settings = get_settings()
     with session_scope() as session:
+        cleaned = action_svc.cleanup_stale_jobs(session)
         data = progress_svc.build_progress_board(session)
+        data["cleaned"] = cleaned
     return render(
         request,
         "app/partials/acompanhamento_body.html",
@@ -156,7 +159,7 @@ def app_acompanhamento_partial(request: Request, user: User = Depends(require_ad
 def app_status(request: Request, user: User = Depends(require_admin)):
     settings = get_settings()
     with session_scope() as session:
-        action_svc.cancel_stale_pending_jobs(session, hours=2.0)
+        action_svc.cleanup_stale_jobs(session)
         data = status_svc.build_pipeline_status(session, settings)
     return render(
         request,
@@ -470,7 +473,11 @@ def app_sync_criteria(
     with session_scope() as session:
         n = criteria_svc.sync_criteria(session, settings)
         write_audit(session, "criteria.sync", username=user.username, details={"created": n})
-    _flash(request, f"Critérios sincronizados ({n} novo(s))", "ok")
+    _flash(
+        request,
+        f"Critérios sincronizados ({n} alteração(ões)) · vínculos OAB atualizados pelas partes",
+        "ok",
+    )
     return RedirectResponse(url="/app/criterios", status_code=303)
 
 

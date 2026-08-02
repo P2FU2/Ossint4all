@@ -4,7 +4,8 @@ monitoramentos:
       seccional: "SP"
       responsavel: "Fernando Crespo Queiroz Neves"
 
-    - numero: "2556A"
+    # Inscrição no DJE/tribunais: 2556/RJ (sem sufixo A — 2556A não retorna na Judit)
+    - numero: "2556"
       seccional: "RJ"
       responsavel: "Fernando Crespo Queiroz Neves"
 

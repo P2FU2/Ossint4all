@@ -83,7 +83,11 @@
         <span class="badge soft {% if v == 0 %}badge-zero{% endif %}" title="{{ k }}: {{ v }} processo(s) vinculado(s) a este critério">{{ k }}: {{ v }}</span>
         {% endfor %}
       </div>
-      <p class="muted tip-note">OAB com 0 = critério ativo, mas ainda sem processos vinculados pela Judit. Tribunal (ex.: TJRJ) não implica OAB/RJ.</p>
+      <p class="muted tip-note">
+        Contagem = processos vinculados à inscrição. Se aparecer 0, sincronize Critérios ou rode discovery —
+        a OAB no YAML deve ser igual à do tribunal (ex.: <span class="mono">2556/RJ</span>, sem sufixo A).
+        Tribunal (TJRJ) ≠ seccional da OAB.
+      </p>
       {% else %}
       <p class="muted">Sem critérios OAB ativos.</p>
       {% endif %}

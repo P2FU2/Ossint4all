@@ -114,9 +114,11 @@ def _filtered_process_rows(
 
     q_norm = (q or "").strip().lower()
     tribunal_norm = (tribunal or "").strip().lower()
-    oab_norm = (oab or "").strip().lower()
+    oab_raw = (oab or "").strip()
     outcome_norm = (outcome or "").strip().lower()
     situacao_norm = (situacao or "").strip().lower()
+
+    from monitor_jus.oab_match import filter_matches_oab_text
 
     filtered: list[dict[str, Any]] = []
     tribunals: set[str] = set()
@@ -145,7 +147,7 @@ def _filtered_process_rows(
                 continue
         if tribunal_norm and tribunal_norm not in (row.get("tribunal") or "").lower():
             continue
-        if oab_norm and oab_norm not in (row.get("criteria") or "").lower():
+        if oab_raw and not filter_matches_oab_text(oab_raw, row.get("criteria") or ""):
             continue
         if outcome_norm and row.get("outcome") != outcome_norm:
             continue

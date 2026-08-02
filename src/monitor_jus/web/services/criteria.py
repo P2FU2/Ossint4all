@@ -50,4 +50,8 @@ def list_criteria(session: Session) -> dict[str, Any]:
 
 
 def sync_criteria(session: Session, settings: Settings) -> int:
-    return sync_criteria_from_config(session, settings)
+    n = sync_criteria_from_config(session, settings)
+    from monitor_jus.pipeline.discovery import backfill_oab_links_from_payloads
+
+    backfill_oab_links_from_payloads(session)
+    return n

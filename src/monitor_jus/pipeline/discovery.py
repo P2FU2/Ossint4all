@@ -14,6 +14,11 @@ from monitor_jus.db.repository import Repository
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.pipeline.normalize import normalize_datajud_source
+from monitor_jus.oab_match import (
+    criterion_matches_oab,
+    extract_oabs_from_payload,
+    parse_oab_criterion_value,
+)
 from monitor_jus.pipeline.portfolio import criterion_display_label
 from monitor_jus.pipeline.status_oficial import clean_status_text, extract_status_from_payload
 from monitor_jus.progress import report as report_progress
@@ -41,6 +46,48 @@ def _extract_cnjs_from_judit_response(data: dict[str, Any]) -> list[str]:
         elif isinstance(cur, list):
             stack.extend(cur)
     return list(dict.fromkeys(found))
+
+
+def _link_oab_criteria_from_payload(
+    repo: Repository,
+    oab_criteria: list[Criterion],
+    process_id: str,
+    payload: dict[str, Any] | None,
+) -> int:
+    """Vincula OABs monitoradas quando a inscrição aparece nas partes do processo."""
+    if not payload or not oab_criteria:
+        return 0
+    identities = extract_oabs_from_payload(payload)
+    if not identities:
+        return 0
+    linked = 0
+    for crit in oab_criteria:
+        for identity in identities:
+            if criterion_matches_oab(crit.value, identity):
+                repo.link_criterion_process(crit.id, process_id)
+                linked += 1
+                break
+    return linked
+
+
+def backfill_oab_links_from_payloads(session: Session) -> int:
+    """Religa processos já no acervo às OABs monitoradas com base no payload."""
+    from monitor_jus.db.models import Process
+
+    repo = Repository(session)
+    oab_criteria = [
+        c
+        for c in session.scalars(select(Criterion).where(Criterion.active.is_(True))).all()
+        if c.criterion_type == "OAB" and parse_oab_criterion_value(c.value)
+    ]
+    if not oab_criteria:
+        return 0
+    linked = 0
+    for proc in session.scalars(select(Process)).all():
+        payload = proc.payload if isinstance(proc.payload, dict) else None
+        linked += _link_oab_criteria_from_payload(repo, oab_criteria, proc.id, payload)
+    session.flush()
+    return linked
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -116,6 +163,7 @@ def run_discovery(
     outcomes: list[dict[str, Any]] = []
     discovered = 0
     criteria = list(session.scalars(select(Criterion).where(Criterion.active.is_(True))).all())
+    oab_criteria = [c for c in criteria if c.criterion_type == "OAB"]
     n_crit = max(len(criteria), 1)
     report_progress(
         stage="discovery",
@@ -222,6 +270,9 @@ def run_discovery(
 
                 proc = repo.upsert_process(parts.numero_formatado, parts.numero_digits, **proc_kwargs)
                 repo.link_criterion_process(crit.id, proc.id)
+                payload = proc_kwargs.get("payload")
+                if isinstance(payload, dict):
+                    _link_oab_criteria_from_payload(repo, oab_criteria, proc.id, payload)
                 discovered += 1
             outcomes.append({"criterion": crit.value, "status": "ok", "cnjs": len(cnjs)})
             report_progress(
@@ -250,10 +301,23 @@ def run_discovery(
             )
 
     report_progress(
+        stage="discovery_oab_backfill",
+        done=n_crit,
+        total=n_crit,
+        message="Relacionando OABs pelas partes do processo…",
+        force=True,
+    )
+    oab_linked = backfill_oab_links_from_payloads(session)
+    report_progress(
         stage="discovery",
         done=n_crit,
         total=n_crit,
-        message=f"Discovery concluído · {discovered} processo(s)",
+        message=f"Discovery concluído · {discovered} processo(s) · OAB backfill {oab_linked}",
         force=True,
     )
-    return {"discovered": discovered, "outcomes": outcomes, "bootstrap": bootstrap_mode}
+    return {
+        "discovered": discovered,
+        "outcomes": outcomes,
+        "bootstrap": bootstrap_mode,
+        "oab_links_backfilled": oab_linked,
+    }

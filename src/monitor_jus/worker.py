@@ -146,6 +146,13 @@ def worker_loop(poll_seconds: float = 2.0) -> None:
     while True:
         claimed = None
         with session_scope() as session:
+            # Ceifa RUNNING zumbis (redeploy/crash) antes de pegar o próximo
+            from monitor_jus.web.services.actions import cleanup_stale_jobs
+
+            cleaned = cleanup_stale_jobs(session)
+            if cleaned.get("running_reaped") or cleaned.get("pending_cancelled"):
+                logger.info("stale_jobs_cleaned", extra={"extra": cleaned})
+
             repo = Repository(session)
             pending = repo.count_jobs_by_status(JobStatus.PENDING.value)
             incr("jobs_pending", 0)  # emit snapshot via gauge-like log

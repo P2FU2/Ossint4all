@@ -13,14 +13,29 @@
   </p>
 
   <div class="kpi-grid">
-    <div class="kpi"><div class="label">Na fila {{ tip("Soma de jobs PENDING + RUNNING + RETRY.") }}</div><div class="value">{{ active_count }}</div></div>
-    <div class="kpi"><div class="label">Em execução {{ tip("Jobs RUNNING neste momento (worker processando).") }}</div><div class="value">{{ running_count }}</div></div>
+    <div class="kpi"><div class="label">Na fila {{ tip("Soma de jobs PENDING + RUNNING + RETRY (ainda não finalizados).") }}</div><div class="value">{{ active_count }}</div></div>
+    <div class="kpi"><div class="label">Em execução {{ tip("Jobs RUNNING com heartbeat recente — worker realmente processando.") }}</div><div class="value">{{ running_count }}</div></div>
     <div class="kpi"><div class="label">Aguardando {{ tip("Jobs PENDING ainda não iniciados.") }}</div><div class="value">{{ pending_count }}</div></div>
   </div>
 
+  {% if cleaned and (cleaned.running_reaped or cleaned.pending_cancelled) %}
+  <div class="callout warn">
+    Limpeza automática:
+    {% if cleaned.running_reaped %}{{ cleaned.running_reaped }} job(s) travado(s) cancelado(s){% endif %}
+    {% if cleaned.running_reaped and cleaned.pending_cancelled %} · {% endif %}
+    {% if cleaned.pending_cancelled %}{{ cleaned.pending_cancelled }} PENDING antigo(s){% endif %}.
+  </div>
+  {% endif %}
+
+  {% if stale_count %}
+  <div class="callout warn">
+    {{ stale_count }} job(s) marcado(s) como travado (sem heartbeat). Serão cancelados na próxima limpeza.
+  </div>
+  {% endif %}
+
   {% if running_count > 1 %}
   <div class="callout warn">
-    Há {{ running_count }} jobs RUNNING ao mesmo tempo. Em produção, use 1 réplica de worker para evitar discovery/bootstrap concorrentes.
+    Há {{ running_count }} jobs em execução ao mesmo tempo. Em produção, use 1 réplica de worker para evitar discovery/bootstrap concorrentes.
   </div>
   {% endif %}
 

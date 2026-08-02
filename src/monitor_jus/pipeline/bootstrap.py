@@ -16,6 +16,7 @@ from monitor_jus.models import NotifyStatus
 from monitor_jus.pipeline.discovery import run_discovery
 from monitor_jus.progress import report as report_progress
 from monitor_jus.security import only_digits
+from monitor_jus.oab_match import oab_identity, parse_oab_criterion_value
 from monitor_jus.validators import normalize_cnj, normalize_oab_numero, validate_cpf, validate_oab
 
 logger = get_logger(__name__)
@@ -107,16 +108,70 @@ def sync_criteria_from_config(session: Session, settings: Settings | None = None
         )
         created += 1
 
+    from monitor_jus.db.models import CriterionLink
+
     for oab in mon.get("oabs") or []:
         numero = normalize_oab_numero(str(oab.get("numero", "")))
         sec = str(oab.get("seccional", "")).upper()
-        if validate_oab(numero, sec):
-            upsert(
-                "OAB",
-                f"{sec}:{numero}",
-                oab.get("responsavel"),
-                {"seccional": sec, "numero": numero},
+        if not validate_oab(numero, sec):
+            continue
+        value = f"{sec}:{numero}"
+        label = oab.get("responsavel")
+        meta = {"seccional": sec, "numero": numero}
+        target_id = oab_identity(numero, sec)
+
+        # Une variantes (ex.: RJ:2556A → RJ:2556) preservando CriterionLink
+        siblings = list(
+            session.scalars(select(Criterion).where(Criterion.criterion_type == "OAB")).all()
+        )
+        matching = []
+        for sibling in siblings:
+            parsed = parse_oab_criterion_value(sibling.value)
+            if parsed and oab_identity(parsed[0], parsed[1]) == target_id:
+                matching.append(sibling)
+
+        if not matching:
+            upsert("OAB", value, label, meta)
+            continue
+
+        canonical = next((c for c in matching if c.value == value), matching[0])
+        if canonical.value != value:
+            # Se já existe outro com o valor alvo, usa esse como canônico
+            exact = session.scalar(
+                select(Criterion).where(Criterion.criterion_type == "OAB", Criterion.value == value)
             )
+            if exact and exact.id != canonical.id:
+                matching.append(exact)
+                canonical = exact
+            else:
+                canonical.value = value
+                created += 1
+        canonical.active = True
+        if label:
+            canonical.label = label
+        canonical.meta = meta
+
+        for other in matching:
+            if other.id == canonical.id:
+                continue
+            links = list(
+                session.scalars(
+                    select(CriterionLink).where(CriterionLink.criterion_id == other.id)
+                ).all()
+            )
+            for link in links:
+                exists = session.scalar(
+                    select(CriterionLink).where(
+                        CriterionLink.criterion_id == canonical.id,
+                        CriterionLink.process_id == link.process_id,
+                    )
+                )
+                if exists or not link.process_id:
+                    session.delete(link)
+                else:
+                    link.criterion_id = canonical.id
+            other.active = False
+            created += 1
 
     for item in mon.get("cpfs") or []:
         cpf = only_digits(str(item.get("cpf", "")))

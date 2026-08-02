@@ -348,7 +348,7 @@ details.admin-menu .admin-nav {
   margin-bottom: 16px;
   box-shadow: var(--shadow-soft);
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 .panel h2 {
   font-family: var(--font-display);
@@ -716,6 +716,13 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   background: #fafafa;
   min-width: 0;
 }
+.progress-card.progress-stale {
+  border-color: rgba(215, 0, 21, 0.25);
+  background: rgba(215, 0, 21, 0.04);
+}
+.progress-fill-stale {
+  background: linear-gradient(90deg, #8e8e93 0%, #d70015 100%) !important;
+}
 .progress-head {
   display: flex;
   flex-wrap: wrap;
@@ -814,7 +821,7 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   margin-top: 4px;
 }
 
-/* Tooltips */
+/* Tooltips — balão fixo via JS (.tip-balloon) para não cortar em cards */
 .with-tip {
   display: inline-flex;
   align-items: center;
@@ -842,13 +849,10 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   color: var(--accent);
   outline: none;
 }
-.tip::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%) translateY(4px);
-  width: max(220px, min(320px, 70vw));
+.tip-balloon {
+  position: fixed;
+  z-index: 9999;
+  max-width: min(320px, calc(100vw - 24px));
   padding: 10px 12px;
   border-radius: 10px;
   background: #1d1d1f;
@@ -856,38 +860,18 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   font-family: var(--font-body);
   font-size: 0.78rem;
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.45;
   text-align: left;
   letter-spacing: 0;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
-  opacity: 0;
-  visibility: hidden;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
   pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 40;
-  white-space: normal;
-}
-.tip::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 2px);
-  transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-top-color: #1d1d1f;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.15s ease, visibility 0.15s;
-  z-index: 41;
+  transition: opacity 0.12s ease;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.tip:hover::after,
-.tip:focus::after {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
-}
-.tip:hover::before,
-.tip:focus::before {
+.tip-balloon.is-visible {
   opacity: 1;
   visibility: visible;
 }
@@ -901,9 +885,15 @@ label .tip {
 .tip-note {
   margin-top: 12px;
   font-size: 0.82rem;
-  line-height: 1.4;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .badge-zero {
   opacity: 0.65;
   border-style: dashed;
+}
+.kpi-grid,
+.panel-grid {
+  overflow: visible;
 }

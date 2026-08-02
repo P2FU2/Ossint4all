@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -11,6 +12,20 @@ from monitor_jus.db.models import Job, Run
 from monitor_jus.db.repository import utcnow
 from monitor_jus.models import JobStatus
 from monitor_jus.progress import format_bar, format_eta, job_progress_dict
+
+_STATUS_LABELS = {
+    JobStatus.PENDING.value: "Na fila",
+    JobStatus.RUNNING.value: "Em execução",
+    JobStatus.RETRY.value: "Nova tentativa",
+    JobStatus.SUCCESS.value: "Concluído",
+    JobStatus.FAILED.value: "Falhou",
+    JobStatus.DEAD.value: "Morto",
+    JobStatus.CANCELLED.value: "Cancelado",
+}
+
+# Sem heartbeat recente → considerado travado na UI (mesmo antes do reap)
+_STALE_HEARTBEAT = timedelta(minutes=25)
+_STALE_NEVER_STARTED = timedelta(minutes=15)
 
 
 def _fmt(dt: Any) -> str:
@@ -33,12 +48,34 @@ def _duration(start: Any, end: Any) -> str:
     return format_eta(float(secs))
 
 
+def _is_stale_running(job: Job) -> bool:
+    if job.status != JobStatus.RUNNING.value:
+        return False
+    now = utcnow()
+    hb = job.heartbeat_at or job.started_at or job.created_at
+    if not hb:
+        return True
+    pct = int(job.progress_pct or 0)
+    stage = (job.progress_stage or "").strip().lower()
+    never_progressed = pct <= 0 and stage in ("", "starting", "—", "-")
+    if never_progressed and (now - hb) >= _STALE_NEVER_STARTED:
+        return True
+    return (now - hb) >= _STALE_HEARTBEAT
+
+
 def _serialize_job(job: Job, run: Run | None = None) -> dict[str, Any]:
     prog = job_progress_dict(job)
+    stale = _is_stale_running(job)
+    status = job.status
+    status_label = _STATUS_LABELS.get(status, status)
+    if stale:
+        status_label = "Travado"
     return {
         "id": job.id,
         "job_type": job.job_type,
-        "status": job.status,
+        "status": status,
+        "status_label": status_label,
+        "stale": stale,
         "run_id": job.run_id,
         "run_type": run.run_type if run else "—",
         "trigger_type": run.trigger_type if run else "—",
@@ -71,7 +108,16 @@ def build_progress_board(session: Session) -> dict[str, Any]:
     recent_jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.status.in_([JobStatus.SUCCESS.value, JobStatus.DEAD.value, JobStatus.FAILED.value]))
+            .where(
+                Job.status.in_(
+                    [
+                        JobStatus.SUCCESS.value,
+                        JobStatus.DEAD.value,
+                        JobStatus.FAILED.value,
+                        JobStatus.CANCELLED.value,
+                    ]
+                )
+            )
             .order_by(Job.finished_at.desc().nulls_last(), Job.created_at.desc())
             .limit(30)
         ).all()
@@ -86,13 +132,21 @@ def build_progress_board(session: Session) -> dict[str, Any]:
     active = [_serialize_job(j, runs.get(j.run_id) if j.run_id else None) for j in active_jobs]
     recent = [_serialize_job(j, runs.get(j.run_id) if j.run_id else None) for j in recent_jobs]
 
-    # resumo: maior progresso em andamento
+    healthy_running = [
+        j
+        for j in active
+        if j["status"] == JobStatus.RUNNING.value and not j.get("stale")
+    ]
+    stale_running = [j for j in active if j.get("stale")]
+
+    # Destaque: job saudável com mais progresso / heartbeat mais recente
     headline = None
-    for j in active:
-        if j["status"] == JobStatus.RUNNING.value:
-            headline = j
-            break
-    if not headline and active:
+    if healthy_running:
+        headline = max(
+            healthy_running,
+            key=lambda j: (j.get("progress_pct") or 0, j.get("heartbeat_at") or ""),
+        )
+    elif active:
         headline = active[0]
 
     return {
@@ -100,7 +154,8 @@ def build_progress_board(session: Session) -> dict[str, Any]:
         "recent": recent,
         "headline": headline,
         "active_count": len(active),
-        "running_count": sum(1 for j in active if j["status"] == JobStatus.RUNNING.value),
+        "running_count": len(healthy_running),
+        "stale_count": len(stale_running),
         "pending_count": sum(1 for j in active if j["status"] == JobStatus.PENDING.value),
         "refreshed_at": _fmt(utcnow()),
         "empty_bar": format_bar(0),

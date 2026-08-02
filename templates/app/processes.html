@@ -20,8 +20,8 @@
 <div class="panel panel-full">
   <form class="filters" method="get" action="/app/processos">
     <input type="hidden" name="page" value="1" />
-    <label>Busca {{ tip("CNJ, classe processual ou assunto.") }}
-      <input name="q" value="{{ filters.q }}" placeholder="CNJ, classe, assunto" />
+    <label>Busca {{ tip("Número CNJ (0000000-00.0000.0.00.0000), classe ou assunto.") }}
+      <input name="q" value="{{ filters.q }}" placeholder="ex.: 0000832-35.2018.4.01.3202" />
     </label>
     <label>Tribunal {{ tip("Tribunal do processo (CNJ/capa), não a seccional da OAB.") }}
       <select name="tribunal">
@@ -31,8 +31,8 @@
         {% endfor %}
       </select>
     </label>
-    <label>OAB / critério {{ tip("Filtra pelo critério que descobriu o processo (OAB, nome, CPF…).") }}
-      <input name="oab" value="{{ filters.oab }}" placeholder="OAB ou responsável" />
+    <label>OAB / critério {{ tip("Formato sugerido: 2556/RJ ou OAB 138094/SP. Também aceita nome do responsável.") }}
+      <input name="oab" value="{{ filters.oab }}" placeholder="ex.: 2556/RJ ou OAB 138094/SP" />
     </label>
     <label>Situação {{ tip("Situação oficial inferida (Extinto, Em grau de recurso, etc.).") }}
       <select name="situacao">

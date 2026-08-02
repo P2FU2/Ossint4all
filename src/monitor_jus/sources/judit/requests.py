@@ -10,6 +10,7 @@ from monitor_jus.exceptions import FailedSource, FailedTimeout, SkippedDisabled
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.sources.judit.client import JuditClient
 from monitor_jus.sources.judit.schemas import extract_request_id
+from monitor_jus.oab_match import oab_search_keys
 from monitor_jus.validators import normalize_oab_numero
 
 logger = get_logger(__name__)
@@ -17,7 +18,15 @@ logger = get_logger(__name__)
 
 def oab_search_key(numero: str, seccional: str) -> str:
     """Formato Judit: {numero}{UF}, ex.: 138094SP."""
+    keys = oab_search_keys(numero, seccional)
+    if keys:
+        return keys[0]
     return f"{normalize_oab_numero(numero)}{(seccional or '').strip().upper()}"
+
+
+def _response_has_items(resp: dict[str, Any]) -> bool:
+    pages = resp.get("page_data") or []
+    return isinstance(pages, list) and len(pages) > 0
 
 
 class JuditRequestsService:
@@ -30,14 +39,27 @@ class JuditRequestsService:
             raise SkippedDisabled("JUDIT_ENABLE_OAB=false")
         if not self.settings.judit_enable_historical_search:
             raise SkippedDisabled("JUDIT_ENABLE_HISTORICAL_SEARCH=false")
-        body = {
-            "search": {
-                "search_type": "oab",
-                "search_key": oab_search_key(numero, seccional),
-            },
-            "with_attachments": bool(self.settings.judit_enable_attachments),
-        }
-        return self.create_and_collect(body)
+        keys = oab_search_keys(numero, seccional)
+        if not keys:
+            raise FailedSource("OAB inválida para busca Judit")
+        last: dict[str, Any] = {}
+        for key in keys:
+            body = {
+                "search": {
+                    "search_type": "oab",
+                    "search_key": key,
+                },
+                "with_attachments": bool(self.settings.judit_enable_attachments),
+            }
+            last = self.create_and_collect(body)
+            if _response_has_items(last):
+                if key != keys[0]:
+                    logger.info(
+                        "judit_oab_fallback_key",
+                        extra={"extra": {"search_key": key, "tried": keys}},
+                    )
+                return last
+        return last
 
     def search_by_document(self, document: str, doc_type: str = "cpf") -> dict[str, Any]:
         if not self.settings.judit_enable_cpf_cnpj:

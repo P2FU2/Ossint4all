@@ -137,10 +137,10 @@ def enqueue_run(
     with session_scope() as session:
         from monitor_jus.web.services.actions import (
             assert_heavy_job_allowed,
-            cancel_stale_pending_jobs,
+            cleanup_stale_jobs,
         )
 
-        cancel_stale_pending_jobs(session, hours=2.0)
+        cleanup_stale_jobs(session)
         try:
             assert_heavy_job_allowed(session, body.run_type)
         except ValueError as exc:
