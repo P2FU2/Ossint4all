@@ -75,6 +75,11 @@
       </form>
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="BOOTSTRAP" />
+        <button class="btn secondary" data-confirm="Rodar bootstrap (leitura inicial / redescoberta do acervo)? Continuar?">Bootstrap</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="run_type" value="RECONCILIATION" />
         <button class="btn secondary" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
       </form>
