@@ -2,41 +2,149 @@
 
 Serviço automatizado de monitoramento judicial em nuvem, com painel web autenticado.
 
-- **Judit** — fonte operacional principal (descoberta, tracking, DJEN, webhooks, STF)
+- **Judit** — fonte operacional principal (descoberta, tracking, DJEN, webhooks)
 - **DataJud** — confirmação oficial seletiva / fallback (API pública CNJ)
 - **OpenRouter** — resumos (com fallback determinístico)
-- **Resend** — e-mail digest diário
-- **Painel** — login usuário/senha, status do pipeline, acervo, eventos e histórico de digests
+- **Resend** — e-mail digest (HTML + PDF em anexos)
+- **Painel** — consulta do acervo + administração (jobs, critérios, cancelamento)
 
-## Arquitetura
+## Como funciona hoje
+
+Webhooks e refresh alimentam eventos o dia todo. O e-mail **não** é disparado por webhook: é um **digest** (cron ou sob demanda pela UI), com corpo HTML e anexos HTML/PDF.
+
+```mermaid
+flowchart TB
+  subgraph config [Configuração]
+    YAML["monitoramentos.yaml<br/>OABs · CPF · nome · CNJ"]
+  end
+
+  subgraph runtime [Railway]
+    WEB["web · FastAPI<br/>painel + API + webhooks"]
+    WRK["worker<br/>consome fila no Postgres"]
+    SCH["scheduler<br/>cron → DAILY_DIGEST"]
+    DB[(PostgreSQL)]
+  end
+
+  subgraph fontes [Integrações]
+    JUDIT[Judit]
+    DATAJUD[DataJud]
+    OR[OpenRouter]
+    RESEND[Resend]
+  end
+
+  YAML -->|sync critérios| DB
+  WEB --> DB
+  WRK --> DB
+  SCH -->|enfileira| DB
+
+  WRK -->|discovery / tracking| JUDIT
+  WRK -->|confirmação seletiva| DATAJUD
+  WRK -->|resumos| OR
+  WRK -->|digest HTML+PDF| RESEND
+
+  JUDIT -->|webhooks| WEB
+  WEB -->|WEBHOOK_INGEST| DB
+```
+
+### Fluxo de dados
+
+```mermaid
+flowchart LR
+  A[YAML critérios] --> B[BOOTSTRAP / DISCOVERY]
+  B --> C[Processos no acervo]
+  C --> D[Tracking + webhooks Judit]
+  D --> E[Eventos PENDING_NOTIFY]
+  E --> F[DAILY_DIGEST]
+  F --> G[HTML + PDF]
+  G --> H[E-mail Resend]
+  H --> I[Histórico no painel]
+```
+
+### Papéis e painel
+
+```mermaid
+flowchart TB
+  LOGIN[Login /app] --> ROLE{Papel}
+
+  ROLE -->|viewer / admin| CONSULTA[Consulta]
+  ROLE -->|admin| ADMIN[Administração]
+
+  CONSULTA --> DASH[Visão geral]
+  CONSULTA --> PROC[Processos + filtros]
+  CONSULTA --> EVT[Novidades]
+  CONSULTA --> HIST[Histórico digests]
+
+  ADMIN --> ACOMP[Acompanhamento<br/>progresso · cancelar]
+  ADMIN --> PIPE[Pipeline / runs]
+  ADMIN --> CRIT[Critérios + sync YAML]
+  ADMIN --> SYS[Sistema / usuários]
+  ADMIN --> MAIL[Enviar relatório por e-mail]
+```
+
+## Arquitetura de deploy
 
 ```
 Railway / Docker
 ├── web        → FastAPI (painel /app + /health /ready /run /webhooks/judit /metrics)
-├── worker     → consome jobs (fila no banco)
+├── worker     → consome jobs (fila no banco) — use 1 réplica
 ├── scheduler  → enfileira DAILY_DIGEST via cron
 └── PostgreSQL → produção  |  SQLite → desenvolvimento local
 ```
 
-Webhooks ingerem eventos o dia todo (`WEBHOOK_INGEST`). O e-mail é um **digest diário** (`DAILY_DIGEST`), não um e-mail por webhook.
+| Serviço | Função |
+|---------|--------|
+| `web` | Painel, login, API de trigger, webhook Judit |
+| `worker` | Executa BOOTSTRAP, discovery, digest, ingest, refresh |
+| `scheduler` | Cron → `DAILY_DIGEST` (dias úteis por padrão) |
+
+## Jobs principais
+
+| Tipo | Função |
+|------|--------|
+| `BOOTSTRAP` | Sync YAML + discovery baseline; eventos históricos **não** vão ao digest |
+| `HISTORICAL_DISCOVERY` | Sync YAML + discovery (novidades notificáveis) |
+| `WEBHOOK_INGEST` | Normaliza webhook Judit → eventos |
+| `PROCESS_REFRESH` / `RECONCILIATION` | Atualiza processos conhecidos |
+| `DAILY_DIGEST` | Portfolio + resumos + HTML/PDF + e-mail |
+| `DELIVERY_RETRY` | Reenvia digest já gerado |
+
+**Regras operacionais**
+
+- Bootstrap e Discovery **não** devem rodar em paralelo (bloqueio na UI/API).
+- Jobs `RUNNING` sem heartbeat são cancelados automaticamente (worker morto/redeploy).
+- Admin pode **cancelar** run/job pela UI; o worker para no próximo CNJ/critério.
+- OAB no YAML deve bater com a inscrição do tribunal (ex.: `2556/RJ`, sem sufixo `A` se o DJE não usa `A`).
 
 ## Painel web
 
 Acesse `https://<seu-dominio>/login` (local: `http://localhost:8000/login`).
 
-Variáveis:
+### Consulta (admin e viewer)
+
+- **Visão geral** — KPIs do acervo, Por OAB / tribunal, timeline, tooltips
+- **Processos** — filtros (CNJ, tribunal, OAB `2556/RJ`, situação oficial, resultado auxiliar)
+- **Novidades** — eventos após a leitura inicial
+- **Histórico** — digests enviados + download HTML/PDF
+
+### Administração (só admin)
+
+- **Acompanhamento** — progresso ao vivo, disparar jobs (Digest, Discovery, Bootstrap, Refresh…), **cancelar**
+- **Pipeline** — stages, runs recentes, cancelar run/job, dead letter
+- **Critérios** — lista do banco + preview do YAML; **Sincronizar YAML** (migra variantes OAB, ex. `2556A`→`2556`)
+- **Sistema** — flags, usuários
+- **Enviar relatório por e-mail** — digest sob demanda para destinatário(s) informados (sem depender do cron)
+
+Variáveis do painel:
 
 ```
-UI_SESSION_SECRET=...          # obrigatório em produção (diferente do default)
+UI_SESSION_SECRET=...          # obrigatório em produção
 UI_ADMIN_USER=admin            # cria o 1º usuário se a tabela users estiver vazia
 UI_ADMIN_PASSWORD=...          # obrigatório em produção no primeiro boot
 UI_SESSION_HOURS=72
 ```
 
-Papéis: `admin` (dispara jobs, gerencia usuários) e `viewer` (somente leitura).  
-`API_TRIGGER_TOKEN` continua só para automação (`POST /run`); não é o login do painel.
-
-**Acompanhamento** (`/app/acompanhamento`): barra de progresso, % e ETA dos jobs (bootstrap, discovery, tracking, digest). Os logs do worker emitem o mesmo (`progress [####----] 42% ETA 3m …`). `GET /runs/{id}` também devolve os campos de progresso.
+Papéis: `admin` (opera) e `viewer` (somente leitura).  
+`API_TRIGGER_TOKEN` é só para automação (`POST /run`), não é o login do painel.
 
 ## Requisitos
 
@@ -65,7 +173,22 @@ python -m monitor_jus.main init-db
 
 ### Monitoramentos
 
-Edite `config/monitoramentos.yaml` (OABs, CPFs, nomes, processos, empresas).
+Edite `config/monitoramentos.yaml`:
+
+```yaml
+monitoramentos:
+  oabs:
+    - numero: "138094"
+      seccional: "SP"
+      responsavel: "Nome"
+    - numero: "2556"          # use a inscrição real (DJE); evite sufixo A se o tribunal não usa
+      seccional: "RJ"
+      responsavel: "Nome"
+  nomes:
+    - "Nome Completo"
+```
+
+Depois do deploy: **Admin → Critérios → Sincronizar YAML**. A tela mostra as OABs lidas do arquivo vs. o que está no banco.
 
 ### Flags Judit (default `false`)
 
@@ -75,14 +198,14 @@ Habilite **somente** o que estiver no contrato:
 JUDIT_ENABLE_HISTORICAL_SEARCH=true
 JUDIT_ENABLE_OAB=true
 JUDIT_ENABLE_CPF_CNPJ=true
+JUDIT_ENABLE_NAME=true
 JUDIT_ENABLE_PROCESS_TRACKING=true
 JUDIT_ENABLE_DJEN=true
 ```
 
 ### DataJud
 
-`DATAJUD_API_KEY` é a **chave pública** do CNJ (não é credencial individual). Pode mudar; veja `DATAJUD_API_KEY_URL`. Em 401/403 o sistema retorna erro claro pedindo atualização da chave.
-
+`DATAJUD_API_KEY` é a **chave pública** do CNJ. Em 401/403 o sistema pede atualização da chave.  
 Política seletiva: `config/datajud_policy.yaml`.
 
 ### Webhook Judit
@@ -100,10 +223,10 @@ Em `ENV=production`, `none` é **proibido**.
 RESEND_API_KEY=re_...
 RESEND_MAX_CONCURRENCY=1
 EMAIL_FROM=Monitor Judicial <onboarding@resend.dev>
-EMAIL_TO=seu@email.com
+EMAIL_TO=seu@email.com,outro@email.com
 ```
 
-Use um remetente de domínio verificado no Resend (ou o domínio de testes `resend.dev` em desenvolvimento).
+O digest envia corpo HTML e anexos (`.html` + `.pdf`). Pela UI admin dá para enviar para outro destinatário sem alterar o cron.
 
 ## Execução
 
@@ -119,10 +242,10 @@ Bootstrap histórico (baseline **sem** flood de novidades no digest):
 
 ```bash
 python -m monitor_jus.main bootstrap
-# com worker rodando para processar o job
+# com worker rodando — ou use o botão Bootstrap no painel admin
 ```
 
-Enfileirar digest manualmente:
+Digest manual (CLI):
 
 ```bash
 python -m monitor_jus.main run DAILY_DIGEST
@@ -138,9 +261,7 @@ curl -X POST http://localhost:8000/run ^
   -d "{\"run_type\":\"DAILY_DIGEST\"}"
 ```
 
-Webhook:
-
-`POST /webhooks/judit` — valida auth, persiste payload, responde 200 e enfileira `WEBHOOK_INGEST`.
+Webhook: `POST /webhooks/judit` — valida auth, persiste payload, responde 200 e enfileira `WEBHOOK_INGEST`.
 
 ## Docker Compose (local / SQLite)
 
@@ -151,13 +272,13 @@ docker compose up --build
 ## Produção (Railway)
 
 1. Provisionar **PostgreSQL**
-2. Definir `DATABASE_URL=postgresql+psycopg://...`
+2. `DATABASE_URL=postgresql+psycopg://...`
 3. `ENV=production`
-4. Definir `UI_SESSION_SECRET`, `UI_ADMIN_USER` e `UI_ADMIN_PASSWORD`
-5. Três serviços: `web`, `worker`, `scheduler` (1 réplica cada no início)
-6. Volume **não** é necessário para o banco (Postgres gerenciado)
-7. Apontar a URL pública do webhook Judit para `https://<app>/webhooks/judit`
-8. Painel em `https://<app>/login`
+4. `UI_SESSION_SECRET`, `UI_ADMIN_USER`, `UI_ADMIN_PASSWORD`
+5. Três serviços: `web`, `worker`, `scheduler` — **1 réplica de worker**
+6. Deploy inclui `config/monitoramentos.yaml` (sync na UI após mudar OABs)
+7. Webhook Judit → `https://<app>/webhooks/judit`
+8. Painel → `https://<app>/login`
 
 Ver também `docker-compose.prod.yml`.
 
@@ -169,6 +290,20 @@ TZ=America/Sao_Paulo
 ```
 
 `SCHEDULE_HOUR` é fallback se o cron estiver vazio.
+
+## Correções e comportamentos recentes
+
+| Tema | Comportamento atual |
+|------|---------------------|
+| OAB RJ `2556A` vs `2556` | YAML e sync usam a inscrição real; busca Judit tenta variante sem letra; painel liga processos pelas partes |
+| Por OAB = 0 | Conta vínculos ao critério (não o tribunal). TJRJ ≠ OAB/RJ |
+| Situação oficial | Inferida da capa/movimentações (Extinto, Em grau de recurso…); filtro em Processos |
+| Jobs zumbis | `RUNNING` sem heartbeat → cancelados; UI mostra “Travado” |
+| Cancelar na UI | Admin cancela run/job em Pipeline e Acompanhamento |
+| Digest sob demanda | Campo de e-mail + “Enviar relatório” (HTML+PDF) |
+| Sync YAML | Preview do arquivo na tela Critérios; falha de backfill não desfaz o sync |
+| Tooltips | Balões fixos (não cortam nos cards) |
+| Progresso | % / ETA / critério X/Y · CNJ A/B no Acompanhamento e nos logs |
 
 ## Exclusão LGPD
 
