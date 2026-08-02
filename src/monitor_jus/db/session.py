@@ -75,18 +75,39 @@ def session_scope(database_url: str | None = None) -> Iterator[Session]:
 def _ensure_schema_compat(engine: Engine) -> None:
     """Ajusta colunas em bancos já existentes (create_all não altera tipos)."""
     dialect = engine.dialect.name
-    if dialect != "postgresql":
+    statements: list[str] = []
+    if dialect == "postgresql":
+        statements.extend(
+            [
+                "ALTER TABLE processes ALTER COLUMN situacao TYPE TEXT",
+                "ALTER TABLE processes ALTER COLUMN grau TYPE VARCHAR(64)",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_pct INTEGER DEFAULT 0",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_done DOUBLE PRECISION",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_total DOUBLE PRECISION",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_stage VARCHAR(64)",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_message VARCHAR(512)",
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eta_seconds DOUBLE PRECISION",
+            ]
+        )
+    elif dialect == "sqlite":
+        # SQLite: ADD COLUMN ignora se já existir (tratamos Exception)
+        statements.extend(
+            [
+                "ALTER TABLE jobs ADD COLUMN progress_pct INTEGER DEFAULT 0",
+                "ALTER TABLE jobs ADD COLUMN progress_done REAL",
+                "ALTER TABLE jobs ADD COLUMN progress_total REAL",
+                "ALTER TABLE jobs ADD COLUMN progress_stage VARCHAR(64)",
+                "ALTER TABLE jobs ADD COLUMN progress_message VARCHAR(512)",
+                "ALTER TABLE jobs ADD COLUMN eta_seconds REAL",
+            ]
+        )
+    if not statements:
         return
-    statements = [
-        "ALTER TABLE processes ALTER COLUMN situacao TYPE TEXT",
-        "ALTER TABLE processes ALTER COLUMN grau TYPE VARCHAR(64)",
-    ]
     with engine.begin() as conn:
         for stmt in statements:
             try:
                 conn.execute(text(stmt))
             except Exception:  # noqa: BLE001
-                # tabela/coluna ainda inexistente ou já no tipo desejado
                 pass
 
 

@@ -17,6 +17,7 @@ from monitor_jus.mail.resend_mailer import send_html_email
 from monitor_jus.metrics import incr, set_gauge
 from monitor_jus.models import DigestStatus
 from monitor_jus.pipeline.portfolio import build_portfolio
+from monitor_jus.progress import report as report_progress
 from monitor_jus.report.html_report import render_digest_html
 
 logger = get_logger(__name__)
@@ -34,6 +35,7 @@ def build_and_send_digest(
     repo = Repository(session)
 
     if digest_id:
+        report_progress(stage="digest_retry", done=0, total=2, message="Reenvio de digest", force=True)
         digest = repo.get_digest(digest_id)
         if not digest:
             raise PermanentJobError(f"Digest não encontrado: {digest_id}")
@@ -42,8 +44,10 @@ def build_and_send_digest(
         if not html_path or not html_path.exists():
             raise PermanentJobError("HTML do digest ausente para retry")
         html = html_path.read_text(encoding="utf-8")
+        report_progress(stage="digest_retry", done=1, total=2, message="Enviando e-mail")
         return _deliver(session, repo, digest, html, settings, run_id)
 
+    report_progress(stage="digest_load", done=0, total=4, message="Carregando eventos", force=True)
     cursor = repo.get_digest_cursor()
     since = cursor.last_successful_digest_at
     events = repo.pending_notify_events(since)
@@ -61,10 +65,20 @@ def build_and_send_digest(
 
     if events:
         repo.attach_digest_items(digest.id, [e.id for e in events])
-        for event in events:
+        n_ev = max(len(events), 1)
+        for i, event in enumerate(events):
+            report_progress(
+                stage="digest_summaries",
+                done=1 + (i / n_ev),
+                total=4,
+                message=f"Resumo IA {i + 1}/{len(events)}",
+            )
             event.summary = summarize_event(session, event, settings)
         session.flush()
+    else:
+        report_progress(stage="digest_summaries", done=2, total=4, message="Sem eventos novos")
 
+    report_progress(stage="digest_html", done=3, total=4, message="Gerando HTML")
     quarantine_count = repo.count_quarantine_open()
     html = render_digest_html(
         events,
@@ -83,6 +97,7 @@ def build_and_send_digest(
     session.flush()
 
     incr("digest_events_total", float(len(events)))
+    report_progress(stage="digest_send", done=3.5, total=4, message="Enviando e-mail")
     return _deliver(session, repo, digest, html, settings, run_id, portfolio=portfolio)
 
 
@@ -126,6 +141,7 @@ def _deliver(
             datetime.now(timezone.utc).timestamp(),
         )
         session.flush()
+        report_progress(stage="digest_send", done=4, total=4, message="E-mail enviado", force=True)
         return {
             "digest_id": digest.id,
             "status": "SENT",
@@ -136,6 +152,7 @@ def _deliver(
     except Exception as exc:  # noqa: BLE001
         notification.status = "FAILED"
         session.flush()
+        report_progress(stage="digest_send", message=f"Falha no envio: {exc}", force=True)
         logger.error("digest_delivery_failed", extra={"extra": {"err": str(exc)}})
         # eventos permanecem IN_DIGEST
         raise RecoverableJobError(str(exc), code="DELIVERY_FAILED") from exc

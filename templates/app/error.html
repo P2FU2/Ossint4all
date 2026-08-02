@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Erro {{ error_code }} · {{ brand }}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <h1 class="login-brand">{{ brand }}</h1>
+      <p class="login-sub">{{ app_name }}</p>
+      <div class="error-box">{{ error_code }} — {{ detail }}</div>
+      <p><a class="btn" href="/app">Voltar ao painel</a></p>
+    </div>
+  </div>
+</body>
+</html>

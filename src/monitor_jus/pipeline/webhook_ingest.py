@@ -15,6 +15,7 @@ from monitor_jus.pipeline.categorize import categorize
 from monitor_jus.pipeline.normalize import normalize_judit_webhook
 from monitor_jus.pipeline.prioritize import classify_priority, has_possible_deadline
 from monitor_jus.pipeline.quarantine import quarantine_event
+from monitor_jus.progress import report as report_progress
 from monitor_jus.sources.judit.webhooks import classify_webhook_event_type
 from monitor_jus.validators import normalize_cnj
 
@@ -24,12 +25,14 @@ logger = get_logger(__name__)
 def ingest_webhook_raw(session: Session, webhook_id: str, settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
     repo = Repository(session)
+    report_progress(stage="webhook", done=0, total=3, message="Ingerindo webhook", force=True)
     raw = repo.get_webhook_raw(webhook_id)
     if not raw:
         raise ValueError(f"webhook_raw não encontrado: {webhook_id}")
 
     payload = raw.payload or {}
     classified = classify_webhook_event_type(payload)
+    report_progress(stage="webhook", done=1, total=3, message=f"Tipo {classified}")
     if classified == "UNKNOWN":
         quarantine_event(
             session,
@@ -39,6 +42,7 @@ def ingest_webhook_raw(session: Session, webhook_id: str, settings: Settings | N
             delivery_key=raw.delivery_key,
         )
         repo.mark_webhook_processed(webhook_id, "QUARANTINED")
+        report_progress(stage="webhook", done=3, total=3, message="Quarentena UNKNOWN", force=True)
         return {"status": "quarantined", "reason": "UNKNOWN_EVENT_TYPE"}
 
     normalized = normalize_judit_webhook(payload, classified)
@@ -154,5 +158,12 @@ def ingest_webhook_raw(session: Session, webhook_id: str, settings: Settings | N
     )
     incr("events_created")
     repo.mark_webhook_processed(webhook_id, "PROCESSED")
+    report_progress(
+        stage="webhook",
+        done=3,
+        total=3,
+        message=f"Evento {event.event_type}",
+        force=True,
+    )
     logger.info("webhook_ingested", extra={"event_id": event.id, "extra": {"type": event.event_type}})
     return {"status": "created", "event_id": event.id}

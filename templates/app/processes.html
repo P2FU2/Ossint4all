@@ -1,0 +1,76 @@
+{% extends "app/base.html" %}
+{% block title %}Acervo{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Acervo de processos</h1>
+    <p>{{ total }} exibido(s) de {{ total_all }} no total.</p>
+  </div>
+  <div class="actions">
+    <a class="btn secondary" href="/app/processos/export.csv?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&pending_only={{ 'true' if filters.pending_only else 'false' }}">Exportar CSV</a>
+  </div>
+</div>
+
+<div class="panel">
+  <form class="filters" method="get" action="/app/processos">
+    <label>Busca
+      <input name="q" value="{{ filters.q }}" placeholder="CNJ, classe, assunto" />
+    </label>
+    <label>Tribunal
+      <select name="tribunal">
+        <option value="">Todos</option>
+        {% for t in tribunals %}
+        <option value="{{ t }}" {% if filters.tribunal == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>OAB / critério
+      <input name="oab" value="{{ filters.oab }}" placeholder="OAB ou responsável" />
+    </label>
+    <label>Outcome
+      <select name="outcome">
+        <option value="">Todos</option>
+        {% for key, label in outcome_labels.items() %}
+        <option value="{{ key }}" {% if filters.outcome == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="checkbox-row" style="margin-top:0;flex-direction:row;align-items:center">
+      <input type="checkbox" name="pending_only" value="true" {% if filters.pending_only %}checked{% endif %} />
+      Só com novidade pendente
+    </label>
+    <button class="btn" type="submit">Filtrar</button>
+  </form>
+
+  <table class="data">
+    <thead>
+      <tr>
+        <th>CNJ</th>
+        <th>Tribunal</th>
+        <th>Classe / assunto</th>
+        <th>Situação</th>
+        <th>Outcome</th>
+        <th>Critérios</th>
+        <th>Última mov.</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in processes %}
+      <tr>
+        <td><a class="mono" href="/app/processos/{{ p.id }}">{{ p.numero_cnj }}</a>{% if p.baseline %} <span class="badge">baseline</span>{% endif %}</td>
+        <td>{{ p.tribunal }}</td>
+        <td>{{ p.classe }}<div class="muted">{{ p.assunto }}</div></td>
+        <td>{{ p.situacao }}</td>
+        <td><span class="badge {% if p.outcome == 'exito' %}ok{% elif p.outcome == 'derrota' %}error{% endif %}">{{ outcome_labels.get(p.outcome, p.outcome) }}</span></td>
+        <td>{{ p.criteria }}</td>
+        <td class="muted">{{ p.last_movement_at }}</td>
+        <td>{% if p.official_link %}<a href="{{ p.official_link }}" target="_blank" rel="noopener">Portal</a>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">Nenhum processo encontrado com esses filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

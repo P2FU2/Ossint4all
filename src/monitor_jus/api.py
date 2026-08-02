@@ -1,14 +1,17 @@
-"""API FastAPI — health, run, webhooks, metrics."""
+"""API FastAPI — health, run, webhooks, metrics + painel web."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
 from monitor_jus import NORMALIZER_VERSION, PROVIDER_SCHEMA_VERSION_JUDIT, __version__
 from monitor_jus.ai.summarizer import check_openrouter
@@ -22,10 +25,30 @@ from monitor_jus.metrics import incr, snapshot
 from monitor_jus.models import JobType, RunMode, RunType
 from monitor_jus.sources.judit.auth import build_webhook_authenticator
 from monitor_jus.sources.judit.webhooks import webhook_meta
+from monitor_jus.web.auth import seed_admin_user
+from monitor_jus.web.exception_handlers import register_ui_exception_handlers
+from monitor_jus.web.router import router as ui_router
 
 logger = get_logger(__name__)
 
 app = FastAPI(title="Monitor Judicial", version=__version__)
+
+_settings_boot = get_settings()
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_settings_boot.ui_session_secret,
+    session_cookie="monitor_jus_session",
+    max_age=max(3600, int(_settings_boot.ui_session_hours) * 3600),
+    same_site="lax",
+    https_only=_settings_boot.is_production,
+)
+register_ui_exception_handlers(app)
+
+_static_dir = Path("static")
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+app.include_router(ui_router)
 
 
 class EnqueueBody(BaseModel):
@@ -51,9 +74,14 @@ def on_startup() -> None:
     settings = get_settings()
     if settings.is_production and settings.judit_webhook_auth_mode == "none":
         raise ConfigurationError("Webhook auth none proibido em produção")
+    if settings.is_production and (
+        not settings.ui_session_secret or settings.ui_session_secret == "change-me-ui-session-secret"
+    ):
+        raise ConfigurationError("UI_SESSION_SECRET deve ser definido em produção")
     init_db()
     with session_scope() as session:
         sync_capabilities(session, settings)
+        seed_admin_user(session, settings)
     check_openrouter(settings)
     logger.info("api_started", extra={"extra": {"version": __version__}})
 
@@ -75,7 +103,7 @@ def ready() -> dict[str, Any]:
 
 
 @app.get("/metrics")
-def metrics() -> dict[str, Any]:
+def metrics(_: None = Depends(verify_trigger_token)) -> dict[str, Any]:
     return snapshot()
 
 
@@ -117,6 +145,8 @@ def get_run(run_id: str, _: None = Depends(verify_trigger_token)) -> dict[str, A
         from sqlalchemy import select
         from monitor_jus.db.models import Job
 
+        from monitor_jus.progress import job_progress_dict
+
         jobs = list(session.scalars(select(Job).where(Job.run_id == run_id)).all())
         return {
             "run_id": run.id,
@@ -133,6 +163,9 @@ def get_run(run_id: str, _: None = Depends(verify_trigger_token)) -> dict[str, A
                     "status": j.status,
                     "attempt_count": j.attempt_count,
                     "last_error_code": j.last_error_code,
+                    "last_error_message": (j.last_error_message or "")[:400] or None,
+                    "heartbeat_at": j.heartbeat_at,
+                    **job_progress_dict(j),
                 }
                 for j in jobs
             ],

@@ -1,0 +1,130 @@
+{% extends "app/base.html" %}
+{% block title %}Visão geral{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Visão geral</h1>
+    <p>Saúde do monitoramento, acervo e novidades recentes.</p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/app/acompanhamento">Acompanhamento</a>
+    <a class="btn secondary" href="/app/processos">Ver acervo</a>
+    <a class="btn secondary" href="/app/historico">Histórico</a>
+    {% if is_admin %}
+    <form method="post" action="/app/actions/enqueue">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="run_type" value="DAILY_DIGEST" />
+      <button class="btn secondary" type="submit" data-confirm="Enfileirar digest diário agora?">Disparar digest</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if live and (live.headline or live.active_count) %}
+{% from "app/partials/progress_bars.html" import progress_row %}
+<div class="panel">
+  <h2>Em execução agora</h2>
+  {% if live.headline %}
+  {{ progress_row(live.headline) }}
+  {% endif %}
+  <p class="muted">{{ live.running_count }} running · {{ live.pending_count }} pending · <a href="/app/acompanhamento">abrir acompanhamento</a></p>
+</div>
+{% endif %}
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="label">Processos</div>
+    <div class="value">{{ portfolio.total_processes }}</div>
+    <div class="hint">{{ portfolio.active_count }} ativos · {{ portfolio.closed_count }} encerrados</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Êxito estimado</div>
+    <div class="value">{% if portfolio.win_rate is not none %}{{ portfolio.win_rate }}%{% else %}n/d{% endif %}</div>
+    <div class="hint">{{ portfolio.win_count }}/{{ portfolio.decided_count }} classificados</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Novidades pendentes</div>
+    <div class="value">{{ pending_notify }}</div>
+    <div class="hint">{{ urgent_pending }} urgentes</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Último digest</div>
+    <div class="value" style="font-size:1.1rem">{{ last_digest.status }}</div>
+    <div class="hint">{{ last_digest.sent_at }} · {{ last_digest.total_events }} itens</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Bootstrap</div>
+    <div class="value" style="font-size:1.1rem">{% if bootstrap.completed %}OK{% else %}Pendente{% endif %}</div>
+    <div class="hint">{{ bootstrap.baseline_at }}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Fila de jobs</div>
+    <div class="value">{{ job_counts.PENDING + job_counts.RUNNING + job_counts.RETRY }}</div>
+    <div class="hint">DEAD {{ job_counts.DEAD }} · RUN {{ job_counts.RUNNING }}</div>
+  </div>
+</div>
+
+<div class="panel-grid">
+  <div class="panel">
+    <h2>Timeline recente</h2>
+    {% if recent_events %}
+    <ul class="list-plain">
+      {% for e in recent_events %}
+      <li>
+        <div class="muted">{{ e.created_at }} · <span class="mono">{{ e.numero_cnj }}</span>
+          <span class="badge {{ e.priority }}">{{ e.priority }}</span>
+          <span class="badge">{{ e.notify_status }}</span>
+        </div>
+        <div><strong>{{ e.title }}</strong></div>
+        {% if e.summary %}<div class="muted">{{ e.summary }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Nenhum evento recente.</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Atenção</h2>
+      <ul class="attention list-plain">
+        {% for a in attention %}
+        <li><span class="badge {{ a.level }}">{{ a.level }}</span> {{ a.text }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>Por OAB</h2>
+      {% if portfolio.by_oab %}
+      <p>
+        {% for k, v in portfolio.by_oab.items() %}
+        <span class="badge">{{ k }}: {{ v }}</span>
+        {% endfor %}
+      </p>
+      {% else %}
+      <p class="muted">Sem vínculos OAB ainda.</p>
+      {% endif %}
+      <h2 style="margin-top:18px">Por tribunal</h2>
+      {% if portfolio.by_tribunal %}
+      <p>
+        {% for k, v in portfolio.by_tribunal.items() %}
+        <span class="badge">{{ k }}: {{ v }}</span>
+        {% endfor %}
+      </p>
+      {% else %}
+      <p class="muted">Sem processos no acervo.</p>
+      {% endif %}
+    </div>
+    <div class="panel">
+      <h2>Integrações</h2>
+      <p>
+        <span class="badge {% if health.judit_flags_on %}ok{% else %}warn{% endif %}">Judit {{ health.judit_flags_on }}/{{ health.judit_flags_total }}</span>
+        <span class="badge {% if health.datajud %}ok{% else %}warn{% endif %}">DataJud</span>
+        <span class="badge {% if health.openrouter %}ok{% else %}warn{% endif %}">OpenRouter</span>
+      </p>
+      <p class="muted">Digest → {{ health.email_to }}</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

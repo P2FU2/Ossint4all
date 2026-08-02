@@ -166,6 +166,12 @@ class Repository:
         job.heartbeat_at = now
         job.started_at = now
         job.attempt_count = (job.attempt_count or 0) + 1
+        if job.run_id:
+            run = self.session.get(Run, job.run_id)
+            if run and run.started_at is None:
+                run.started_at = now
+                if run.status == RunStatus.PENDING.value:
+                    run.status = RunStatus.RUNNING.value
         self.session.flush()
         return job
 
@@ -178,6 +184,10 @@ class Repository:
         job.status = JobStatus.SUCCESS.value
         job.finished_at = utcnow()
         job.locked_by = None
+        job.progress_pct = 100
+        job.eta_seconds = 0.0
+        if not job.progress_stage:
+            job.progress_stage = "done"
 
     def fail_job(
         self,

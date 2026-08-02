@@ -1,0 +1,160 @@
+<div
+  id="status-body"
+  hx-get="/app/status/partial"
+  hx-trigger="every 20s"
+  hx-swap="outerHTML"
+  hx-select="#status-body"
+>
+  <p class="muted" style="margin-top:-8px;margin-bottom:16px">
+    Atualizado {{ refreshed_at }}
+    <span class="htmx-indicator"> · atualizando…</span>
+  </p>
+
+  <div class="kpi-grid">
+    <div class="kpi"><div class="label">PENDING</div><div class="value">{{ job_counts.PENDING }}</div></div>
+    <div class="kpi"><div class="label">RUNNING</div><div class="value">{{ job_counts.RUNNING }}</div></div>
+    <div class="kpi"><div class="label">RETRY</div><div class="value">{{ job_counts.RETRY }}</div></div>
+    <div class="kpi"><div class="label">DEAD</div><div class="value">{{ job_counts.DEAD }}</div></div>
+  </div>
+
+  {% if live and live.headline %}
+  {% from "app/partials/progress_bars.html" import progress_row %}
+  <div class="panel">
+    <h2>Progresso ao vivo <a href="/app/acompanhamento" class="muted" style="font-size:0.85rem;font-weight:500">ver tudo →</a></h2>
+    {{ progress_row(live.headline) }}
+    {% if live.active_count > 1 %}
+    <p class="muted">+ {{ live.active_count - 1 }} outro(s) na fila · <a href="/app/acompanhamento">Acompanhamento</a></p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Etapas do pipeline</h2>
+    <div class="pipeline">
+      {% for s in stages %}
+      <div class="stage">
+        <span class="badge {{ s.status }}">{{ s.status }}</span>
+        <div class="stage-label">{{ s.label }}</div>
+        <div class="stage-detail">{{ s.detail }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if is_admin %}
+  <div class="panel">
+    <h2>Ações</h2>
+    <div class="actions">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="DAILY_DIGEST" />
+        <button class="btn" data-confirm="Enfileirar DAILY_DIGEST?">Digest</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
+        <button class="btn secondary" data-confirm="Enfileirar discovery?">Discovery</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="RECONCILIATION" />
+        <button class="btn secondary" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="BOOTSTRAP" />
+        <button class="btn ghost" data-confirm="Bootstrap só se necessário. Continuar?">Bootstrap</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Runs recentes</h2>
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Tipo</th>
+          <th>Trigger</th>
+          <th>Status</th>
+          <th>Duração</th>
+          <th>Criado</th>
+          <th>Jobs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td><span class="mono">{{ r.run_type }}</span></td>
+          <td>{{ r.trigger_type }}</td>
+          <td><span class="badge {% if r.status == 'SUCCESS' %}ok{% elif r.status == 'FAILED' %}error{% else %}warn{% endif %}">{{ r.status }}</span></td>
+          <td>{{ r.duration }}</td>
+          <td class="muted">{{ r.created_at }}</td>
+          <td>
+            <details class="run-jobs">
+              <summary>{{ r.jobs|length }} job(s)</summary>
+              <ul class="list-plain">
+                {% for j in r.jobs %}
+                <li>
+                  <span class="mono">{{ j.job_type }}</span>
+                  <span class="badge">{{ j.status }}</span>
+                  · <strong>{{ j.progress_pct }}%</strong> · ETA {{ j.eta_label }}
+                  · tentativa {{ j.attempt_count }}/{{ j.max_attempts }}
+                  <div class="progress-track" style="margin:6px 0;max-width:280px">
+                    <div class="progress-fill" style="width:{{ j.progress_pct }}%"></div>
+                  </div>
+                  {% if j.progress_message %}<div class="muted">{{ j.progress_stage }} — {{ j.progress_message }}</div>{% endif %}
+                  {% if j.last_error %}<div class="muted">{{ j.last_error }}</div>{% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </details>
+            {% if r.error_summary %}<div class="muted">{{ r.error_summary }}</div>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">Nenhum run ainda.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel-grid">
+    <div class="panel">
+      <h2>Dead letter</h2>
+      {% if dead_letters %}
+      <ul class="list-plain">
+        {% for d in dead_letters %}
+        <li>
+          <span class="mono">{{ d.job_type }}</span>
+          <span class="badge error">{{ d.error_code }}</span>
+          <div class="muted">{{ d.created_at }}</div>
+          <div>{{ d.error_message }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Nenhum job morto.</p>
+      {% endif %}
+    </div>
+    <div class="panel">
+      <h2>Subscriptions Judit</h2>
+      {% if subscriptions %}
+      <table class="data">
+        <thead><tr><th>Tipo</th><th>Status</th><th>Último webhook</th></tr></thead>
+        <tbody>
+          {% for s in subscriptions %}
+          <tr>
+            <td>{{ s.tracking_type }}</td>
+            <td><span class="badge {% if s.status == 'ACTIVE' %}ok{% elif s.status == 'ERROR' %}error{% else %}warn{% endif %}">{{ s.status }}</span></td>
+            <td class="muted">{{ s.last_webhook_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">Nenhuma subscription registrada.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>

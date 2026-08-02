@@ -12,6 +12,7 @@ from monitor_jus.db.repository import Repository
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.pipeline.normalize import normalize_datajud_source
+from monitor_jus.progress import report as report_progress
 from monitor_jus.sources.datajud import DataJudClient
 from monitor_jus.sources.judit.lawsuits import JuditLawsuitsService
 
@@ -41,8 +42,22 @@ def run_tracking(session: Session, settings: Settings | None = None) -> dict[str
     due = repo.processes_due()
     refreshed = 0
     outcomes: list[dict[str, Any]] = []
+    n_due = max(len(due), 1)
+    report_progress(
+        stage="tracking",
+        done=0,
+        total=n_due,
+        message=f"Tracking · {len(due)} processo(s) devido(s)",
+        force=True,
+    )
 
-    for proc in due:
+    for idx, proc in enumerate(due):
+        report_progress(
+            stage="tracking",
+            done=idx,
+            total=n_due,
+            message=f"Atualizando {proc.numero_cnj} ({idx + 1}/{len(due)})",
+        )
         try:
             full = lawsuits.get_full_process(proc.numero_cnj_digits)
             if full:
@@ -80,6 +95,19 @@ def run_tracking(session: Session, settings: Settings | None = None) -> dict[str
                     pass
             proc.last_checked_at = datetime.now(timezone.utc)
             proc.next_check_at = datetime.now(timezone.utc) + timedelta(days=1)
+        report_progress(
+            stage="tracking",
+            done=idx + 1,
+            total=n_due,
+            message=f"OK {proc.numero_cnj} · refreshed {refreshed}",
+        )
 
     session.flush()
+    report_progress(
+        stage="tracking",
+        done=n_due,
+        total=n_due,
+        message=f"Tracking concluído · {refreshed}/{len(due)}",
+        force=True,
+    )
     return {"due": len(due), "refreshed": refreshed, "outcomes": outcomes}

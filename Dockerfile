@@ -14,6 +14,7 @@ COPY requirements.txt pyproject.toml README.md ./
 COPY src ./src
 COPY config ./config
 COPY templates ./templates
+COPY static ./static
 
 RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir -e .
 

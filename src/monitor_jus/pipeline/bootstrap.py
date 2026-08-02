@@ -14,6 +14,7 @@ from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.models import NotifyStatus
 from monitor_jus.pipeline.discovery import run_discovery
+from monitor_jus.progress import report as report_progress
 from monitor_jus.security import only_digits
 from monitor_jus.validators import normalize_cnj, normalize_oab_numero, validate_cpf, validate_oab
 
@@ -35,8 +36,16 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
     state = ensure_bootstrap_row(session)
     first_run = not (state.completed and state.baseline_at)
 
+    report_progress(
+        stage="bootstrap",
+        done=0,
+        total=2,
+        message="Bootstrap · discovery baseline",
+        force=True,
+    )
     # Sempre redescobre/atualiza o acervo; só na 1ª execução move o cursor do digest
     result = run_discovery(session, settings=settings, bootstrap_mode=True)
+    report_progress(stage="bootstrap_finalize", done=1.5, total=2, message="Finalizando baseline")
     # Marca eventos criados no bootstrap como IGNORED (não vão para digest)
     from monitor_jus.db.models import Event
     from sqlalchemy import update
@@ -54,6 +63,13 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
         cursor = repo.get_digest_cursor()
         cursor.last_successful_digest_at = now
     session.flush()
+    report_progress(
+        stage="bootstrap",
+        done=2,
+        total=2,
+        message="Bootstrap concluído",
+        force=True,
+    )
     logger.info("bootstrap_completed", extra={"extra": result})
     return {
         "status": "completed" if first_run else "refreshed",

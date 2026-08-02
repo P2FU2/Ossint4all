@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     config_dir: str = "config"
     outbox_dir: str = "data/outbox"
 
+    # Painel web (login humano — separado do API_TRIGGER_TOKEN)
+    ui_session_secret: str = "change-me-ui-session-secret"
+    ui_admin_user: str = "admin"
+    ui_admin_password: str = ""
+    ui_session_hours: int = 72
+
     @field_validator("judit_webhook_allowed_ips", mode="before")
     @classmethod
     def _ips(cls, v: Any) -> str:

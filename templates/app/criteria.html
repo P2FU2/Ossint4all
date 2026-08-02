@@ -1,0 +1,46 @@
+{% extends "app/base.html" %}
+{% block title %}Critérios{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Critérios / monitoramentos</h1>
+    <p>{{ active }} ativo(s) de {{ total }} · leitura do YAML sincronizado no banco.</p>
+  </div>
+  {% if is_admin %}
+  <form method="post" action="/app/actions/sync-criteria">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="btn" type="submit" data-confirm="Sincronizar critérios do YAML?">Sincronizar YAML</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <p class="muted">A edição dos critérios continua em <code>config/monitoramentos.yaml</code> no deploy. A UI apenas consulta e sincroniza.</p>
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Tipo</th>
+        <th>Valor</th>
+        <th>Label / responsável</th>
+        <th>Ativo</th>
+        <th>Processos</th>
+        <th>Criado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in criteria %}
+      <tr>
+        <td><span class="badge">{{ c.type }}</span></td>
+        <td class="mono">{{ c.value }}</td>
+        <td>{{ c.label }}</td>
+        <td>{% if c.active %}<span class="badge ok">sim</span>{% else %}<span class="badge warn">não</span>{% endif %}</td>
+        <td>{{ c.process_count }}</td>
+        <td class="muted">{{ c.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Nenhum critério. Rode o bootstrap ou sincronize o YAML.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

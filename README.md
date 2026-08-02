@@ -1,23 +1,42 @@
 # Monitor Judicial
 
-Serviço automatizado de monitoramento judicial em nuvem (sem painel na v1).
+Serviço automatizado de monitoramento judicial em nuvem, com painel web autenticado.
 
 - **Judit** — fonte operacional principal (descoberta, tracking, DJEN, webhooks, STF)
 - **DataJud** — confirmação oficial seletiva / fallback (API pública CNJ)
 - **OpenRouter** — resumos (com fallback determinístico)
 - **Resend** — e-mail digest diário
+- **Painel** — login usuário/senha, status do pipeline, acervo, eventos e histórico de digests
 
 ## Arquitetura
 
 ```
 Railway / Docker
-├── web        → FastAPI (/health /ready /run /webhooks/judit /metrics)
+├── web        → FastAPI (painel /app + /health /ready /run /webhooks/judit /metrics)
 ├── worker     → consome jobs (fila no banco)
 ├── scheduler  → enfileira DAILY_DIGEST via cron
 └── PostgreSQL → produção  |  SQLite → desenvolvimento local
 ```
 
 Webhooks ingerem eventos o dia todo (`WEBHOOK_INGEST`). O e-mail é um **digest diário** (`DAILY_DIGEST`), não um e-mail por webhook.
+
+## Painel web
+
+Acesse `https://<seu-dominio>/login` (local: `http://localhost:8000/login`).
+
+Variáveis:
+
+```
+UI_SESSION_SECRET=...          # obrigatório em produção (diferente do default)
+UI_ADMIN_USER=admin            # cria o 1º usuário se a tabela users estiver vazia
+UI_ADMIN_PASSWORD=...          # obrigatório em produção no primeiro boot
+UI_SESSION_HOURS=72
+```
+
+Papéis: `admin` (dispara jobs, gerencia usuários) e `viewer` (somente leitura).  
+`API_TRIGGER_TOKEN` continua só para automação (`POST /run`); não é o login do painel.
+
+**Acompanhamento** (`/app/acompanhamento`): barra de progresso, % e ETA dos jobs (bootstrap, discovery, tracking, digest). Os logs do worker emitem o mesmo (`progress [####----] 42% ETA 3m …`). `GET /runs/{id}` também devolve os campos de progresso.
 
 ## Requisitos
 
@@ -134,9 +153,11 @@ docker compose up --build
 1. Provisionar **PostgreSQL**
 2. Definir `DATABASE_URL=postgresql+psycopg://...`
 3. `ENV=production`
-4. Três serviços: `web`, `worker`, `scheduler` (1 réplica cada no início)
-5. Volume **não** é necessário para o banco (Postgres gerenciado)
-6. Apontar a URL pública do webhook Judit para `https://<app>/webhooks/judit`
+4. Definir `UI_SESSION_SECRET`, `UI_ADMIN_USER` e `UI_ADMIN_PASSWORD`
+5. Três serviços: `web`, `worker`, `scheduler` (1 réplica cada no início)
+6. Volume **não** é necessário para o banco (Postgres gerenciado)
+7. Apontar a URL pública do webhook Judit para `https://<app>/webhooks/judit`
+8. Painel em `https://<app>/login`
 
 Ver também `docker-compose.prod.yml`.
 

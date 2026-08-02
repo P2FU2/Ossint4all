@@ -14,6 +14,7 @@ from monitor_jus.db.repository import Repository
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.pipeline.normalize import normalize_datajud_source
+from monitor_jus.progress import report as report_progress
 from monitor_jus.sources.datajud import DataJudClient
 from monitor_jus.sources.judit.lawsuits import JuditLawsuitsService
 from monitor_jus.sources.judit.requests import JuditRequestsService
@@ -115,8 +116,23 @@ def run_discovery(
     outcomes: list[dict[str, Any]] = []
     discovered = 0
     criteria = list(session.scalars(select(Criterion).where(Criterion.active.is_(True))).all())
+    n_crit = max(len(criteria), 1)
+    report_progress(
+        stage="discovery",
+        done=0,
+        total=n_crit,
+        message=f"Discovery · {len(criteria)} critério(s)",
+        force=True,
+    )
 
-    for crit in criteria:
+    for crit_i, crit in enumerate(criteria):
+        label = crit.label or f"{crit.criterion_type}:{crit.value}"
+        report_progress(
+            stage="discovery_search",
+            done=crit_i,
+            total=n_crit,
+            message=f"Buscando {label}",
+        )
         try:
             page_items: list[dict[str, Any]] = []
             if crit.criterion_type == "OAB":
@@ -131,9 +147,11 @@ def run_discovery(
             elif crit.criterion_type == "PROCESSO":
                 parts = normalize_cnj(crit.value)
                 if not parts:
+                    report_progress(done=crit_i + 1, total=n_crit, message=f"Pulado {label}")
                     continue
                 resp = {"page_data": [{"response_data": {"code": parts.numero_formatado}}]}
             else:
+                report_progress(done=crit_i + 1, total=n_crit, message=f"Tipo ignorado {label}")
                 continue
 
             if isinstance(resp, dict):
@@ -148,10 +166,19 @@ def run_discovery(
                 for cnj in _extract_cnjs_from_judit_response(item):
                     cnj_item[cnj] = item
 
-            for cnj in cnjs:
+            n_cnj = max(len(cnjs), 1)
+            for cnj_i, cnj in enumerate(cnjs):
                 parts = normalize_cnj(cnj)
                 if not parts:
                     continue
+                # progresso fracionário dentro do critério
+                frac = crit_i + ((cnj_i + 1) / n_cnj)
+                report_progress(
+                    stage="discovery_enrich",
+                    done=frac,
+                    total=n_crit,
+                    message=f"{label} · CNJ {cnj_i + 1}/{len(cnjs)} · {parts.numero_formatado}",
+                )
                 full: dict[str, Any] = {}
                 try:
                     full = lawsuits.get_full_process(parts.numero_digits) or {}
@@ -185,6 +212,12 @@ def run_discovery(
                 repo.link_criterion_process(crit.id, proc.id)
                 discovered += 1
             outcomes.append({"criterion": crit.value, "status": "ok", "cnjs": len(cnjs)})
+            report_progress(
+                stage="discovery",
+                done=crit_i + 1,
+                total=n_crit,
+                message=f"OK {label} · {len(cnjs)} CNJ(s) · total descobertos {discovered}",
+            )
         except SourceOutcomeError as exc:
             outcomes.append(
                 {
@@ -195,5 +228,17 @@ def run_discovery(
                 }
             )
             logger.warning("discovery_outcome", extra={"extra": {"code": exc.code, "c": crit.value}})
+            report_progress(
+                done=crit_i + 1,
+                total=n_crit,
+                message=f"Falha/skip {label}: {exc.code}",
+            )
 
+    report_progress(
+        stage="discovery",
+        done=n_crit,
+        total=n_crit,
+        message=f"Discovery concluído · {discovered} processo(s)",
+        force=True,
+    )
     return {"discovered": discovered, "outcomes": outcomes, "bootstrap": bootstrap_mode}

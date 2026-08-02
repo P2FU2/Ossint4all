@@ -1,0 +1,29 @@
+{# Espera variável `jobs` (lista) ou usa `active` #}
+{% macro progress_row(j) %}
+<div class="progress-card">
+  <div class="progress-head">
+    <div>
+      <strong class="mono">{{ j.job_type }}</strong>
+      <span class="badge {% if j.status == 'RUNNING' %}em_andamento{% elif j.status == 'SUCCESS' %}ok{% elif j.status == 'DEAD' or j.status == 'FAILED' %}error{% else %}warn{% endif %}">{{ j.status }}</span>
+      {% if j.run_type and j.run_type != '—' %}<span class="muted">· {{ j.run_type }}</span>{% endif %}
+    </div>
+    <div class="progress-meta">
+      <span class="mono">{{ j.progress_pct }}%</span>
+      <span class="muted">ETA {{ j.eta_label }}</span>
+    </div>
+  </div>
+  <div class="progress-track" role="progressbar" aria-valuenow="{{ j.progress_pct }}" aria-valuemin="0" aria-valuemax="100">
+    <div class="progress-fill" style="width: {{ j.progress_pct }}%"></div>
+  </div>
+  <div class="progress-foot">
+    <span class="mono muted">{{ j.bar }}</span>
+    <span>{{ j.progress_stage }}{% if j.progress_message %} — {{ j.progress_message }}{% endif %}</span>
+  </div>
+  {% if j.progress_done is not none and j.progress_total is not none %}
+  <div class="muted" style="font-size:0.82rem;margin-top:4px">
+    {{ j.progress_done }} / {{ j.progress_total }}
+    · início {{ j.started_at }} · duração {{ j.duration }}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}

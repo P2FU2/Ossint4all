@@ -26,6 +26,9 @@ class JsonFormatter(logging.Formatter):
             "event_id",
             "delivery_key",
             "latency_ms",
+            "progress_pct",
+            "progress_eta_seconds",
+            "progress_stage",
             "extra",
         ):
             if hasattr(record, key):

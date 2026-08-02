@@ -1,0 +1,12 @@
+{% extends "app/base.html" %}
+{% block title %}Status{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Status & etapas</h1>
+    <p>Pipeline operacional — atualiza automaticamente a cada 20s.</p>
+  </div>
+</div>
+
+{% include "app/partials/status_body.html" %}
+{% endblock %}

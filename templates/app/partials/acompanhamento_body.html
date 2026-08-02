@@ -1,0 +1,76 @@
+{% from "app/partials/progress_bars.html" import progress_row %}
+<div
+  id="acompanhamento-body"
+  hx-get="/app/acompanhamento/partial"
+  hx-trigger="every 5s"
+  hx-swap="outerHTML"
+  hx-select="#acompanhamento-body"
+>
+  <p class="muted" style="margin-top:-8px;margin-bottom:16px">
+    Atualizado {{ refreshed_at }}
+    <span class="htmx-indicator"> · atualizando…</span>
+  </p>
+
+  <div class="kpi-grid">
+    <div class="kpi"><div class="label">Ativos</div><div class="value">{{ active_count }}</div></div>
+    <div class="kpi"><div class="label">Running</div><div class="value">{{ running_count }}</div></div>
+    <div class="kpi"><div class="label">Pending</div><div class="value">{{ pending_count }}</div></div>
+  </div>
+
+  {% if headline %}
+  <div class="panel">
+    <h2>Em destaque</h2>
+    {{ progress_row(headline) }}
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Jobs em andamento / fila</h2>
+    {% if active %}
+      {% for j in active %}
+        {{ progress_row(j) }}
+      {% endfor %}
+    {% else %}
+      <p class="muted">Nenhum job ativo no momento. A fila está ociosa.</p>
+    {% endif %}
+  </div>
+
+  {% if is_admin %}
+  <div class="panel">
+    <h2>Disparar</h2>
+    <div class="actions">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="DAILY_DIGEST" />
+        <button class="btn" data-confirm="Enfileirar digest?">Digest</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
+        <button class="btn secondary" data-confirm="Enfileirar discovery?">Discovery</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="RECONCILIATION" />
+        <button class="btn secondary" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
+      </form>
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="PROCESS_REFRESH" />
+        <button class="btn ghost" data-confirm="Enfileirar refresh?">Refresh</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Recentes</h2>
+    {% if recent %}
+      {% for j in recent %}
+        {{ progress_row(j) }}
+      {% endfor %}
+    {% else %}
+      <p class="muted">Ainda sem histórico de jobs concluídos.</p>
+    {% endif %}
+  </div>
+</div>

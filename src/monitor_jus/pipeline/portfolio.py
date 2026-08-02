@@ -122,6 +122,7 @@ def build_portfolio(session: Session) -> dict[str, Any]:
 
         rows.append(
             {
+                "id": proc.id,
                 "numero_cnj": proc.numero_cnj,
                 "tribunal": tribunal,
                 "classe": proc.classe or "—",
@@ -131,6 +132,7 @@ def build_portfolio(session: Session) -> dict[str, Any]:
                 "grau": proc.grau or "—",
                 "orgao_julgador": proc.orgao_julgador or "—",
                 "data_distribuicao": _fmt_dt(proc.data_distribuicao),
+                "last_checked_at": _fmt_dt(proc.last_checked_at),
                 "last_movement_at": _fmt_dt(proc.last_movement_at),
                 "criteria": ", ".join(crits),
                 "baseline": proc.baseline,

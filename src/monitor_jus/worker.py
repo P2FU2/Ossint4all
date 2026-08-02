@@ -20,6 +20,7 @@ from monitor_jus.pipeline.digest import build_and_send_digest
 from monitor_jus.pipeline.discovery import run_discovery
 from monitor_jus.pipeline.tracking import run_tracking
 from monitor_jus.pipeline.webhook_ingest import ingest_webhook_raw
+from monitor_jus.progress import bind_job, clear_job, complete as progress_complete, fail as progress_fail
 
 logger = get_logger(__name__)
 
@@ -33,8 +34,10 @@ def process_job(job_id: str) -> None:
         job = session.get(Job, job_id)
         if not job:
             return
+        bind_job(job.id, job.run_id)
         try:
             result = _dispatch(session, job.job_type, job.payload or {}, job.run_id)
+            progress_complete("Concluído")
             repo.complete_job(job)
             if job.run_id:
                 # se todos jobs do run terminaram, marca success
@@ -58,6 +61,7 @@ def process_job(job_id: str) -> None:
                     repo.finish_run(job.run_id, RunStatus.SUCCESS.value)
             logger.info("job_success", extra={"job_id": job.id, "extra": result})
         except RecoverableJobError as exc:
+            progress_fail(exc.message or str(exc))
             incr("jobs_failed")
             repo.fail_job(
                 job,
@@ -66,6 +70,7 @@ def process_job(job_id: str) -> None:
                 recoverable=True,
             )
         except (PermanentJobError, SourceOutcomeError) as exc:
+            progress_fail(str(exc))
             incr("jobs_failed")
             code = getattr(exc, "code", "PERMANENT")
             recoverable = False
@@ -80,6 +85,7 @@ def process_job(job_id: str) -> None:
             if job.status == JobStatus.DEAD.value:
                 incr("jobs_dead")
         except Exception as exc:  # noqa: BLE001
+            progress_fail(str(exc))
             incr("jobs_failed")
             repo.fail_job(
                 job,
@@ -87,6 +93,8 @@ def process_job(job_id: str) -> None:
                 error_message=f"{exc}\n{traceback.format_exc()}",
                 recoverable=True,
             )
+        finally:
+            clear_job()
 
 
 def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | None) -> dict[str, Any]:

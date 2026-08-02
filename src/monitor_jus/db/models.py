@@ -125,6 +125,13 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # progresso ao vivo (%, ETA) — atualizado pelo worker via progress.py
+    progress_pct: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    progress_done: Mapped[float | None] = mapped_column(Float, nullable=True)
+    progress_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    progress_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    progress_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    eta_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     run: Mapped[Run | None] = relationship(back_populates="jobs")
 
@@ -405,3 +412,15 @@ class BootstrapState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="viewer")  # admin | viewer
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
