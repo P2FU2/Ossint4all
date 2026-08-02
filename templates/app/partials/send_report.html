@@ -1,10 +1,10 @@
 {# Formulário de envio sob demanda — espera default_email_to #}
 {% from "app/partials/macros.html" import tip %}
 <div class="panel">
-  <h2>Enviar relatório por e-mail {{ tip("Enfileira o mesmo relatório do digest (HTML + PDF) para o(s) e-mail(s) informado(s). O worker precisa estar ativo.") }}</h2>
+  <h2>Enviar relatório por e-mail {{ tip("Enfileira o relatório do digest (HTML no corpo + anexo HTML) para o(s) e-mail(s) informado(s). O worker precisa estar ativo.") }}</h2>
   <p class="muted" style="margin-top:-6px;margin-bottom:14px">
-    Gera o relatório atual (HTML + PDF no corpo e anexos) e envia para o endereço informado,
-    sem depender do cron.
+    Gera o relatório atual (HTML no corpo e anexo HTML) e envia para o endereço informado,
+    sem depender do cron. PDF não é enviado por e-mail.
   </p>
   <form class="form-inline send-report-form" method="post" action="/app/actions/send-report">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

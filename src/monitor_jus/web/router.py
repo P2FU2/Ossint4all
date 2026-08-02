@@ -197,6 +197,8 @@ def app_processes(
     outcome: str = Query(""),
     situacao: str = Query(""),
     pending_only: bool = Query(False),
+    sort_by: str = Query("last_movement_at"),
+    sort_dir: str = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=10, le=200),
 ):
@@ -209,6 +211,8 @@ def app_processes(
             outcome=outcome,
             situacao=situacao,
             pending_only=pending_only,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
             page=page,
             page_size=page_size,
         )
@@ -233,6 +237,8 @@ def app_processes_csv(
     outcome: str = Query(""),
     situacao: str = Query(""),
     pending_only: bool = Query(False),
+    sort_by: str = Query("last_movement_at"),
+    sort_dir: str = Query("desc"),
 ) -> Response:
     with session_scope() as session:
         content = processes_svc.processes_csv(
@@ -243,6 +249,8 @@ def app_processes_csv(
             outcome=outcome,
             situacao=situacao,
             pending_only=pending_only,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
         )
     return Response(
         content=content,

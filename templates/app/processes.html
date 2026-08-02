@@ -5,15 +5,17 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Processos {{ tip("Lista do acervo com filtros. Situação vem da capa/movimentações; Resultado é classificação auxiliar interna.") }}</h1>
+    <h1>Processos {{ tip("Lista do acervo com filtros. A ordenação vale para o acervo inteiro (todas as páginas), não só a página atual.") }}</h1>
     <p>
       {{ total }} resultado(s) · página {{ page }}/{{ total_pages }}
       · {{ total_all }} no acervo.
-      Situação oficial inferida da capa/movimentações (ex.: Extinto, Em grau de recurso). Resultado é classificação auxiliar.
+      Ordenado por <strong>{{ sort_labels.get(sort_by, sort_by) }}</strong>
+      ({{ 'mais recente → mais antigo' if sort_dir == 'desc' else 'mais antigo → mais recente' if sort_by == 'last_movement_at' else ('A→Z' if sort_dir == 'asc' else 'Z→A') }}).
+      Situação oficial inferida da capa/movimentações. Resultado é classificação auxiliar.
     </p>
   </div>
   <div class="actions">
-    <a class="btn secondary" href="/app/processos/export.csv?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&situacao={{ filters.situacao }}&pending_only={{ 'true' if filters.pending_only else 'false' }}">Exportar CSV</a>
+    <a class="btn secondary" href="/app/processos/export.csv?{{ qs_export }}">Exportar CSV</a>
   </div>
 </div>
 
@@ -50,6 +52,19 @@
         {% endfor %}
       </select>
     </label>
+    <label>Ordenar por {{ tip("Aplica ao conjunto filtrado inteiro, antes da paginação.") }}
+      <select name="sort_by">
+        {% for key, label in sort_labels.items() %}
+        <option value="{{ key }}" {% if sort_by == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Ordem
+      <select name="sort_dir">
+        <option value="desc" {% if sort_dir == 'desc' %}selected{% endif %}>Decrescente</option>
+        <option value="asc" {% if sort_dir == 'asc' %}selected{% endif %}>Crescente</option>
+      </select>
+    </label>
     <label>Por página
       <select name="page_size">
         {% for n in [25, 50, 100] %}
@@ -68,13 +83,41 @@
   <table class="data table-processos">
     <thead>
       <tr>
-        <th>CNJ</th>
-        <th>Tribunal</th>
-        <th>Classe / assunto</th>
-        <th>Situação</th>
-        <th>Resultado</th>
-        <th>Critérios</th>
-        <th>Última mov.</th>
+        <th>
+          <a class="th-sort {% if header_sorts.numero_cnj.active %}active{% endif %}" href="{{ header_sorts.numero_cnj.href }}">
+            CNJ{% if header_sorts.numero_cnj.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
+        <th>
+          <a class="th-sort {% if header_sorts.tribunal.active %}active{% endif %}" href="{{ header_sorts.tribunal.href }}">
+            Tribunal{% if header_sorts.tribunal.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
+        <th>
+          <a class="th-sort {% if header_sorts.classe.active %}active{% endif %}" href="{{ header_sorts.classe.href }}">
+            Classe / assunto{% if header_sorts.classe.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
+        <th>
+          <a class="th-sort {% if header_sorts.situacao.active %}active{% endif %}" href="{{ header_sorts.situacao.href }}">
+            Situação{% if header_sorts.situacao.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
+        <th>
+          <a class="th-sort {% if header_sorts.outcome.active %}active{% endif %}" href="{{ header_sorts.outcome.href }}">
+            Resultado{% if header_sorts.outcome.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
+        <th>
+          <a class="th-sort {% if header_sorts.criteria.active %}active{% endif %}" href="{{ header_sorts.criteria.href }}">
+            Critérios{% if header_sorts.criteria.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
+        <th>
+          <a class="th-sort {% if header_sorts.last_movement_at.active %}active{% endif %}" href="{{ header_sorts.last_movement_at.href }}">
+            Última mov.{% if header_sorts.last_movement_at.active %} <span class="sort-ind">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>{% endif %}
+          </a>
+        </th>
         <th></th>
       </tr>
     </thead>
@@ -117,13 +160,13 @@
 
   {% if total_pages > 1 %}
   <div class="actions" style="margin-top:16px;justify-content:space-between">
-    <span class="muted">Página {{ page }} de {{ total_pages }}</span>
+    <span class="muted">Página {{ page }} de {{ total_pages }} · ordem global preservada</span>
     <div class="actions">
       {% if has_prev %}
-      <a class="btn ghost" href="/app/processos?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&situacao={{ filters.situacao }}&pending_only={{ 'true' if filters.pending_only else 'false' }}&page={{ page - 1 }}&page_size={{ page_size }}">Anterior</a>
+      <a class="btn ghost" href="/app/processos?{{ qs_prev }}">Anterior</a>
       {% endif %}
       {% if has_next %}
-      <a class="btn secondary" href="/app/processos?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&situacao={{ filters.situacao }}&pending_only={{ 'true' if filters.pending_only else 'false' }}&page={{ page + 1 }}&page_size={{ page_size }}">Próxima</a>
+      <a class="btn secondary" href="/app/processos?{{ qs_next }}">Próxima</a>
       {% endif %}
     </div>
   </div>

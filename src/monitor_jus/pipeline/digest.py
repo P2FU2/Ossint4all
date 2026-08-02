@@ -45,7 +45,7 @@ def build_and_send_digest(
     digest_id: str | None = None,
     recipient: str | None = None,
 ) -> dict[str, Any]:
-    """Cria digest (ou retenta o mesmo) e envia e-mail com HTML + PDF anexos.
+    """Cria digest (ou retenta o mesmo) e envia e-mail com HTML (sem PDF).
 
     `recipient` sobrescreve EMAIL_TO (envio sob demanda pelo painel).
     """
@@ -53,7 +53,7 @@ def build_and_send_digest(
     repo = Repository(session)
 
     if digest_id:
-        report_progress(stage="digest_retry", done=0, total=3, message="Reenvio de digest", force=True)
+        report_progress(stage="digest_retry", done=0, total=2, message="Reenvio de digest", force=True)
         digest = repo.get_digest(digest_id)
         if not digest:
             raise PermanentJobError(f"Digest não encontrado: {digest_id}")
@@ -61,15 +61,7 @@ def build_and_send_digest(
         if not html_path or not html_path.exists():
             raise PermanentJobError("HTML do digest ausente para retry")
         html = html_path.read_text(encoding="utf-8")
-        pdf_path = Path(digest.pdf_path) if digest.pdf_path else html_path.with_suffix(".pdf")
-        report_progress(stage="digest_pdf", done=1, total=3, message="Gerando/atualizando PDF")
-        try:
-            _ensure_pdf(html, pdf_path)
-            digest.pdf_path = str(pdf_path)
-            session.flush()
-        except Exception as exc:  # noqa: BLE001
-            raise RecoverableJobError(f"Falha ao gerar PDF: {exc}", code="PDF_FAILED") from exc
-        report_progress(stage="digest_retry", done=2, total=3, message="Enviando e-mail com anexos")
+        report_progress(stage="digest_retry", done=1, total=2, message="Enviando e-mail")
         return _deliver(
             session, repo, digest, html, settings, run_id, recipient=recipient
         )
@@ -119,12 +111,14 @@ def build_and_send_digest(
     html_path.write_text(html, encoding="utf-8")
     digest.html_path = str(html_path)
 
-    report_progress(stage="digest_pdf", done=3.5, total=5, message="Gerando PDF")
+    # PDF opcional só para arquivo local/histórico — não é anexo de e-mail
+    report_progress(stage="digest_pdf", done=3.5, total=5, message="Arquivando PDF (histórico)")
     try:
         _ensure_pdf(html, pdf_path)
         digest.pdf_path = str(pdf_path)
     except Exception as exc:  # noqa: BLE001
-        raise RecoverableJobError(f"Falha ao gerar PDF: {exc}", code="PDF_FAILED") from exc
+        logger.warning("digest_pdf_skip", extra={"extra": {"err": str(exc)}})
+        digest.pdf_path = None
 
     digest.generated_at = now
     digest.status = DigestStatus.READY.value
@@ -132,7 +126,7 @@ def build_and_send_digest(
     session.flush()
 
     incr("digest_events_total", float(len(events)))
-    report_progress(stage="digest_send", done=4, total=5, message="Enviando e-mail com anexos")
+    report_progress(stage="digest_send", done=4, total=5, message="Enviando e-mail")
     return _deliver(
         session,
         repo,
@@ -165,7 +159,6 @@ def _deliver(
     )
 
     html_file = Path(digest.html_path) if digest.html_path else None
-    pdf_file = Path(digest.pdf_path) if digest.pdf_path else None
     attach_name_base = f"monitor-judicial-{subject_date}"
     attachments: list[Path | dict[str, Any]] = []
     if html_file and html_file.is_file():
@@ -182,18 +175,10 @@ def _deliver(
                 "content": html.encode("utf-8"),
             }
         )
-    if pdf_file and pdf_file.is_file():
-        attachments.append(
-            {
-                "filename": f"{attach_name_base}.pdf",
-                "content": pdf_file.read_bytes(),
-            }
-        )
 
-    # Nota no body sobre anexos
     note = (
         '<p style="font-size:13px;color:#555;margin:12px 0 0">'
-        "Anexos neste e-mail: relatório em <strong>HTML</strong> e <strong>PDF</strong> "
+        "Anexo neste e-mail: relatório em <strong>HTML</strong> "
         "com as mesmas informações do corpo."
         "</p>"
     )

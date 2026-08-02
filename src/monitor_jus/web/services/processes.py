@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Callable
+from urllib.parse import urlencode
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
@@ -32,6 +34,21 @@ from monitor_jus.security import redact_text
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
+DEFAULT_SORT_BY = "last_movement_at"
+DEFAULT_SORT_DIR = "desc"
+
+SORT_LABELS: dict[str, str] = {
+    "last_movement_at": "Última movimentação",
+    "numero_cnj": "CNJ",
+    "tribunal": "Tribunal",
+    "classe": "Classe / assunto",
+    "situacao": "Situação",
+    "outcome": "Resultado",
+    "criteria": "Critérios",
+}
+
+_DT_MIN = datetime.min.replace(tzinfo=timezone.utc)
+_DT_MAX = datetime.max.replace(tzinfo=timezone.utc)
 
 
 def _fmt(dt: Any) -> str:
@@ -64,9 +81,75 @@ def _light_processes(session: Session) -> list[Process]:
                     Process.baseline,
                 )
             )
-            .order_by(Process.numero_cnj.asc())
+            .order_by(
+                Process.last_movement_at.desc().nulls_last(),
+                Process.numero_cnj.asc(),
+            )
         ).all()
     )
+
+
+def _normalize_sort(sort_by: str, sort_dir: str) -> tuple[str, str]:
+    field = (sort_by or DEFAULT_SORT_BY).strip()
+    if field not in SORT_LABELS:
+        field = DEFAULT_SORT_BY
+    direction = (sort_dir or DEFAULT_SORT_DIR).strip().lower()
+    if direction not in ("asc", "desc"):
+        direction = DEFAULT_SORT_DIR if field == "last_movement_at" else "asc"
+    return field, direction
+
+
+def _sort_key_fn(sort_by: str, sort_dir: str) -> Callable[[dict[str, Any]], Any]:
+    reverse = sort_dir == "desc"
+
+    def dt_key(row: dict[str, Any]) -> datetime:
+        val = row.get("_sort_last_movement")
+        if isinstance(val, datetime):
+            if val.tzinfo is None:
+                return val.replace(tzinfo=timezone.utc)
+            return val
+        # nulls no fim em qualquer direção
+        return _DT_MIN if reverse else _DT_MAX
+
+    keys: dict[str, Callable[[dict[str, Any]], Any]] = {
+        "last_movement_at": dt_key,
+        "numero_cnj": lambda r: (r.get("numero_cnj") or "").lower(),
+        "tribunal": lambda r: (r.get("tribunal") or "").lower(),
+        "classe": lambda r: ((r.get("classe") or "") + " " + (r.get("assunto") or "")).lower(),
+        "situacao": lambda r: (r.get("situacao") or "").lower(),
+        "outcome": lambda r: (r.get("outcome") or "").lower(),
+        "criteria": lambda r: (r.get("criteria") or "").lower(),
+    }
+    return keys.get(sort_by) or keys[DEFAULT_SORT_BY]
+
+
+def sort_process_rows(
+    rows: list[dict[str, Any]], *, sort_by: str, sort_dir: str
+) -> list[dict[str, Any]]:
+    """Ordena o conjunto filtrado inteiro (antes da paginação)."""
+    field, direction = _normalize_sort(sort_by, sort_dir)
+    key_fn = _sort_key_fn(field, direction)
+    return sorted(rows, key=key_fn, reverse=(direction == "desc"))
+
+
+def build_query_string(filters: dict[str, Any], **overrides: Any) -> str:
+    """Query string preservando filtros/ordenação/paginação."""
+    data = {
+        "q": filters.get("q") or "",
+        "tribunal": filters.get("tribunal") or "",
+        "oab": filters.get("oab") or "",
+        "outcome": filters.get("outcome") or "",
+        "situacao": filters.get("situacao") or "",
+        "pending_only": "true" if filters.get("pending_only") else "false",
+        "sort_by": filters.get("sort_by") or DEFAULT_SORT_BY,
+        "sort_dir": filters.get("sort_dir") or DEFAULT_SORT_DIR,
+        "page": filters.get("page") or 1,
+        "page_size": filters.get("page_size") or DEFAULT_PAGE_SIZE,
+    }
+    data.update(overrides)
+    # remove vazios opcionais (mantém pending_only/sort sempre)
+    cleaned = {k: v for k, v in data.items() if v not in ("", None)}
+    return urlencode(cleaned)
 
 
 def _payloads_for_placeholders(
@@ -93,8 +176,10 @@ def _filtered_process_rows(
     outcome: str = "",
     situacao: str = "",
     pending_only: bool = False,
+    sort_by: str = DEFAULT_SORT_BY,
+    sort_dir: str = DEFAULT_SORT_DIR,
 ) -> tuple[list[dict[str, Any]], list[str], int]:
-    """Retorna (linhas filtradas, tribunais, total_acervo)."""
+    """Retorna (linhas filtradas e ordenadas no acervo inteiro, tribunais, total_acervo)."""
     _, process_criteria = load_process_criteria(session)
     procs = _light_processes(session)
     payloads = _payloads_for_placeholders(session, procs)
@@ -132,6 +217,7 @@ def _filtered_process_rows(
             include_payload=False,
             payload=payloads.get(proc.id),
         )
+        row["_sort_last_movement"] = proc.last_movement_at
 
         # Persistência leve: se resolvemos status melhor que "---", grava no banco
         if (
@@ -157,6 +243,8 @@ def _filtered_process_rows(
             continue
         filtered.append(row)
 
+    field, direction = _normalize_sort(sort_by, sort_dir)
+    filtered = sort_process_rows(filtered, sort_by=field, sort_dir=direction)
     return filtered, sorted(tribunals), len(procs)
 
 
@@ -169,11 +257,14 @@ def list_processes(
     outcome: str = "",
     situacao: str = "",
     pending_only: bool = False,
+    sort_by: str = DEFAULT_SORT_BY,
+    sort_dir: str = DEFAULT_SORT_DIR,
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
 ) -> dict[str, Any]:
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE))
+    sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
 
     filtered, tribunals, total_all = _filtered_process_rows(
         session,
@@ -183,6 +274,8 @@ def list_processes(
         outcome=outcome,
         situacao=situacao,
         pending_only=pending_only,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
     total = len(filtered)
@@ -191,6 +284,35 @@ def list_processes(
         page = total_pages
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
+
+    filters = {
+        "q": q,
+        "tribunal": tribunal,
+        "oab": oab,
+        "outcome": outcome,
+        "situacao": situacao,
+        "pending_only": pending_only,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+        "page": page,
+        "page_size": page_size,
+    }
+
+    # URLs de cabeçalho: mesmo campo inverte direção; outro campo inicia com default
+    header_sorts: dict[str, dict[str, str]] = {}
+    for field in SORT_LABELS:
+        if field == sort_by:
+            next_dir = "asc" if sort_dir == "desc" else "desc"
+        else:
+            next_dir = "desc" if field == "last_movement_at" else "asc"
+        header_sorts[field] = {
+            "sort_by": field,
+            "sort_dir": next_dir,
+            "active": field == sort_by,
+            "dir": sort_dir if field == sort_by else "",
+            "href": "/app/processos?"
+            + build_query_string(filters, sort_by=field, sort_dir=next_dir, page=1),
+        }
 
     return {
         "processes": page_rows,
@@ -203,14 +325,14 @@ def list_processes(
         "has_next": page < total_pages,
         "tribunals": tribunals,
         "situacao_labels": SITUACAO_LABELS,
-        "filters": {
-            "q": q,
-            "tribunal": tribunal,
-            "oab": oab,
-            "outcome": outcome,
-            "situacao": situacao,
-            "pending_only": pending_only,
-        },
+        "sort_labels": SORT_LABELS,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+        "header_sorts": header_sorts,
+        "qs_export": build_query_string(filters, page=None, page_size=None),
+        "qs_prev": build_query_string(filters, page=page - 1) if page > 1 else "",
+        "qs_next": build_query_string(filters, page=page + 1) if page < total_pages else "",
+        "filters": filters,
     }
 
 

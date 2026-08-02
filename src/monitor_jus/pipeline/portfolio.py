@@ -340,7 +340,14 @@ def build_portfolio(session: Session, *, include_processes: bool = True) -> dict
     if not include_processes:
         return build_portfolio_stats(session)
 
-    processes = list(session.scalars(select(Process).order_by(Process.numero_cnj.asc())).all())
+    processes = list(
+        session.scalars(
+            select(Process).order_by(
+                Process.last_movement_at.desc().nulls_last(),
+                Process.numero_cnj.asc(),
+            )
+        ).all()
+    )
     criteria, process_criteria = load_process_criteria(session)
 
     by_oab: Counter[str] = Counter()
