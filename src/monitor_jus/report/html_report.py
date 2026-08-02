@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from monitor_jus.config import Settings, get_settings
 from monitor_jus.db.models import Event
 from monitor_jus.models import EventType, Priority
+from monitor_jus.official_portal import resolve_official_link
 
 
 SECTION_ORDER = [
@@ -111,6 +112,14 @@ def render_digest_html(
         "processes": [],
         "oab_criteria_count": 0,
     }
+
+    for e in events:
+        if not e.official_link:
+            e.official_link = resolve_official_link(
+                e.numero_cnj,
+                tribunal=e.tribunal,
+                payload=e.payload if isinstance(e.payload, dict) else None,
+            )
 
     urgent = [e for e in events if e.priority == Priority.ALTA.value]
     sections = []

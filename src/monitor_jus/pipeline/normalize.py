@@ -13,6 +13,7 @@ from monitor_jus.pipeline.identity import (
     movement_key,
 )
 from monitor_jus.sources.judit.webhooks import payload_hash
+from monitor_jus.official_portal import resolve_official_link
 from monitor_jus.validators import normalize_cnj
 
 
@@ -136,7 +137,12 @@ def normalize_judit_webhook(
         cached_response=payload.get("cached_response"),
         provider_schema_version=PROVIDER_SCHEMA_VERSION_JUDIT,
         normalizer_version=NORMALIZER_VERSION,
-        official_link=lawsuit.get("url") if isinstance(lawsuit, dict) else None,
+        official_link=resolve_official_link(
+            numero,
+            tribunal=tribunal if isinstance(tribunal, str) else None,
+            payload=lawsuit if isinstance(lawsuit, dict) else None,
+            existing=lawsuit.get("url") if isinstance(lawsuit, dict) else None,
+        ),
     )
 
 

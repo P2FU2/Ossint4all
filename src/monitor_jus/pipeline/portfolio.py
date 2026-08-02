@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from monitor_jus.db.models import Criterion, CriterionLink, Process
+from monitor_jus.official_portal import resolve_official_link
 
 
 def classify_outcome(situacao: str | None, *, last_step: str | None = None) -> str:
@@ -133,6 +134,11 @@ def build_portfolio(session: Session) -> dict[str, Any]:
                 "last_movement_at": _fmt_dt(proc.last_movement_at),
                 "criteria": ", ".join(crits),
                 "baseline": proc.baseline,
+                "official_link": resolve_official_link(
+                    proc.numero_cnj,
+                    tribunal=tribunal,
+                    payload=payload if isinstance(payload, dict) else None,
+                ),
             }
         )
 

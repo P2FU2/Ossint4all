@@ -72,12 +72,31 @@ def session_scope(database_url: str | None = None) -> Iterator[Session]:
         session.close()
 
 
+def _ensure_schema_compat(engine: Engine) -> None:
+    """Ajusta colunas em bancos já existentes (create_all não altera tipos)."""
+    dialect = engine.dialect.name
+    if dialect != "postgresql":
+        return
+    statements = [
+        "ALTER TABLE processes ALTER COLUMN situacao TYPE TEXT",
+        "ALTER TABLE processes ALTER COLUMN grau TYPE VARCHAR(64)",
+    ]
+    with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                conn.execute(text(stmt))
+            except Exception:  # noqa: BLE001
+                # tabela/coluna ainda inexistente ou já no tipo desejado
+                pass
+
+
 def init_db(database_url: str | None = None) -> None:
     from monitor_jus.db import models  # noqa: F401
     from monitor_jus.db.models import Base
 
     engine = get_engine(database_url)
     Base.metadata.create_all(bind=engine)
+    _ensure_schema_compat(engine)
     # seed digest_cursor
     with session_scope(database_url) as session:
         exists = session.execute(text("SELECT 1 FROM digest_cursor WHERE id = 1")).first()

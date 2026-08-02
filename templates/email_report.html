@@ -85,6 +85,7 @@
           <th>Classe / Assunto</th>
           <th>Critério</th>
           <th>Última mov.</th>
+          <th>Portal</th>
         </tr>
       </thead>
       <tbody>
@@ -96,6 +97,13 @@
           <td>{{ p.classe }}<br><span class="muted">{{ p.assunto }}</span></td>
           <td>{{ p.criteria }}</td>
           <td>{{ p.last_movement_at }}</td>
+          <td>
+            {% if p.official_link %}
+            <a href="{{ p.official_link }}">Consulta oficial</a>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -125,11 +133,11 @@
     <h2>Itens urgentes</h2>
     {% for e in urgent %}
     <div class="item">
-      <strong>{{ e.numero_cnj or 'Sem CNJ' }}</strong> — {{ e.tribunal or '—' }}
+      <strong>{% if e.official_link %}<a href="{{ e.official_link }}">{{ e.numero_cnj or 'Sem CNJ' }}</a>{% else %}{{ e.numero_cnj or 'Sem CNJ' }}{% endif %}</strong> — {{ e.tribunal or '—' }}
       <div class="muted">{{ e.event_type }} · prioridade {{ e.priority }} · {{ e.tipo_movimentacao or '—' }}</div>
       <div>{{ e.summary or e.description }}</div>
       {% if e.possible_deadline_flag %}<div><em>Possível prazo identificado. Necessária validação jurídica na publicação oficial.</em></div>{% endif %}
-      {% if e.official_link %}<div><a href="{{ e.official_link }}">Consulta oficial</a></div>{% endif %}
+      {% if e.official_link %}<div><a href="{{ e.official_link }}">Ver no portal oficial do tribunal</a></div>{% endif %}
       {% if e.criterion_refs %}<div class="muted">Critérios: {{ e.criterion_refs | join(', ') }}</div>{% endif %}
     </div>
     {% endfor %}
@@ -142,11 +150,11 @@
     {% else %}
     {% for e in items %}
     <div class="item">
-      <strong>{{ e.numero_cnj or 'Sem CNJ' }}</strong> — {{ e.tribunal or '—' }} · {{ e.priority }}
+      <strong>{% if e.official_link %}<a href="{{ e.official_link }}">{{ e.numero_cnj or 'Sem CNJ' }}</a>{% else %}{{ e.numero_cnj or 'Sem CNJ' }}{% endif %}</strong> — {{ e.tribunal or '—' }} · {{ e.priority }}
       <div class="muted">{{ e.title }}</div>
       <div>{{ e.summary or e.description }}</div>
       {% if e.requires_name_validation %}<div class="muted">Correspondência por nome — requer validação.</div>{% endif %}
-      {% if e.official_link %}<div><a href="{{ e.official_link }}">Consulta oficial</a></div>{% endif %}
+      {% if e.official_link %}<div><a href="{{ e.official_link }}">Ver no portal oficial do tribunal</a></div>{% endif %}
     </div>
     {% endfor %}
     {% endif %}

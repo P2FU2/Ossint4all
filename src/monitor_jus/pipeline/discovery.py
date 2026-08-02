@@ -80,7 +80,7 @@ def _lawsuit_fields(full: dict[str, Any], page_item: dict[str, Any] | None = Non
         "classe": _first_name(data.get("classifications") or data.get("classe")),
         "assunto": _first_name(data.get("subjects") or data.get("assunto")),
         "orgao_julgador": data.get("county") or data.get("orgao_julgador"),
-        "grau": str(data.get("instance") or data.get("grau") or "") or None,
+        "grau": (str(data.get("instance") or data.get("grau") or "")[:64] or None),
         "situacao": str(situacao) if situacao else None,
         "data_distribuicao": _parse_dt(data.get("distribution_date") or data.get("data_distribuicao")),
         "last_movement_at": _parse_dt(last_step.get("step_date") or last_step.get("date")),
