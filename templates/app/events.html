@@ -1,10 +1,11 @@
 {% extends "app/base.html" %}
+{% from "app/partials/macros.html" import tip %}
 {% block title %}Novidades{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Novidades</h1>
-    <p>{{ total }} evento(s) na lista. Após o baseline, só entram movimentações novas.</p>
+    <h1>Novidades {{ tip("Movimentações e alertas detectados após a leitura inicial do acervo. Podem ir para o próximo e-mail.") }}</h1>
+    <p>{{ total }} evento(s) na lista. Após a leitura inicial, só entram movimentações novas.</p>
   </div>
 </div>
 

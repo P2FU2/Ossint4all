@@ -1,9 +1,10 @@
 {% extends "app/base.html" %}
+{% from "app/partials/macros.html" import tip %}
 {% block title %}Critérios{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Critérios</h1>
+    <h1>Critérios {{ tip("OABs, CPFs, nomes e processos usados na discovery. Contagem = processos vinculados a cada critério.") }}</h1>
     <p>{{ active }} ativo(s) de {{ total }} · sincronizados do YAML no banco.</p>
   </div>
   <form method="post" action="/app/actions/sync-criteria">

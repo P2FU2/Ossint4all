@@ -1,3 +1,4 @@
+{% from "app/partials/macros.html" import tip %}
 <div
   id="status-body"
   hx-get="/app/status/partial"
@@ -11,10 +12,10 @@
   </p>
 
   <div class="kpi-grid">
-    <div class="kpi"><div class="label">Aguardando</div><div class="value">{{ job_counts.PENDING }}</div></div>
-    <div class="kpi"><div class="label">Em execução</div><div class="value">{{ job_counts.RUNNING }}</div></div>
-    <div class="kpi"><div class="label">Retry</div><div class="value">{{ job_counts.RETRY }}</div></div>
-    <div class="kpi"><div class="label">Dead</div><div class="value">{{ job_counts.DEAD }}</div></div>
+    <div class="kpi"><div class="label">Aguardando {{ tip("Jobs PENDING na fila.") }}</div><div class="value">{{ job_counts.PENDING }}</div></div>
+    <div class="kpi"><div class="label">Em execução {{ tip("Jobs RUNNING no worker.") }}</div><div class="value">{{ job_counts.RUNNING }}</div></div>
+    <div class="kpi"><div class="label">Retry {{ tip("Jobs que falharam e serão tentados de novo.") }}</div><div class="value">{{ job_counts.RETRY }}</div></div>
+    <div class="kpi"><div class="label">Dead {{ tip("Jobs que esgotaram tentativas — precisam de análise.") }}</div><div class="value">{{ job_counts.DEAD }}</div></div>
   </div>
 
   {% if tracking_hint %}

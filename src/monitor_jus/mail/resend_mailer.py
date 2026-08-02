@@ -41,6 +41,13 @@ def _attachment_from_bytes(content: bytes, filename: str) -> dict[str, Any]:
     }
 
 
+def parse_recipients(raw: str | None) -> list[str]:
+    """Separa e-mails por vírgula ou ponto-e-vírgula."""
+    if not raw:
+        return []
+    return [e.strip() for e in str(raw).replace(";", ",").split(",") if e.strip()]
+
+
 def send_html_email(
     *,
     subject: str,
@@ -48,9 +55,11 @@ def send_html_email(
     settings: Settings | None = None,
     outbox_path: Path | None = None,
     attachments: list[Path | dict[str, Any]] | None = None,
+    to: str | None = None,
 ) -> dict[str, Any]:
     """Envia HTML no body e opcionalmente anexa arquivos (HTML/PDF).
 
+    `to` sobrescreve EMAIL_TO (útil para envio sob demanda pelo painel).
     `attachments` aceita Path ou dict com `filename` + `content` (bytes|str base64).
     """
     settings = settings or get_settings()
@@ -58,11 +67,11 @@ def send_html_email(
         outbox_path.parent.mkdir(parents=True, exist_ok=True)
         outbox_path.write_text(html, encoding="utf-8")
 
-    if not settings.resend_api_key or not settings.email_from or not settings.email_to:
+    recipients = parse_recipients(to) or parse_recipients(settings.email_to)
+    if not settings.resend_api_key or not settings.email_from or not recipients:
         incr("delivery_failures")
-        raise FailedSource("Resend/EMAIL não configurados")
+        raise FailedSource("Resend/EMAIL não configurados (from/to)")
 
-    recipients = [e.strip() for e in settings.email_to.split(",") if e.strip()]
     params: dict[str, Any] = {
         "from": settings.email_from,
         "to": recipients,

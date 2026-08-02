@@ -1,9 +1,10 @@
 {% extends "app/base.html" %}
+{% from "app/partials/macros.html" import tip %}
 {% block title %}Visão geral{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Visão geral</h1>
+    <h1>Visão geral {{ tip("Painel resumido do acervo monitorado, novidades e status do último e-mail.") }}</h1>
     <p>Resumo do acervo e novidades recentes.</p>
   </div>
   <div class="actions">
@@ -13,38 +14,48 @@
   </div>
 </div>
 
-<div class="section-label">Acervo</div>
+{% if is_admin %}
+{% include "app/partials/send_report.html" %}
+{% endif %}
+
+<div class="section-label">Acervo {{ tip("Totais derivados dos processos já descobertos e salvos na base.") }}</div>
 <div class="kpi-grid">
   <div class="kpi">
-    <div class="label">Processos</div>
+    <div class="label">Processos {{ tip("Quantidade total de CNJs no acervo. Em tramitação = com indício de andamento; encerrados = arquivados/extintos etc.") }}</div>
     <div class="value">{{ portfolio.total_processes }}</div>
     <div class="hint">{{ portfolio.active_count }} em tramitação · {{ portfolio.closed_count }} encerrados</div>
   </div>
   <div class="kpi">
-    <div class="label">Sem status claro</div>
+    <div class="label">Sem status claro {{ tip("Capa ou movimentações sem situação útil (ex.: ---, inconsistente). Não significa processo ativo.") }}</div>
     <div class="value">{{ portfolio.undefined_count or 0 }}</div>
     <div class="hint">capa sem indicação útil</div>
   </div>
   <div class="kpi">
-    <div class="label">Novidades pendentes</div>
+    <div class="label">Novidades pendentes {{ tip("Eventos ainda não incluídos em um e-mail enviado (status PENDING_NOTIFY).") }}</div>
     <div class="value">{{ pending_notify }}</div>
     <div class="hint">{{ urgent_pending }} urgentes</div>
   </div>
   <div class="kpi">
-    <div class="label">Último digest</div>
+    <div class="label">Último e-mail enviado {{ tip("Último relatório (digest) gerado/enviado por e-mail — automático ou pelo botão Enviar relatório.") }}</div>
     <div class="value wrap">{{ last_digest.status }}</div>
-    <div class="hint">{{ last_digest.sent_at }} · {{ last_digest.total_events }} itens</div>
+    <div class="hint">{{ last_digest.sent_at }} · {{ last_digest.total_events }} itens · {{ last_digest.recipient }}</div>
   </div>
   <div class="kpi">
-    <div class="label">Baseline</div>
-    <div class="value wrap">{% if bootstrap.completed %}Concluído{% else %}Pendente{% endif %}</div>
-    <div class="hint">{{ bootstrap.baseline_at }}</div>
+    <div class="label">Leitura inicial {{ tip("Primeira varredura histórica do acervo (baseline). Serve de ponto de partida: movimentações anteriores não viram ‘novidade’ no e-mail.") }}</div>
+    <div class="value wrap">{% if bootstrap.completed %}Concluída{% else %}Pendente{% endif %}</div>
+    <div class="hint">
+      {% if bootstrap.completed %}
+      Varredura histórica · {{ bootstrap.baseline_at }}
+      {% else %}
+      Ainda não feita — primeira coleta do acervo
+      {% endif %}
+    </div>
   </div>
 </div>
 
 <div class="panel-grid">
   <div class="panel">
-    <h2>Timeline recente</h2>
+    <h2>Timeline recente {{ tip("Últimas novidades detectadas após a leitura inicial. Só entram movimentações novas ou via tracking.") }}</h2>
     {% if recent_events %}
     <ul class="list-plain">
       {% for e in recent_events %}
@@ -59,23 +70,24 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">Nenhuma novidade recente. Após o baseline, eventos só aparecem com novas movimentações ou tracking ativo.</p>
+    <p class="muted">Nenhuma novidade recente. Após a leitura inicial, eventos só aparecem com novas movimentações ou tracking ativo.</p>
     {% endif %}
   </div>
 
   <div>
     <div class="panel">
-      <h2>Por OAB</h2>
+      <h2>Por OAB {{ tip("Contagem por OAB cadastrada como critério. Processos no TJRJ podem ter vindo de OAB/SP, OAB/DF ou busca por nome — tribunal ≠ seccional da OAB.") }}</h2>
       {% if portfolio.by_oab %}
       <div class="chip-cloud">
         {% for k, v in portfolio.by_oab.items() %}
-        <span class="badge soft" title="{{ k }}: {{ v }}">{{ k }}: {{ v }}</span>
+        <span class="badge soft {% if v == 0 %}badge-zero{% endif %}" title="{{ k }}: {{ v }} processo(s) vinculado(s) a este critério">{{ k }}: {{ v }}</span>
         {% endfor %}
       </div>
+      <p class="muted tip-note">OAB com 0 = critério ativo, mas ainda sem processos vinculados pela Judit. Tribunal (ex.: TJRJ) não implica OAB/RJ.</p>
       {% else %}
-      <p class="muted">Sem vínculos OAB ainda.</p>
+      <p class="muted">Sem critérios OAB ativos.</p>
       {% endif %}
-      <h2 style="margin-top:20px">Por tribunal</h2>
+      <h2 style="margin-top:20px">Por tribunal {{ tip("Distribuição dos processos pelo tribunal do CNJ/capa — independente da seccional da OAB que descobriu o processo.") }}</h2>
       {% if portfolio.by_tribunal %}
       <div class="chip-cloud">
         {% for k, v in portfolio.by_tribunal.items() %}
@@ -90,12 +102,12 @@
 </div>
 
 {% if is_admin %}
-<div class="section-label" style="margin-top:8px">Operações (admin)</div>
+<div class="section-label" style="margin-top:8px">Operações (admin) {{ tip("Indicadores operacionais visíveis só para administradores.") }}</div>
 
 {% if live and (live.headline or live.active_count) %}
 {% from "app/partials/progress_bars.html" import progress_row %}
 <div class="panel">
-  <h2>Em execução agora</h2>
+  <h2>Em execução agora {{ tip("Jobs RUNNING/PENDING com progresso ao vivo (discovery, refresh, digest etc.).") }}</h2>
   {% if live.headline %}
   {{ progress_row(live.headline) }}
   {% endif %}
@@ -105,7 +117,7 @@
 
 <div class="panel-grid">
   <div class="panel">
-    <h2>Atenção</h2>
+    <h2>Atenção {{ tip("Alertas de fila, dead letter, webhooks e falhas de e-mail.") }}</h2>
     <ul class="attention list-plain">
       {% for a in attention %}
       <li><span class="badge {{ a.level }}">{{ a.level }}</span> {{ a.text }}</li>
@@ -113,13 +125,13 @@
     </ul>
   </div>
   <div class="panel">
-    <h2>Integrações &amp; fila</h2>
+    <h2>Integrações &amp; fila {{ tip("Flags Judit, DataJud, OpenRouter e tamanho da fila de jobs.") }}</h2>
     <div class="tag-row">
       <span class="badge {% if health.judit_flags_on %}ok{% else %}warn{% endif %}">Judit {{ health.judit_flags_on }}/{{ health.judit_flags_total }}</span>
       <span class="badge {% if health.datajud %}ok{% else %}warn{% endif %}">DataJud</span>
       <span class="badge {% if health.openrouter %}ok{% else %}warn{% endif %}">OpenRouter</span>
     </div>
-    <p class="muted" style="margin-top:12px">Digest → {{ health.email_to }}</p>
+    <p class="muted" style="margin-top:12px">E-mail padrão → {{ health.email_to }}</p>
     <p class="muted">Fila: {{ job_counts.PENDING + job_counts.RUNNING + job_counts.RETRY }} ativos · DEAD {{ job_counts.DEAD }} · RUN {{ job_counts.RUNNING }}</p>
     <div class="actions" style="margin-top:12px">
       <a class="btn secondary" href="/app/status">Pipeline</a>
@@ -127,7 +139,7 @@
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="run_type" value="DAILY_DIGEST" />
-        <button class="btn ghost" type="submit" data-confirm="Enfileirar digest diário agora?">Disparar digest</button>
+        <button class="btn ghost" type="submit" data-confirm="Enfileirar envio de e-mail (digest) agora?">Disparar e-mail</button>
       </form>
     </div>
   </div>

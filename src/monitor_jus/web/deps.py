@@ -11,6 +11,7 @@ from starlette.responses import RedirectResponse
 from monitor_jus.config import get_settings
 from monitor_jus.db.models import User
 from monitor_jus.db.session import session_scope
+from monitor_jus.pipeline.status_oficial import SITUACAO_LABELS
 from monitor_jus.web.auth import (
     SESSION_USER_KEY,
     ensure_csrf,
@@ -79,6 +80,7 @@ def template_context(request: Request, user: User | None = None, **extra: object
         "brand": "Authentic",
         "app_name": "Monitor Judicial",
         "outcome_labels": OUTCOME_LABELS,
+        "situacao_labels": SITUACAO_LABELS,
         "is_admin": bool(user and user.role == "admin"),
         "tz": settings.tz,
     }

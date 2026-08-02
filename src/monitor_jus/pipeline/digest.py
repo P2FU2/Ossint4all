@@ -43,8 +43,12 @@ def build_and_send_digest(
     run_id: str | None = None,
     settings: Settings | None = None,
     digest_id: str | None = None,
+    recipient: str | None = None,
 ) -> dict[str, Any]:
-    """Cria digest (ou retenta o mesmo) e envia e-mail com HTML + PDF anexos."""
+    """Cria digest (ou retenta o mesmo) e envia e-mail com HTML + PDF anexos.
+
+    `recipient` sobrescreve EMAIL_TO (envio sob demanda pelo painel).
+    """
     settings = settings or get_settings()
     repo = Repository(session)
 
@@ -66,7 +70,9 @@ def build_and_send_digest(
         except Exception as exc:  # noqa: BLE001
             raise RecoverableJobError(f"Falha ao gerar PDF: {exc}", code="PDF_FAILED") from exc
         report_progress(stage="digest_retry", done=2, total=3, message="Enviando e-mail com anexos")
-        return _deliver(session, repo, digest, html, settings, run_id)
+        return _deliver(
+            session, repo, digest, html, settings, run_id, recipient=recipient
+        )
 
     report_progress(stage="digest_load", done=0, total=5, message="Carregando eventos", force=True)
     cursor = repo.get_digest_cursor()
@@ -127,7 +133,16 @@ def build_and_send_digest(
 
     incr("digest_events_total", float(len(events)))
     report_progress(stage="digest_send", done=4, total=5, message="Enviando e-mail com anexos")
-    return _deliver(session, repo, digest, html, settings, run_id, portfolio=portfolio)
+    return _deliver(
+        session,
+        repo,
+        digest,
+        html,
+        settings,
+        run_id,
+        portfolio=portfolio,
+        recipient=recipient,
+    )
 
 
 def _deliver(
@@ -138,6 +153,7 @@ def _deliver(
     settings: Settings,
     run_id: str | None,
     portfolio: dict[str, Any] | None = None,
+    recipient: str | None = None,
 ) -> dict[str, Any]:
     digest.status = DigestStatus.DELIVERY_PENDING.value
     session.flush()
@@ -188,10 +204,11 @@ def _deliver(
     else:
         html_with_note = html + note
 
+    to_addr = (recipient or "").strip() or settings.email_to
     notification = repo.create_notification(
         run_id=run_id,
         digest_id=digest.id,
-        recipient=settings.email_to,
+        recipient=to_addr,
         status="PENDING",
         html_path=digest.html_path,
     )
@@ -202,6 +219,7 @@ def _deliver(
             settings=settings,
             outbox_path=html_file,
             attachments=attachments,
+            to=to_addr,
         )
         notification.status = "SENT"
         notification.provider_message_id = result.get("message_id")
@@ -228,6 +246,7 @@ def _deliver(
             "attachments": result.get("attachments", 0),
             "html_path": digest.html_path,
             "pdf_path": digest.pdf_path,
+            "recipient": to_addr,
         }
     except Exception as exc:  # noqa: BLE001
         notification.status = "FAILED"

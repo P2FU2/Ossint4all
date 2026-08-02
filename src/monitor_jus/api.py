@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
@@ -58,6 +58,17 @@ if _static_dir.is_dir():
     app.mount("/static", _CachedStaticFiles(directory=str(_static_dir)), name="static")
 
 app.include_router(ui_router)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon_ico() -> FileResponse:
+    ico = _static_dir / "favicon.ico"
+    if ico.is_file():
+        return FileResponse(ico, media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
+    svg = _static_dir / "favicon.svg"
+    if svg.is_file():
+        return FileResponse(svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+    raise HTTPException(status_code=404, detail="favicon não encontrado")
 
 
 class EnqueueBody(BaseModel):

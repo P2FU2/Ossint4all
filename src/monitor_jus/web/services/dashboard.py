@@ -35,6 +35,22 @@ def _fmt(dt: Any) -> str:
         return str(dt)[:16]
 
 
+_DIGEST_STATUS_LABELS = {
+    DigestStatus.BUILDING.value: "Gerando",
+    DigestStatus.READY.value: "Pronto",
+    DigestStatus.DELIVERY_PENDING.value: "Aguardando envio",
+    DigestStatus.SENT.value: "Enviado",
+    DigestStatus.PARTIAL.value: "Parcial",
+    DigestStatus.FAILED.value: "Falhou",
+}
+
+
+def _digest_status_label(status: str | None) -> str:
+    if not status:
+        return "—"
+    return _DIGEST_STATUS_LABELS.get(status, status)
+
+
 def build_dashboard(
     session: Session,
     settings: Settings,
@@ -159,13 +175,15 @@ def build_dashboard(
                     {"level": "error", "text": f"{dead_letters} job(s) em dead letter"}
                 )
         if last_digest and last_digest.status == DigestStatus.FAILED.value:
-            attention.append({"level": "error", "text": "Último digest falhou"})
+            attention.append({"level": "error", "text": "Último e-mail falhou"})
         if stale_webhooks:
             attention.append(
                 {"level": "warn", "text": f"{stale_webhooks} webhook(s) PENDING há mais de 6h"}
             )
         if bootstrap and not bootstrap.completed:
-            attention.append({"level": "warn", "text": "Bootstrap ainda não concluído"})
+            attention.append(
+                {"level": "warn", "text": "Leitura inicial do acervo ainda não concluída"}
+            )
         if live.get("running_count", 0) > 1:
             attention.append(
                 {
@@ -185,7 +203,8 @@ def build_dashboard(
         "urgent_pending": urgent_pending,
         "last_digest": {
             "id": last_digest.id if last_digest else None,
-            "status": last_digest.status if last_digest else "—",
+            "status": _digest_status_label(last_digest.status if last_digest else None),
+            "status_raw": last_digest.status if last_digest else None,
             "reference_date": last_digest.reference_date if last_digest else "—",
             "total_events": last_digest.total_events if last_digest else 0,
             "sent_at": _fmt(last_digest.sent_at if last_digest else None),
@@ -212,4 +231,5 @@ def build_dashboard(
             for e in recent_events
         ],
         "health": health,
+        "default_email_to": settings.email_to or "",
     }

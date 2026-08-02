@@ -105,13 +105,19 @@ def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | Non
         sync_criteria_from_config(session, settings)
         return run_discovery(session, settings=settings, bootstrap_mode=False)
     if job_type == JobType.DAILY_DIGEST.value:
-        return build_and_send_digest(session, run_id=run_id, settings=settings)
+        return build_and_send_digest(
+            session,
+            run_id=run_id,
+            settings=settings,
+            recipient=payload.get("email_to") or payload.get("recipient"),
+        )
     if job_type == JobType.DELIVERY_RETRY.value:
         return build_and_send_digest(
             session,
             run_id=run_id,
             settings=settings,
             digest_id=payload.get("digest_id"),
+            recipient=payload.get("email_to") or payload.get("recipient"),
         )
     if job_type == JobType.PROCESS_REFRESH.value:
         return run_tracking(session, settings=settings)

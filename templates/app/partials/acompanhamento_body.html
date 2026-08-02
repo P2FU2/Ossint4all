@@ -1,4 +1,5 @@
 {% from "app/partials/progress_bars.html" import progress_row %}
+{% from "app/partials/macros.html" import tip %}
 <div
   id="acompanhamento-body"
   hx-get="/app/acompanhamento/partial"
@@ -12,9 +13,9 @@
   </p>
 
   <div class="kpi-grid">
-    <div class="kpi"><div class="label">Na fila</div><div class="value">{{ active_count }}</div></div>
-    <div class="kpi"><div class="label">Em execução</div><div class="value">{{ running_count }}</div></div>
-    <div class="kpi"><div class="label">Aguardando</div><div class="value">{{ pending_count }}</div></div>
+    <div class="kpi"><div class="label">Na fila {{ tip("Soma de jobs PENDING + RUNNING + RETRY.") }}</div><div class="value">{{ active_count }}</div></div>
+    <div class="kpi"><div class="label">Em execução {{ tip("Jobs RUNNING neste momento (worker processando).") }}</div><div class="value">{{ running_count }}</div></div>
+    <div class="kpi"><div class="label">Aguardando {{ tip("Jobs PENDING ainda não iniciados.") }}</div><div class="value">{{ pending_count }}</div></div>
   </div>
 
   {% if running_count > 1 %}
@@ -40,6 +41,8 @@
       <p class="muted">Nenhum job ativo. A fila está ociosa.</p>
     {% endif %}
   </div>
+
+  {% include "app/partials/send_report.html" %}
 
   <div class="panel">
     <h2>Disparar</h2>

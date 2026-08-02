@@ -16,12 +16,12 @@
 
 <div class="kpi-grid">
   <div class="kpi">
-    <div class="label">Resultado estimado</div>
-    <div class="value wrap">{{ outcome_labels.get(process.outcome, process.outcome) }}</div>
+    <div class="label">Situação oficial</div>
+    <div class="value wrap" title="{{ process.situacao }}">{{ process.situacao }}</div>
   </div>
   <div class="kpi">
-    <div class="label">Situação na capa</div>
-    <div class="value wrap" title="{{ process.situacao }}">{{ process.situacao }}</div>
+    <div class="label">Resultado estimado</div>
+    <div class="value wrap">{{ outcome_labels.get(process.outcome, process.outcome) }}</div>
   </div>
   <div class="kpi">
     <div class="label">Distribuição</div>

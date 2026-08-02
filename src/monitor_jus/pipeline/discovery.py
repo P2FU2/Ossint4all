@@ -15,6 +15,7 @@ from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.pipeline.normalize import normalize_datajud_source
 from monitor_jus.pipeline.portfolio import criterion_display_label
+from monitor_jus.pipeline.status_oficial import clean_status_text, extract_status_from_payload
 from monitor_jus.progress import report as report_progress
 from monitor_jus.sources.datajud import DataJudClient
 from monitor_jus.sources.judit.lawsuits import JuditLawsuitsService
@@ -71,19 +72,17 @@ def _lawsuit_fields(full: dict[str, Any], page_item: dict[str, Any] | None = Non
         tribunal = tribunal.get("name") or tribunal.get("acronym")
 
     last_step = data.get("last_step") if isinstance(data.get("last_step"), dict) else {}
-    situacao = (
-        data.get("status")
-        or data.get("phase")
-        or data.get("situacao")
-        or last_step.get("content")
-    )
+    # Não gravar "---" / placeholders: preferir status oficial inferido do payload
+    situacao = extract_status_from_payload(data if isinstance(data, dict) else None)
+    if not situacao:
+        situacao = clean_status_text(last_step.get("content"))
     return {
         "tribunal": str(tribunal) if tribunal else None,
         "classe": _first_name(data.get("classifications") or data.get("classe")),
         "assunto": _first_name(data.get("subjects") or data.get("assunto")),
         "orgao_julgador": data.get("county") or data.get("orgao_julgador"),
         "grau": (str(data.get("instance") or data.get("grau") or "")[:64] or None),
-        "situacao": str(situacao) if situacao else None,
+        "situacao": situacao,
         "data_distribuicao": _parse_dt(data.get("distribution_date") or data.get("data_distribuicao")),
         "last_movement_at": _parse_dt(last_step.get("step_date") or last_step.get("date")),
         "payload": data if data else None,

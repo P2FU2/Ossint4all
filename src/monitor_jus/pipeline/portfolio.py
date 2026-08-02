@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session, load_only
 
 from monitor_jus.db.models import Criterion, CriterionLink, Process
 from monitor_jus.official_portal import resolve_official_link
+from monitor_jus.pipeline.status_oficial import (
+    is_placeholder_status,
+    resolve_situacao_oficial,
+)
 
 _PLACEHOLDERS = {
     "",
@@ -65,6 +69,7 @@ _ENCERRADO = (
     "baixado",
     "baixa definitiva",
     "extin",
+    "extinto",
     "transitad",
     "finalizad",
     "encerrad",
@@ -110,6 +115,7 @@ _TRAMITACAO = (
     "apens",
     "suspens",
     "sobrestad",
+    "grau de recurso",
 )
 
 
@@ -190,6 +196,16 @@ def load_process_criteria(session: Session) -> tuple[dict[str, Criterion], dict[
     return criteria, process_criteria
 
 
+def _include_all_oab_criteria(criteria: dict[str, Criterion], by_oab: Counter[str]) -> None:
+    """Garante que toda OAB ativa apareça no painel, mesmo com 0 processos vinculados."""
+    for crit in criteria.values():
+        if crit.criterion_type != "OAB":
+            continue
+        label = criterion_display_label(crit)
+        if label not in by_oab:
+            by_oab[label] = 0
+
+
 def _stats_from_counters(
     *,
     total: int,
@@ -240,6 +256,8 @@ def build_portfolio_stats(session: Session) -> dict[str, Any]:
             if c.startswith("OAB "):
                 by_oab[c] += 1
 
+    _include_all_oab_criteria(criteria, by_oab)
+
     return _stats_from_counters(
         total=len(processes),
         by_outcome=by_outcome,
@@ -254,25 +272,42 @@ def serialize_process_row(
     *,
     criteria_labels: list[str] | None = None,
     include_payload: bool = False,
+    payload: dict[str, Any] | None = None,
+    last_movement: str | None = None,
 ) -> dict[str, Any]:
     """Serializa um processo para UI/CSV (payload opcional)."""
-    payload = proc.payload if include_payload and isinstance(proc.payload, dict) else {}
+    if payload is None and include_payload and isinstance(proc.payload, dict):
+        payload = proc.payload
+    payload = payload if isinstance(payload, dict) else {}
+
     last_step = None
-    if include_payload and isinstance(payload.get("last_step"), dict):
+    if isinstance(payload.get("last_step"), dict):
         last_step = str(
             payload["last_step"].get("content") or payload["last_step"].get("nome") or ""
         )
-    elif include_payload and payload.get("last_step_content"):
+    elif payload.get("last_step_content"):
         last_step = str(payload.get("last_step_content"))
 
-    phase = payload.get("phase") or payload.get("status") if payload else None
-    phase_s = str(phase) if phase else None
-    situacao = proc.situacao or phase_s
-    outcome = classify_outcome(situacao, last_step=last_step)
+    situacao_raw = proc.situacao
+    # Se capa veio como "---", resolve pelo payload / última movimentação
+    use_payload = payload if (payload and is_placeholder_status(situacao_raw)) else (
+        payload if payload else None
+    )
+    situacao_full, situacao_key = resolve_situacao_oficial(
+        situacao_raw,
+        payload=use_payload or (payload or None),
+        last_movement=last_movement or last_step,
+    )
+    outcome = classify_outcome(situacao_full if situacao_full != "—" else None, last_step=last_step)
+    # Extinto / arquivado → encerrado
+    if situacao_key in ("extinto", "arquivado", "baixado"):
+        outcome = "encerrado"
+    elif situacao_key == "em_grau_de_recurso":
+        outcome = "ativo"
+
     tribunal = proc.tribunal or "N/D"
     crits = criteria_labels or ["—"]
     crits_sorted = sorted(crits, key=lambda c: (0 if c.startswith("OAB ") else 1, c))
-    situacao_full = situacao or "—"
 
     return {
         "id": proc.id,
@@ -282,6 +317,7 @@ def serialize_process_row(
         "assunto": proc.assunto or "—",
         "situacao": situacao_full,
         "situacao_short": _truncate(situacao_full, 120),
+        "situacao_key": situacao_key,
         "outcome": outcome,
         "grau": proc.grau or "—",
         "orgao_julgador": proc.orgao_julgador or "—",
@@ -321,6 +357,8 @@ def build_portfolio(session: Session, *, include_processes: bool = True) -> dict
             if c.startswith("OAB "):
                 by_oab[c] += 1
         rows.append(row)
+
+    _include_all_oab_criteria(criteria, by_oab)
 
     return _stats_from_counters(
         total=len(processes),

@@ -1,4 +1,11 @@
-from monitor_jus.pipeline.portfolio import classify_outcome
+from collections import Counter
+from types import SimpleNamespace
+
+from monitor_jus.pipeline.portfolio import (
+    _include_all_oab_criteria,
+    classify_outcome,
+    criterion_display_label,
+)
 
 
 def test_classify_outcome_exito():
@@ -29,3 +36,21 @@ def test_classify_outcome_indefinido_placeholder():
 
 def test_classify_outcome_default_tramitacao():
     assert classify_outcome("Remetidos os Autos a Outro Juízo") == "ativo"
+
+
+def test_criterion_display_label_oab_with_letter_suffix():
+    crit = SimpleNamespace(criterion_type="OAB", value="RJ:2556A", label=None)
+    assert criterion_display_label(crit) == "OAB 2556A/RJ"
+
+
+def test_include_all_oab_criteria_shows_zero_counts():
+    criteria = {
+        "1": SimpleNamespace(criterion_type="OAB", value="RJ:2556A", label=None),
+        "2": SimpleNamespace(criterion_type="OAB", value="SP:138094", label=None),
+        "3": SimpleNamespace(criterion_type="NOME", value="Fulano", label="Fulano"),
+    }
+    by_oab = Counter({"OAB 138094/SP": 10})
+    _include_all_oab_criteria(criteria, by_oab)
+    assert by_oab["OAB 138094/SP"] == 10
+    assert by_oab["OAB 2556A/RJ"] == 0
+    assert "Nome · Fulano" not in by_oab

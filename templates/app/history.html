@@ -1,12 +1,17 @@
 {% extends "app/base.html" %}
+{% from "app/partials/macros.html" import tip %}
 {% block title %}Histórico{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Histórico</h1>
-    <p>Digests consolidados e entregas de e-mail · {{ total }} registro(s).</p>
+    <h1>Histórico {{ tip("Cada linha é um relatório gerado (automático ou enviado pela UI), com status de entrega e anexos.") }}</h1>
+    <p>Relatórios e entregas de e-mail · {{ total }} registro(s).</p>
   </div>
 </div>
+
+{% if is_admin %}
+{% include "app/partials/send_report.html" %}
+{% endif %}
 
 <div class="panel">
   <div class="table-wrap">

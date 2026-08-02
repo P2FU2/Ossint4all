@@ -112,6 +112,7 @@ a:hover { text-decoration: underline; }
   display: grid;
   grid-template-columns: var(--sidebar) 1fr;
   min-height: 100vh;
+  width: 100%;
 }
 .sidebar {
   position: sticky;
@@ -248,10 +249,14 @@ details.admin-menu .admin-nav {
 .sidebar-foot button:hover { background: rgba(255, 255, 255, 0.08); }
 
 .main {
-  padding: 32px 36px 56px;
-  max-width: 1180px;
+  padding: 28px 28px 48px;
   width: 100%;
+  max-width: none;
   min-width: 0;
+}
+.main.main-wide {
+  padding-left: 20px;
+  padding-right: 20px;
 }
 .page-head {
   display: flex;
@@ -275,7 +280,7 @@ details.admin-menu .admin-nav {
   color: var(--muted);
   width: 100%;
   font-size: 0.95rem;
-  max-width: 52rem;
+  max-width: 72rem;
 }
 
 .section-label {
@@ -447,14 +452,12 @@ details.admin-menu .admin-nav {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  margin: 0 -4px;
-  padding: 0 4px;
 }
 table.data {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
-  min-width: 640px;
+  min-width: 0;
 }
 table.data th, table.data td {
   text-align: left;
@@ -472,12 +475,11 @@ table.data th {
 }
 table.data tr:hover td { background: rgba(0, 0, 0, 0.015); }
 table.data td {
-  max-width: 280px;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-table.data td.cell-tight { max-width: 140px; }
-table.data td.cell-wide { max-width: 360px; }
+table.data td.cell-tight { white-space: nowrap; }
+table.data td.cell-wide { min-width: 0; }
 .cell-clamp,
 table.data .cell-clamp {
   display: -webkit-box;
@@ -485,6 +487,37 @@ table.data .cell-clamp {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+/* Acervo: usa toda a largura disponível */
+.panel.panel-full {
+  width: 100%;
+}
+table.data.table-processos {
+  table-layout: fixed;
+  min-width: 960px;
+}
+table.data.table-processos th:nth-child(1),
+table.data.table-processos td:nth-child(1) { width: 15%; }
+table.data.table-processos th:nth-child(2),
+table.data.table-processos td:nth-child(2) { width: 6%; }
+table.data.table-processos th:nth-child(3),
+table.data.table-processos td:nth-child(3) { width: 20%; }
+table.data.table-processos th:nth-child(4),
+table.data.table-processos td:nth-child(4) { width: 22%; }
+table.data.table-processos th:nth-child(5),
+table.data.table-processos td:nth-child(5) { width: 11%; }
+table.data.table-processos th:nth-child(6),
+table.data.table-processos td:nth-child(6) { width: 14%; }
+table.data.table-processos th:nth-child(7),
+table.data.table-processos td:nth-child(7) { width: 8%; }
+table.data.table-processos th:nth-child(8),
+table.data.table-processos td:nth-child(8) { width: 4%; }
+table.data.table-processos td.cell-tight {
+  white-space: normal;
+}
+table.data.table-processos .cell-clamp {
+  -webkit-line-clamp: 2;
 }
 
 .muted { color: var(--muted); }
@@ -509,13 +542,21 @@ table.data .cell-clamp {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--muted);
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 280px;
+}
+.filters label.checkbox-row {
+  flex: 0 1 auto;
+  max-width: none;
 }
 .filters input, .filters select {
   padding: 9px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   font: inherit;
-  min-width: 140px;
+  min-width: 0;
+  width: 100%;
   background: #fafafa;
   max-width: 100%;
 }
@@ -627,6 +668,29 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   font: inherit;
+}
+.send-report-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.send-report-form input[type="text"],
+.send-report-form input[type="email"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  font: inherit;
+  background: #fafafa;
+}
+.send-report-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: #fff;
 }
 .checkbox-row {
   display: flex;
@@ -748,4 +812,98 @@ details.run-jobs summary { cursor: pointer; color: var(--muted); font-size: 0.85
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
+}
+
+/* Tooltips */
+.with-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05em;
+  height: 1.05em;
+  margin-left: 4px;
+  font-size: 0.78em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted);
+  cursor: help;
+  vertical-align: middle;
+  border-radius: 999px;
+  user-select: none;
+}
+.tip:hover,
+.tip:focus {
+  color: var(--accent);
+  outline: none;
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(4px);
+  width: max(220px, min(320px, 70vw));
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #1d1d1f;
+  color: #f5f5f7;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  letter-spacing: 0;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  z-index: 40;
+  white-space: normal;
+}
+.tip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1d1d1f;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s;
+  z-index: 41;
+}
+.tip:hover::after,
+.tip:focus::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+.tip:hover::before,
+.tip:focus::before {
+  opacity: 1;
+  visibility: visible;
+}
+.kpi .label .tip,
+h1 .tip,
+h2 .tip,
+.section-label .tip,
+label .tip {
+  font-size: 0.85em;
+}
+.tip-note {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.badge-zero {
+  opacity: 0.65;
+  border-style: dashed;
 }

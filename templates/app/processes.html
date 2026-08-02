@@ -1,27 +1,29 @@
 {% extends "app/base.html" %}
+{% from "app/partials/macros.html" import tip %}
 {% block title %}Processos{% endblock %}
+{% block main_class %}main-wide{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Processos</h1>
+    <h1>Processos {{ tip("Lista do acervo com filtros. Situação vem da capa/movimentações; Resultado é classificação auxiliar interna.") }}</h1>
     <p>
       {{ total }} resultado(s) · página {{ page }}/{{ total_pages }}
       · {{ total_all }} no acervo.
-      Situação vem da capa; o resultado estimado é heurística textual.
+      Situação oficial inferida da capa/movimentações (ex.: Extinto, Em grau de recurso). Resultado é classificação auxiliar.
     </p>
   </div>
   <div class="actions">
-    <a class="btn secondary" href="/app/processos/export.csv?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&pending_only={{ 'true' if filters.pending_only else 'false' }}">Exportar CSV</a>
+    <a class="btn secondary" href="/app/processos/export.csv?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&situacao={{ filters.situacao }}&pending_only={{ 'true' if filters.pending_only else 'false' }}">Exportar CSV</a>
   </div>
 </div>
 
-<div class="panel">
+<div class="panel panel-full">
   <form class="filters" method="get" action="/app/processos">
     <input type="hidden" name="page" value="1" />
-    <label>Busca
+    <label>Busca {{ tip("CNJ, classe processual ou assunto.") }}
       <input name="q" value="{{ filters.q }}" placeholder="CNJ, classe, assunto" />
     </label>
-    <label>Tribunal
+    <label>Tribunal {{ tip("Tribunal do processo (CNJ/capa), não a seccional da OAB.") }}
       <select name="tribunal">
         <option value="">Todos</option>
         {% for t in tribunals %}
@@ -29,10 +31,18 @@
         {% endfor %}
       </select>
     </label>
-    <label>OAB / critério
+    <label>OAB / critério {{ tip("Filtra pelo critério que descobriu o processo (OAB, nome, CPF…).") }}
       <input name="oab" value="{{ filters.oab }}" placeholder="OAB ou responsável" />
     </label>
-    <label>Resultado estimado
+    <label>Situação {{ tip("Situação oficial inferida (Extinto, Em grau de recurso, etc.).") }}
+      <select name="situacao">
+        <option value="">Todas</option>
+        {% for key, label in situacao_labels.items() %}
+        <option value="{{ key }}" {% if filters.situacao == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Resultado estimado {{ tip("Classificação auxiliar (tramitação, encerrado, êxito…). Não substitui a situação oficial.") }}
       <select name="outcome">
         <option value="">Todos</option>
         {% for key, label in outcome_labels.items() %}
@@ -55,7 +65,7 @@
   </form>
 
   <div class="table-wrap">
-  <table class="data">
+  <table class="data table-processos">
     <thead>
       <tr>
         <th>CNJ</th>
@@ -81,10 +91,14 @@
           <div class="muted cell-clamp">{{ p.assunto }}</div>
         </td>
         <td class="cell-wide" title="{{ p.situacao }}">
-          <div class="cell-clamp">{{ p.situacao_short or p.situacao }}</div>
+          <div class="cell-clamp">
+            <span class="badge {% if p.situacao_key == 'extinto' or p.situacao_key == 'arquivado' %}error{% elif p.situacao_key == 'em_grau_de_recurso' %}em_andamento{% elif p.situacao_key == 'sem_informacao' %}warn{% else %}soft{% endif %}">
+              {{ p.situacao_short or p.situacao }}
+            </span>
+          </div>
         </td>
         <td class="cell-tight">
-          <span class="badge {% if p.outcome == 'exito' %}ok{% elif p.outcome == 'derrota' %}error{% elif p.outcome == 'ativo' %}em_andamento{% elif p.outcome == 'encerrado' %}soft{% else %}warn{% endif %}" title="Estimativa com base no texto da situação">
+          <span class="badge {% if p.outcome == 'exito' %}ok{% elif p.outcome == 'derrota' %}error{% elif p.outcome == 'ativo' %}em_andamento{% elif p.outcome == 'encerrado' %}soft{% else %}warn{% endif %}" title="Classificação auxiliar">
             {{ outcome_labels.get(p.outcome, p.outcome) }}
           </span>
         </td>
@@ -106,10 +120,10 @@
     <span class="muted">Página {{ page }} de {{ total_pages }}</span>
     <div class="actions">
       {% if has_prev %}
-      <a class="btn ghost" href="/app/processos?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&pending_only={{ 'true' if filters.pending_only else 'false' }}&page={{ page - 1 }}&page_size={{ page_size }}">Anterior</a>
+      <a class="btn ghost" href="/app/processos?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&situacao={{ filters.situacao }}&pending_only={{ 'true' if filters.pending_only else 'false' }}&page={{ page - 1 }}&page_size={{ page_size }}">Anterior</a>
       {% endif %}
       {% if has_next %}
-      <a class="btn secondary" href="/app/processos?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&pending_only={{ 'true' if filters.pending_only else 'false' }}&page={{ page + 1 }}&page_size={{ page_size }}">Próxima</a>
+      <a class="btn secondary" href="/app/processos?q={{ filters.q }}&tribunal={{ filters.tribunal }}&oab={{ filters.oab }}&outcome={{ filters.outcome }}&situacao={{ filters.situacao }}&pending_only={{ 'true' if filters.pending_only else 'false' }}&page={{ page + 1 }}&page_size={{ page_size }}">Próxima</a>
       {% endif %}
     </div>
   </div>

@@ -9,9 +9,12 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from email_validator import EmailNotValidError, validate_email
+
 from monitor_jus.config import Settings
 from monitor_jus.db.models import Job, Run
 from monitor_jus.db.repository import Repository, utcnow
+from monitor_jus.mail.resend_mailer import parse_recipients
 from monitor_jus.models import JobStatus, RunMode, RunStatus, RunType
 from monitor_jus.web.auth import write_audit
 
@@ -91,6 +94,21 @@ def assert_heavy_job_allowed(session: Session, run_type: str) -> None:
         )
 
 
+def normalize_email_to(raw: str) -> str:
+    """Valida e normaliza um ou mais e-mails (separados por vírgula)."""
+    parts = parse_recipients(raw)
+    if not parts:
+        raise ValueError("Informe ao menos um e-mail de destino")
+    cleaned: list[str] = []
+    for part in parts:
+        try:
+            info = validate_email(part, check_deliverability=False)
+            cleaned.append(info.normalized)
+        except EmailNotValidError as exc:
+            raise ValueError(f"E-mail inválido ({part}): {exc}") from exc
+    return ",".join(cleaned)
+
+
 def enqueue_from_ui(
     session: Session,
     settings: Settings,
@@ -131,3 +149,21 @@ def enqueue_from_ui(
         details={"run_type": run_type, "run_id": run.id, "payload": payload or {}},
     )
     return {"run_id": run.id, "status": "accepted"}
+
+
+def enqueue_report_email(
+    session: Session,
+    settings: Settings,
+    *,
+    username: str,
+    email_to: str,
+) -> dict[str, str]:
+    """Enfileira relatório (mesmo fluxo do digest) para o(s) e-mail(s) informado(s)."""
+    normalized = normalize_email_to(email_to)
+    return enqueue_from_ui(
+        session,
+        settings,
+        run_type=RunType.DAILY_DIGEST.value,
+        username=username,
+        payload={"email_to": normalized, "source": "ui_send_report"},
+    )

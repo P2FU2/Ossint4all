@@ -120,6 +120,7 @@ def app_dashboard(request: Request, user: User = Depends(require_user)):
 
 @router.get("/app/acompanhamento", response_model=None)
 def app_acompanhamento(request: Request, user: User = Depends(require_admin)):
+    settings = get_settings()
     with session_scope() as session:
         action_svc.cancel_stale_pending_jobs(session, hours=2.0)
         data = progress_svc.build_progress_board(session)
@@ -129,6 +130,7 @@ def app_acompanhamento(request: Request, user: User = Depends(require_admin)):
         user,
         flash=_pop_flash(request),
         **data,
+        default_email_to=settings.email_to or "",
         nav="acompanhamento",
         nav_group="admin",
     )
@@ -136,6 +138,7 @@ def app_acompanhamento(request: Request, user: User = Depends(require_admin)):
 
 @router.get("/app/acompanhamento/partial", response_model=None)
 def app_acompanhamento_partial(request: Request, user: User = Depends(require_admin)):
+    settings = get_settings()
     with session_scope() as session:
         data = progress_svc.build_progress_board(session)
     return render(
@@ -143,6 +146,7 @@ def app_acompanhamento_partial(request: Request, user: User = Depends(require_ad
         "app/partials/acompanhamento_body.html",
         user,
         **data,
+        default_email_to=settings.email_to or "",
         nav="acompanhamento",
         nav_group="admin",
     )
@@ -188,6 +192,7 @@ def app_processes(
     tribunal: str = Query(""),
     oab: str = Query(""),
     outcome: str = Query(""),
+    situacao: str = Query(""),
     pending_only: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=10, le=200),
@@ -199,6 +204,7 @@ def app_processes(
             tribunal=tribunal,
             oab=oab,
             outcome=outcome,
+            situacao=situacao,
             pending_only=pending_only,
             page=page,
             page_size=page_size,
@@ -222,6 +228,7 @@ def app_processes_csv(
     tribunal: str = Query(""),
     oab: str = Query(""),
     outcome: str = Query(""),
+    situacao: str = Query(""),
     pending_only: bool = Query(False),
 ) -> Response:
     with session_scope() as session:
@@ -231,6 +238,7 @@ def app_processes_csv(
             tribunal=tribunal,
             oab=oab,
             outcome=outcome,
+            situacao=situacao,
             pending_only=pending_only,
         )
     return Response(
@@ -304,6 +312,7 @@ def app_event_detail(request: Request, event_id: str, user: User = Depends(requi
 
 @router.get("/app/historico", response_model=None)
 def app_history(request: Request, user: User = Depends(require_user)):
+    settings = get_settings()
     with session_scope() as session:
         data = history_svc.list_digests(session)
     return render(
@@ -312,6 +321,7 @@ def app_history(request: Request, user: User = Depends(require_user)):
         user,
         flash=_pop_flash(request),
         **data,
+        default_email_to=settings.email_to or "",
         nav="historico",
         nav_group="consulta",
     )
@@ -418,6 +428,34 @@ def app_enqueue(
         _flash(request, f"Job enfileirado: {run_type} · run {result['run_id'][:8]}…", "ok")
     except ValueError as exc:
         _flash(request, str(exc), "error")
+    return RedirectResponse(url="/app/acompanhamento", status_code=303)
+
+
+@router.post("/app/actions/send-report")
+def app_send_report(
+    request: Request,
+    user: User = Depends(require_admin),
+    csrf_token: str = Form(""),
+    email_to: str = Form(...),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    settings = get_settings()
+    try:
+        with session_scope() as session:
+            result = action_svc.enqueue_report_email(
+                session,
+                settings,
+                username=user.username,
+                email_to=email_to,
+            )
+        _flash(
+            request,
+            f"Relatório enfileirado para {email_to.strip()} · run {result['run_id'][:8]}…",
+            "ok",
+        )
+    except ValueError as exc:
+        _flash(request, str(exc), "error")
+        return RedirectResponse(url="/app", status_code=303)
     return RedirectResponse(url="/app/acompanhamento", status_code=303)
 
 
