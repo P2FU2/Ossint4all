@@ -916,3 +916,25 @@ label .tip {
 .panel-grid {
   overflow: visible;
 }
+
+/* Ordenação por cabeçalho na tabela de processos */
+.th-sort {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.th-sort:hover {
+  color: var(--accent, #2f6fed);
+  text-decoration: underline;
+}
+.th-sort.active {
+  color: var(--accent, #2f6fed);
+  font-weight: 650;
+}
+.th-sort .sort-ind {
+  font-size: 0.72em;
+  opacity: 0.85;
+}
