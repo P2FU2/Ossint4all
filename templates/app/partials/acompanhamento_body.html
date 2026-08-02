@@ -1,4 +1,4 @@
-{% from "app/partials/progress_bars.html" import progress_row %}
+{% from "app/partials/progress_bars.html" import progress_row with context %}
 {% from "app/partials/macros.html" import tip %}
 <div
   id="acompanhamento-body"
@@ -42,7 +42,7 @@
   {% if headline %}
   <div class="panel">
     <h2>Em destaque</h2>
-    {{ progress_row(headline) }}
+    {{ progress_row(headline, csrf_token) }}
   </div>
   {% endif %}
 
@@ -50,7 +50,7 @@
     <h2>Jobs em andamento / fila</h2>
     {% if active %}
       {% for j in active %}
-        {{ progress_row(j) }}
+        {{ progress_row(j, csrf_token) }}
       {% endfor %}
     {% else %}
       <p class="muted">Nenhum job ativo. A fila está ociosa.</p>
@@ -95,7 +95,7 @@
     <h2>Recentes</h2>
     {% if recent %}
       {% for j in recent %}
-        {{ progress_row(j) }}
+        {{ progress_row(j, csrf_token) }}
       {% endfor %}
     {% else %}
       <p class="muted">Ainda sem histórico de jobs concluídos.</p>

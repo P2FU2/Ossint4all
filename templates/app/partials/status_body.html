@@ -23,10 +23,10 @@
   {% endif %}
 
   {% if live and live.headline %}
-  {% from "app/partials/progress_bars.html" import progress_row %}
+  {% from "app/partials/progress_bars.html" import progress_row with context %}
   <div class="panel">
     <h2>Progresso ao vivo <a href="/app/acompanhamento" class="muted" style="font-size:0.85rem;font-weight:500">ver tudo →</a></h2>
-    {{ progress_row(live.headline) }}
+    {{ progress_row(live.headline, csrf_token) }}
     {% if live.active_count > 1 %}
     <p class="muted">+ {{ live.active_count - 1 }} outro(s) na fila · <a href="/app/acompanhamento">Acompanhamento</a></p>
     {% endif %}
@@ -112,10 +112,10 @@
                   {% if j.progress_message %}<div class="muted cell-clamp">{{ j.progress_stage }} — {{ j.progress_message }}</div>{% endif %}
                   {% if j.last_error %}<div class="muted cell-clamp">{{ j.last_error }}</div>{% endif %}
                   {% if j.can_cancel %}
-                  <form method="post" action="/app/actions/cancel-job" style="margin-top:6px">
+                  <form method="post" action="/app/actions/cancel-job" style="margin-top:6px" class="js-csrf-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <input type="hidden" name="job_id" value="{{ j.id }}" />
-                    <input type="hidden" name="next" value="/app/status" />
+                    <input type="hidden" name="next_path" value="/app/status" />
                     <button class="btn ghost" type="submit" data-confirm="Cancelar job {{ j.job_type }}?">Cancelar job</button>
                   </form>
                   {% endif %}
@@ -127,10 +127,10 @@
           </td>
           <td>
             {% if r.can_cancel %}
-            <form method="post" action="/app/actions/cancel-run">
+            <form method="post" action="/app/actions/cancel-run" class="js-csrf-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <input type="hidden" name="run_id" value="{{ r.id }}" />
-              <input type="hidden" name="next" value="/app/status" />
+              <input type="hidden" name="next_path" value="/app/status" />
               <button class="btn ghost" type="submit" data-confirm="Cancelar run {{ r.run_type }} e seus jobs?">Cancelar</button>
             </form>
             {% endif %}

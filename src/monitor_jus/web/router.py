@@ -435,16 +435,26 @@ def app_enqueue(
     return RedirectResponse(url="/app/acompanhamento", status_code=303)
 
 
+def _safe_app_path(raw: str, default: str) -> str:
+    path = (raw or "").strip() or default
+    return path if path.startswith("/app/") else default
+
+
 @router.post("/app/actions/cancel-run")
 def app_cancel_run(
     request: Request,
     user: User = Depends(require_admin),
     csrf_token: str = Form(""),
     run_id: str = Form(...),
-    next: str = Form("/app/status"),
+    next_path: str = Form("/app/status"),
 ) -> RedirectResponse:
-    require_csrf(request, csrf_token)
-    redirect_to = next if next.startswith("/app/") else "/app/status"
+    redirect_to = _safe_app_path(next_path, "/app/status")
+    from monitor_jus.web.auth import validate_csrf
+
+    token = csrf_token or request.headers.get("x-csrf-token")
+    if not validate_csrf(request.session, token):
+        _flash(request, "CSRF inválido — recarregue a página e tente cancelar de novo", "error")
+        return RedirectResponse(url=redirect_to, status_code=303)
     try:
         with session_scope() as session:
             result = action_svc.cancel_run(
@@ -466,10 +476,15 @@ def app_cancel_job(
     user: User = Depends(require_admin),
     csrf_token: str = Form(""),
     job_id: str = Form(...),
-    next: str = Form("/app/acompanhamento"),
+    next_path: str = Form("/app/acompanhamento"),
 ) -> RedirectResponse:
-    require_csrf(request, csrf_token)
-    redirect_to = next if next.startswith("/app/") else "/app/acompanhamento"
+    redirect_to = _safe_app_path(next_path, "/app/acompanhamento")
+    from monitor_jus.web.auth import validate_csrf
+
+    token = csrf_token or request.headers.get("x-csrf-token")
+    if not validate_csrf(request.session, token):
+        _flash(request, "CSRF inválido — recarregue a página e tente cancelar de novo", "error")
+        return RedirectResponse(url=redirect_to, status_code=303)
     try:
         with session_scope() as session:
             result = action_svc.cancel_job(

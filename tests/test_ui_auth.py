@@ -68,3 +68,62 @@ def test_app_requires_login(ui_client: TestClient):
     r = ui_client.get("/app", follow_redirects=False)
     assert r.status_code in (303, 307)
     assert "/login" in r.headers.get("location", "")
+
+
+def _login(client: TestClient) -> str:
+    page = client.get("/login")
+    marker = 'name="csrf_token" value="'
+    csrf = page.text.split(marker, 1)[1].split('"', 1)[0]
+    client.post(
+        "/login",
+        data={"username": "admin", "password": "senha-forte-123", "csrf_token": csrf},
+        follow_redirects=False,
+    )
+    # CSRF da sessão após login (página autenticada)
+    dash = client.get("/app/acompanhamento")
+    assert dash.status_code == 200
+    assert marker in dash.text
+    return dash.text.split(marker, 1)[1].split('"', 1)[0]
+
+
+def test_cancel_job_accepts_valid_csrf(ui_client: TestClient, tmp_path, monkeypatch):
+    csrf = _login(ui_client)
+    from monitor_jus.db.repository import Repository
+    from monitor_jus.db.session import session_scope
+    from monitor_jus.models import JobStatus
+
+    with session_scope() as session:
+        repo = Repository(session)
+        run = repo.create_run("BOOTSTRAP", "ui")
+        job = repo.enqueue_job(run.id, "BOOTSTRAP", max_attempts=3)
+        job_id = job.id
+
+    r = ui_client.post(
+        "/app/actions/cancel-job",
+        data={
+            "csrf_token": csrf,
+            "job_id": job_id,
+            "next_path": "/app/acompanhamento",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "/app/acompanhamento" in r.headers.get("location", "")
+
+    with session_scope() as session:
+        from monitor_jus.db.models import Job
+
+        job = session.get(Job, job_id)
+        assert job is not None
+        assert job.status == JobStatus.CANCELLED.value
+
+
+def test_cancel_job_empty_csrf_redirects_with_flash(ui_client: TestClient):
+    _login(ui_client)
+    r = ui_client.post(
+        "/app/actions/cancel-job",
+        data={"csrf_token": "", "job_id": "does-not-matter", "next_path": "/app/acompanhamento"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "/app/acompanhamento" in r.headers.get("location", "")

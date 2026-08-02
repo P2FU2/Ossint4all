@@ -66,7 +66,9 @@ def require_admin(user: User = Depends(require_user)) -> User:
 
 
 def require_csrf(request: Request, csrf_token: str | None) -> None:
-    if not validate_csrf(request.session, csrf_token):
+    # Aceita também header (fallback para forms HTMX/JS)
+    token = csrf_token or request.headers.get("x-csrf-token")
+    if not validate_csrf(request.session, token):
         raise HTTPException(status_code=400, detail="CSRF inválido — recarregue a página")
 
 
@@ -76,7 +78,6 @@ def template_context(request: Request, user: User | None = None, **extra: object
     csrf = ensure_csrf(request.session)
     ctx: dict = {
         "user": user,
-        "csrf_token": csrf,
         "brand": "Authentic",
         "app_name": "Monitor Judicial",
         "outcome_labels": OUTCOME_LABELS,
@@ -85,6 +86,8 @@ def template_context(request: Request, user: User | None = None, **extra: object
         "tz": settings.tz,
     }
     ctx.update(extra)
+    # Sempre por último — evita extra sobrescrever o token
+    ctx["csrf_token"] = csrf
     return ctx
 
 

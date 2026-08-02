@@ -1,4 +1,23 @@
 /* Helpers mínimos do painel */
+function csrfFromMeta() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute("content") || "" : "";
+}
+
+function syncFormCsrf(form) {
+  if (!(form instanceof HTMLFormElement)) return;
+  const token = csrfFromMeta();
+  if (!token) return;
+  let input = form.querySelector('input[name="csrf_token"]');
+  if (!input) {
+    input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "csrf_token";
+    form.appendChild(input);
+  }
+  input.value = token;
+}
+
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-confirm]");
   if (!el) return;
@@ -6,6 +25,26 @@ document.addEventListener("click", (ev) => {
   if (!window.confirm(msg)) {
     ev.preventDefault();
     ev.stopImmediatePropagation();
+  }
+});
+
+/* Garante CSRF válido mesmo se o macro Jinja/HTMX deixou o campo vazio */
+document.addEventListener(
+  "submit",
+  (ev) => {
+    const form = ev.target;
+    if (form instanceof HTMLFormElement) syncFormCsrf(form);
+  },
+  true
+);
+
+document.body.addEventListener("htmx:afterSwap", (ev) => {
+  const root = ev.detail && ev.detail.elt;
+  if (!root || !root.querySelector) return;
+  const fresh = root.querySelector('input[name="csrf_token"]');
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (fresh && fresh.value && meta) {
+    meta.setAttribute("content", fresh.value);
   }
 });
 

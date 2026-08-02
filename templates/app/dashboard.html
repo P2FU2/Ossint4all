@@ -109,11 +109,11 @@
 <div class="section-label" style="margin-top:8px">Operações (admin) {{ tip("Indicadores operacionais visíveis só para administradores.") }}</div>
 
 {% if live and (live.headline or live.active_count) %}
-{% from "app/partials/progress_bars.html" import progress_row %}
+{% from "app/partials/progress_bars.html" import progress_row with context %}
 <div class="panel">
   <h2>Em execução agora {{ tip("Jobs RUNNING/PENDING com progresso ao vivo (discovery, refresh, digest etc.).") }}</h2>
   {% if live.headline %}
-  {{ progress_row(live.headline) }}
+  {{ progress_row(live.headline, csrf_token) }}
   {% endif %}
   <p class="muted">{{ live.running_count }} em execução · {{ live.pending_count }} na fila · <a href="/app/acompanhamento">abrir acompanhamento</a></p>
 </div>
