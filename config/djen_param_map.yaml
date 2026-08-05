@@ -1,6 +1,5 @@
-# Mapeamento domínio → query params da Comunica API (DJEN).
-# Ajuste após `python -m monitor_jus.sources.djen.probe`.
-# Nomes abaixo são o contrato esperado; o probe valida/ajusta.
+# Contrato confirmado pelo probe (2026-08-05) — Comunica API
+# python -m monitor_jus.sources.djen.probe → data/outbox/djen_probe.json
 
 base_url: "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
 
@@ -18,8 +17,14 @@ params:
 
 defaults:
   size: 50
-  max_size: 100
+  max_size: 100   # API aceita até 100; size=200 é truncado no client
 
 response:
   items_key: items
   total_key: count
+  # Observações do probe:
+  # - count pode saturar em 10000 em buscas amplas
+  # - itensPorPagina=2 pode devolver mais itens (mínimo efetivo da API)
+  # - campos úteis no item: id, hash, numero_processo, numeroprocessocommascara,
+  #   data_disponibilizacao, siglaTribunal, texto, tipoComunicacao, link,
+  #   destinatarios[], destinatarioadvogados[].advogado{nome,numero_oab,uf_oab}

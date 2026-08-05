@@ -1,4 +1,4 @@
-"""Extração de campos de uma comunicação DJEN."""
+"""Extração de campos de uma comunicação DJEN (contrato Comunica API)."""
 
 from __future__ import annotations
 
@@ -24,18 +24,65 @@ def _first_str(payload: dict[str, Any], keys: tuple[str, ...]) -> str | None:
     return None
 
 
+def _collect_from_destinatarioadvogados(
+    payload: dict[str, Any],
+) -> tuple[list[str], list[CanonicalOab]]:
+    names: list[str] = []
+    oabs: list[CanonicalOab] = []
+    rows = payload.get("destinatarioadvogados")
+    if not isinstance(rows, list):
+        return names, oabs
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        adv = row.get("advogado") if isinstance(row.get("advogado"), dict) else row
+        nome = adv.get("nome")
+        if isinstance(nome, str) and nome.strip():
+            names.append(nome.strip())
+        numero = adv.get("numero_oab") or adv.get("numeroOab")
+        uf = adv.get("uf_oab") or adv.get("ufOab")
+        if numero:
+            try:
+                oabs.append(
+                    canonicalize_oab(
+                        str(numero),
+                        default_state=str(uf).upper() if uf else None,
+                    )
+                )
+            except OabCanonicalizeError:
+                pass
+    return names, oabs
+
+
+def _collect_party_names(payload: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for key in ("destinatarios", "partes"):
+        val = payload.get(key)
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, str) and item.strip():
+                    names.append(item.strip())
+                elif isinstance(item, dict):
+                    n = item.get("nome") or item.get("name")
+                    if isinstance(n, str) and n.strip():
+                        names.append(n.strip())
+    return names
+
+
 def extract_communication(payload: dict[str, Any]) -> dict[str, Any]:
-    text = _first_str(
-        payload,
-        ("texto", "conteudo", "conteudoPublicacao", "inteiroTeor", "body", "text", "mensagem"),
-    ) or ""
-    court = _first_str(
-        payload,
-        ("siglaTribunal", "tribunal", "court", "sigla"),
-    )
+    text = _first_str(payload, ("texto", "conteudo", "body", "text")) or ""
+    court = _first_str(payload, ("siglaTribunal", "tribunal", "sigla"))
+
+    # Preferir CNJ mascarado; fallback dígitos / texto
     process_raw = _first_str(
         payload,
-        ("numeroProcesso", "numero_processo", "processo", "numero_cnj", "cnj"),
+        (
+            "numeroprocessocommascara",
+            "numero_processo",
+            "numeroProcesso",
+            "processo",
+            "cnj",
+        ),
     )
     if not process_raw:
         m = _CNJ_IN_TEXT.search(text)
@@ -44,56 +91,34 @@ def extract_communication(payload: dict[str, Any]) -> dict[str, Any]:
     parts = normalize_cnj(process_raw or "")
     process_number = parts.numero_formatado if parts else process_raw
 
-    external_id = _first_str(
-        payload,
-        ("id", "idComunicacao", "codigo", "hash", "uuid"),
-    )
+    # id numérico da comunicação é estável → DJEN:{id}
+    external_id = _first_str(payload, ("id", "hash", "numeroComunicacao"))
+
     availability = _first_str(
         payload,
-        ("dataDisponibilizacao", "data_disponibilizacao", "disponibilizacao", "availabilityDate"),
+        (
+            "data_disponibilizacao",
+            "datadisponibilizacao",
+            "dataDisponibilizacao",
+        ),
     )
-    publication = _first_str(
-        payload,
-        ("dataPublicacao", "data_publicacao", "publicationDate"),
-    )
+    publication = _first_str(payload, ("dataPublicacao", "data_publicacao"))
     comm_type = _first_str(
         payload,
-        ("tipoComunicacao", "tipo", "type", "meio"),
+        ("tipoComunicacao", "tipoDocumento", "meio", "meiocompleto"),
     ) or "COMUNICACAO"
 
-    lawyer_names: list[str] = []
-    for key in ("nomeAdvogado", "advogados", "destinatarios", "partes"):
-        val = payload.get(key)
-        if isinstance(val, str) and val.strip():
-            lawyer_names.append(val.strip())
-        elif isinstance(val, list):
-            for item in val:
-                if isinstance(item, str) and item.strip():
-                    lawyer_names.append(item.strip())
-                elif isinstance(item, dict):
-                    n = item.get("nome") or item.get("name")
-                    if isinstance(n, str) and n.strip():
-                        lawyer_names.append(n.strip())
+    lawyer_names, structured_oabs = _collect_from_destinatarioadvogados(payload)
+    lawyer_names.extend(_collect_party_names(payload))
 
-    oabs: list[CanonicalOab] = extract_oabs_from_text(text, default_state=None)
-    # campos estruturados
-    oab_num = _first_str(payload, ("numeroOab", "oab", "oabNumero"))
-    oab_uf = _first_str(payload, ("ufOab", "uf", "seccional"))
-    if oab_num:
-        try:
-            oabs.append(
-                canonicalize_oab(
-                    f"{oab_uf or ''}{oab_num}" if oab_uf else oab_num,
-                    default_state=oab_uf,
-                )
-            )
-        except OabCanonicalizeError:
-            pass
+    oabs: list[CanonicalOab] = list(structured_oabs)
+    oabs.extend(extract_oabs_from_text(text, default_state=None))
 
-    # dedupe oabs
-    uniq: dict[str, CanonicalOab] = {}
+    uniq_oabs: dict[str, CanonicalOab] = {}
     for o in oabs:
-        uniq[o.canonical or f"{o.number}:{o.state}:{o.suffix}"] = o
+        uniq_oabs[o.canonical or f"{o.number}:{o.state}:{o.suffix}"] = o
+
+    link = _first_str(payload, ("link", "url", "official_url"))
 
     return {
         "external_id": external_id,
@@ -104,6 +129,10 @@ def extract_communication(payload: dict[str, Any]) -> dict[str, Any]:
         "publication_date": publication,
         "raw_text": text,
         "lawyer_names": list(dict.fromkeys(lawyer_names)),
-        "oabs": list(uniq.values()),
-        "parties": lawyer_names,
+        "oabs": list(uniq_oabs.values()),
+        "parties": list(dict.fromkeys(_collect_party_names(payload))),
+        "source_link": link,
+        "hash": payload.get("hash"),
+        "nome_orgao": _first_str(payload, ("nomeOrgao",)),
+        "nome_classe": _first_str(payload, ("nomeClasse",)),
     }
