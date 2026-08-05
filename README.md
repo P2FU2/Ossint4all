@@ -298,7 +298,7 @@ TZ=America/Sao_Paulo
 | Tema | Comportamento atual |
 |------|---------------------|
 | OAB RJ `2556A` vs `2556` | YAML e sync usam a inscrição real; busca Judit tenta variante sem letra; painel liga processos pelas partes |
-| Por OAB = 0 | Conta vínculos ao critério (não o tribunal). TJRJ ≠ OAB/RJ |
+| Por OAB baixo vs total | Conta CNJs com a OAB no registro DJEN ou vínculo. Processos só por nome (sem OAB no DJEN) ficam de fora. Sincronize Critérios para religar o histórico. Tribunal ≠ seccional da OAB. |
 | Situação oficial | Inferida da capa/movimentações (Extinto, Em grau de recurso…); filtro em Processos |
 | Jobs zumbis | `RUNNING` sem heartbeat → cancelados; UI mostra “Travado” |
 | Cancelar na UI | Admin cancela run/job em Pipeline e Acompanhamento |

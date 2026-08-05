@@ -128,35 +128,6 @@ def classify_match(
                 process_number=cnj.numero_formatado,
             )
 
-    # OAB exata (UF + número + sufixo)
-    for crit in criteria:
-        if crit.criterion_type != "OAB":
-            continue
-        crit_oab = crit.oab
-        if not crit_oab or not crit_oab.state:
-            continue
-        for hit in oabs:
-            if hit.matches_criterion(crit_oab):
-                matched.append(crit.value)
-                return MatchEvidence(
-                    status=MatchStatus.CONFIRMED_OAB,
-                    reasons=[f"OAB canônica {hit.canonical}"],
-                    matched_criteria=matched,
-                    oabs_found=oab_strs,
-                    names_found=lawyer_names,
-                    process_number=cnj.numero_formatado if cnj else process_number,
-                )
-            # Mesmo número/UF com sufixo divergente → nunca confirmar
-            if (
-                hit.state == crit_oab.state
-                and hit.digits == crit_oab.digits
-                and (hit.suffix or None) != (crit_oab.suffix or None)
-            ):
-                reasons.append(
-                    f"OAB {hit.canonical or hit.original} diverge do critério "
-                    f"{crit_oab.canonical} (sufixo)"
-                )
-
     name_criteria = [c for c in criteria if c.criterion_type == "NOME"]
     full_name_hits: list[MonitoredCriterion] = []
     fragment_hits: list[MonitoredCriterion] = []
@@ -171,14 +142,44 @@ def classify_match(
             if _name_is_fragment(name, monitored):
                 fragment_hits.append(crit)
 
-    # Nome completo + OAB no texto (mesmo sem casar sufixo? só se OAB casar)
-    # Já tratado acima. Nome + processo conhecido → confirmado processo se CNJ no acervo
-    # (caller pode passar process already known via criteria PROCESSO — done)
+    # OAB exata (UF + número + sufixo) — coleta todas as OABs casadas
+    oab_matched: list[str] = []
+    oab_reasons: list[str] = []
+    for crit in criteria:
+        if crit.criterion_type != "OAB":
+            continue
+        crit_oab = crit.oab
+        if not crit_oab or not crit_oab.state:
+            continue
+        for hit in oabs:
+            if hit.matches_criterion(crit_oab):
+                if crit.value not in oab_matched:
+                    oab_matched.append(crit.value)
+                    oab_reasons.append(f"OAB canônica {hit.canonical}")
+                break
+            # Mesmo número/UF com sufixo divergente → nunca confirmar
+            if (
+                hit.state == crit_oab.state
+                and hit.digits == crit_oab.digits
+                and (hit.suffix or None) != (crit_oab.suffix or None)
+            ):
+                reasons.append(
+                    f"OAB {hit.canonical or hit.original} diverge do critério "
+                    f"{crit_oab.canonical} (sufixo)"
+                )
 
-    if full_name_hits and oabs:
-        # Nome + qualquer OAB monitorada no texto (já confirmado acima se casou).
-        # Se há OAB no texto mas não casou critério → não confirma por nome sozinho.
-        pass
+    if oab_matched:
+        matched.extend(oab_matched)
+        # Também vincula nome completo quando a OAB confirma a identidade
+        matched.extend(c.value for c in full_name_hits if c.value not in matched)
+        return MatchEvidence(
+            status=MatchStatus.CONFIRMED_OAB,
+            reasons=oab_reasons or ["OAB monitorada no registro"],
+            matched_criteria=matched,
+            oabs_found=oab_strs,
+            names_found=lawyer_names,
+            process_number=cnj.numero_formatado if cnj else process_number,
+        )
 
     if full_name_hits and court:
         matched.extend(c.value for c in full_name_hits)

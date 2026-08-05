@@ -5,6 +5,7 @@ from monitor_jus.pipeline.portfolio import (
     _include_all_oab_criteria,
     classify_outcome,
     criterion_display_label,
+    oab_labels_for_process,
 )
 
 
@@ -54,3 +55,22 @@ def test_include_all_oab_criteria_shows_zero_counts():
     assert by_oab["OAB 138094/SP"] == 10
     assert by_oab["OAB 2556A/RJ"] == 0
     assert "Nome · Fulano" not in by_oab
+
+
+def test_oab_labels_from_payload_even_without_link():
+    """Processo achado só por nome, mas com OAB no DJEN, conta na Por OAB."""
+    crit_sp = SimpleNamespace(criterion_type="OAB", value="SP:138094", label=None)
+    crit_rj = SimpleNamespace(criterion_type="OAB", value="RJ:2556", label=None)
+    payload = {
+        "djen": {
+            "destinatarioadvogados": [
+                {"advogado": {"numero_oab": "138094", "uf_oab": "SP"}}
+            ]
+        }
+    }
+    labels = oab_labels_for_process(
+        link_labels=["Nome · Fernando Crespo Queiroz Neves"],
+        payload=payload,
+        oab_criteria=[crit_sp, crit_rj],
+    )
+    assert labels == {"OAB 138094/SP"}

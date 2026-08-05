@@ -26,6 +26,20 @@ def test_confirmed_oab_sp():
     assert ev.status == MatchStatus.CONFIRMED_OAB
 
 
+def test_confirmed_oab_also_links_matching_name():
+    ev = classify_match(
+        process_number=None,
+        court="TJSP",
+        text="Fernando Crespo Queiroz Neves OAB/SP 138094",
+        lawyer_names=["Fernando Crespo Queiroz Neves"],
+        oabs=[canonicalize_oab("SP-138094")],
+        criteria=CRITERIA,
+    )
+    assert ev.status == MatchStatus.CONFIRMED_OAB
+    assert "SP:138094" in ev.matched_criteria
+    assert "Fernando Crespo Queiroz Neves" in ev.matched_criteria
+
+
 def test_rj_2556a_does_not_confirm_2556():
     ev = classify_match(
         process_number=None,

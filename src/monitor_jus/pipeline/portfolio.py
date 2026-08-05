@@ -209,6 +209,33 @@ def _include_all_oab_criteria(criteria: dict[str, Criterion], by_oab: Counter[st
             by_oab[label] = 0
 
 
+def _oab_criteria_list(criteria: dict[str, Criterion]) -> list[Criterion]:
+    return [c for c in criteria.values() if c.criterion_type == "OAB"]
+
+
+def oab_labels_for_process(
+    *,
+    link_labels: list[str] | None,
+    payload: dict[str, Any] | None,
+    oab_criteria: list[Criterion],
+) -> set[str]:
+    """OABs monitoradas atribuídas ao processo: vínculo de critério ∪ OAB no payload DJEN."""
+    from monitor_jus.oab_match import criterion_matches_oab, extract_oabs_from_payload
+
+    labels = {c for c in (link_labels or []) if c.startswith("OAB ")}
+    if not oab_criteria:
+        return labels
+    identities = extract_oabs_from_payload(payload)
+    if not identities:
+        return labels
+    for crit in oab_criteria:
+        for ident in identities:
+            if criterion_matches_oab(crit.value, ident):
+                labels.add(criterion_display_label(crit))
+                break
+    return labels
+
+
 def _highlight_tribunals() -> list[str]:
     from monitor_jus.config import get_settings, load_cobertura
 
@@ -240,6 +267,8 @@ def _stats_from_counters(
     by_tribunal: Counter[str],
     oab_criteria_count: int,
     processes: list[dict[str, Any]] | None = None,
+    without_oab_count: int = 0,
+    oab_attributed_count: int = 0,
 ) -> dict[str, Any]:
     return {
         "total_processes": total,
@@ -251,11 +280,22 @@ def _stats_from_counters(
         "by_outcome": dict(by_outcome),
         "processes": processes or [],
         "oab_criteria_count": oab_criteria_count,
+        "without_oab_count": without_oab_count,
+        "oab_attributed_count": oab_attributed_count,
     }
 
 
 def build_portfolio_stats(session: Session) -> dict[str, Any]:
-    """Agregados leves para o dashboard — sem payload JSON nem lista completa."""
+    """Agregados do dashboard — Por OAB usa vínculos + OAB estruturada no payload."""
+    # Religa histórico (DJEN numero_oab/uf_oab) antes de agregar — idempotente
+    try:
+        from monitor_jus.pipeline.discovery import backfill_oab_links_from_payloads
+
+        with session.begin_nested():
+            backfill_oab_links_from_payloads(session)
+    except Exception:  # noqa: BLE001
+        pass
+
     processes = list(
         session.scalars(
             select(Process).options(
@@ -263,24 +303,37 @@ def build_portfolio_stats(session: Session) -> dict[str, Any]:
                     Process.id,
                     Process.situacao,
                     Process.tribunal,
+                    Process.payload,
                 )
             )
         ).all()
     )
     criteria, process_criteria = load_process_criteria(session)
+    oab_criteria = _oab_criteria_list(criteria)
 
     by_oab: Counter[str] = Counter()
     by_tribunal: Counter[str] = Counter()
     by_outcome: Counter[str] = Counter()
+    without_oab = 0
+    with_oab = 0
 
     for proc in processes:
         outcome = classify_outcome(proc.situacao)
         by_outcome[outcome] += 1
         tribunal = proc.tribunal or "N/D"
         by_tribunal[tribunal] += 1
-        for c in process_criteria.get(proc.id) or []:
-            if c.startswith("OAB "):
-                by_oab[c] += 1
+        payload = proc.payload if isinstance(proc.payload, dict) else None
+        labels = oab_labels_for_process(
+            link_labels=process_criteria.get(proc.id),
+            payload=payload,
+            oab_criteria=oab_criteria,
+        )
+        if labels:
+            with_oab += 1
+            for label in labels:
+                by_oab[label] += 1
+        else:
+            without_oab += 1
 
     _include_all_oab_criteria(criteria, by_oab)
 
@@ -289,7 +342,9 @@ def build_portfolio_stats(session: Session) -> dict[str, Any]:
         by_outcome=by_outcome,
         by_oab=by_oab,
         by_tribunal=by_tribunal,
-        oab_criteria_count=sum(1 for c in criteria.values() if c.criterion_type == "OAB"),
+        oab_criteria_count=len(oab_criteria),
+        without_oab_count=without_oab,
+        oab_attributed_count=with_oab,
     )
 
 
@@ -405,19 +460,33 @@ def build_portfolio(session: Session, *, include_processes: bool = True) -> dict
     )
     criteria, process_criteria = load_process_criteria(session)
 
+    oab_criteria = _oab_criteria_list(criteria)
     by_oab: Counter[str] = Counter()
     by_tribunal: Counter[str] = Counter()
     by_outcome: Counter[str] = Counter()
     rows: list[dict[str, Any]] = []
+    without_oab = 0
+    with_oab = 0
 
     for proc in processes:
-        crits = process_criteria.get(proc.id) or ["—"]
+        link_labels = process_criteria.get(proc.id) or []
+        payload = proc.payload if isinstance(proc.payload, dict) else None
+        oab_labels = oab_labels_for_process(
+            link_labels=link_labels,
+            payload=payload,
+            oab_criteria=oab_criteria,
+        )
+        # Critérios exibidos: vínculos + OABs evidenciadas no payload
+        crits = list(dict.fromkeys([*link_labels, *sorted(oab_labels)])) or ["—"]
         row = serialize_process_row(proc, criteria_labels=crits, include_payload=True)
         by_outcome[row["outcome"]] += 1
         by_tribunal[row["tribunal"]] += 1
-        for c in row["criteria_list"]:
-            if c.startswith("OAB "):
+        if oab_labels:
+            with_oab += 1
+            for c in oab_labels:
                 by_oab[c] += 1
+        else:
+            without_oab += 1
         rows.append(row)
 
     _include_all_oab_criteria(criteria, by_oab)
@@ -427,6 +496,8 @@ def build_portfolio(session: Session, *, include_processes: bool = True) -> dict
         by_outcome=by_outcome,
         by_oab=by_oab,
         by_tribunal=by_tribunal,
-        oab_criteria_count=sum(1 for c in criteria.values() if c.criterion_type == "OAB"),
+        oab_criteria_count=len(oab_criteria),
         processes=rows,
+        without_oab_count=without_oab,
+        oab_attributed_count=with_oab,
     )

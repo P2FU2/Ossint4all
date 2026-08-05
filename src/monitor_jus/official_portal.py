@@ -30,6 +30,29 @@ _SECOND_DEGREE_HINTS = (
     "revisao criminal",
 )
 
+# Família e-SAJ (cpopg/cposg search.do) — placeholders padrão
+_ESAJ_1G = (
+    "{esaj_host}/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
+    "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+    "&foroNumeroUnificado={oooo}"
+    "&dadosConsulta.valorConsultaNuUnificado={cnj}"
+    "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+)
+_ESAJ_2G = (
+    "{esaj_host}/cposg/search.do?conversationId=&paginaConsulta=0"
+    "&cbPesquisa=NUMPROC"
+    "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+    "&foroNumeroUnificado={oooo}"
+    "&dePesquisa={cnj}"
+    "&localPesquisa.cdLocal=-1"
+    "&tipoNuProcesso=UNIFICADO"
+)
+# Família eproc — txtNumProcesso pré-preenche a busca pública
+_EPROC = (
+    "{eproc_host}/externo_controlador.php"
+    "?acao=processo_consulta_publica&txtNumProcesso={digits}"
+)
+
 # Portais de consulta pública (templates com placeholders CNJ).
 _DEFAULT_PORTAIS: dict[str, str] = {
     "stf": (
@@ -40,31 +63,20 @@ _DEFAULT_PORTAIS: dict[str, str] = {
         "https://processo.stj.jus.br/processo/pesquisa/"
         "?tipoPesquisa=tipoPesquisaNumeroUnico&termo={digits}"
     ),
-    "tst": "https://consultaprocessual.tst.jus.br/consultaProcessual/consultaTstNumUnica.do",
-    "tse": "https://www.tse.jus.br/servicos-eleitorais/processos/consulta-processual",
-    # 1º grau TJSP — cpopg
-    "tjsp": (
-        "https://esaj.tjsp.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
-        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    "tst": (
+        "https://consultaprocessual.tst.jus.br/consultaProcessual/consultaTstNumUnica.do"
+        "?consulta=1&numeroTst={nnnnnnn}&digitoVerificador={dd}"
+        "&anoAjuizamento={aaaa}&orgaoJudiciario=5&tribunal={tr}&varaOrigem={oooo}"
     ),
-    # 2º grau TJSP — cposg (Agravo, Apelação, origem 0000)
-    "tjsp_2g": (
-        "https://esaj.tjsp.jus.br/cposg/search.do?conversationId=&paginaConsulta=0"
-        "&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dePesquisa={cnj}"
-        "&localPesquisa.cdLocal=-1"
-        "&tipoNuProcesso=UNIFICADO"
+    "tse": (
+        "https://pje.tse.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
     ),
-    # Detalhe público — a SPA só auto-busca com codigoProcesso (CNJ 25 chars).
-    # A home #/consultapublica?numProcesso=… abre o formulário vazio.
+    "tjsp": _ESAJ_1G.replace("{esaj_host}", "https://esaj.tjsp.jus.br"),
+    "tjsp_2g": _ESAJ_2G.replace("{esaj_host}", "https://esaj.tjsp.jus.br"),
     "tjrj": (
         "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublicap"
-        "?codigoProcesso={cnj}"
+        "?codigoProcesso={digits}&tipoProcesso=13"
     ),
     "tjmg": (
         "https://www4.tjmg.jus.br/juridico/sf/proc_resultado2.jsp"
@@ -73,75 +85,114 @@ _DEFAULT_PORTAIS: dict[str, str] = {
         "&tipoConsulta=1&natureza=0&ativoBaixado=X&listaProcessos={digits}"
     ),
     "tjrs": "https://www.tjrs.jus.br/novo/busca/?return=proc&client=wp_index&q={cnj_q}",
-    "tjpr": "https://consulta.tjpr.jus.br/projudi_consulta/",
-    "tjsc": "https://eproc1g.tjsc.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
-    "tjba": "https://projetos.tjba.jus.br/projudi/",
-    # Demais e-SAJ (mesmo padrão cpopg/search.do do TJSP)
-    "tjce": (
-        "https://esaj.tjce.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
-        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    "tjpr": (
+        "https://consulta.tjpr.jus.br/projudi_consulta/"
+        "processo/consultaPublica.do?actionType=pesquisar"
+        "&numeroProcesso={cnj_q}"
     ),
-    "tjgo": "https://projudi.tjgo.jus.br/ConsultaPublica",
-    "tjdft": "https://pje.tjdft.jus.br/consultapublica/ConsultaPublica/listView.seam",
-    "tjes": "https://sistemas.tjes.jus.br/consulta/",
-    "tjpe": "https://www.tjpe.jus.br/consultaprocessual/",
-    "tjpb": "https://pje.tjpb.jus.br/pje/ConsultaPublica/listView.seam",
-    "tjrn": "https://pje1g.tjrn.jus.br/consultapublica/ConsultaPublica/listView.seam",
-    "tjma": "https://pje.tjma.jus.br/pje/ConsultaPublica/listView.seam",
-    "tjmt": "https://pje.tjmt.jus.br/pje/ConsultaPublica/listView.seam",
-    "tjms": (
-        "https://esaj.tjms.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
-        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    "tjsc": _EPROC.replace(
+        "{eproc_host}", "https://eprocwebcon.tjsc.jus.br/consulta1g"
     ),
-    "tjms_2g": (
-        "https://esaj.tjms.jus.br/cposg/search.do?conversationId=&paginaConsulta=0"
-        "&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dePesquisa={cnj}"
-        "&localPesquisa.cdLocal=-1"
-        "&tipoNuProcesso=UNIFICADO"
+    "tjsc_2g": _EPROC.replace(
+        "{eproc_host}", "https://eprocwebcon.tjsc.jus.br/consulta2g"
     ),
-    "tjpa": "https://pje.tjpa.jus.br/pje/ConsultaPublica/listView.seam",
-    "tjpi": "https://www.tjpi.jus.br/themisconsultas/",
-    "tjal": (
-        "https://www2.tjal.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
-        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    "tjba": (
+        "https://projudi.tjba.jus.br/projudi/listagens/DadosProcesso"
+        "?numeroProcesso={digits}"
     ),
-    "tjam": (
-        "https://consultasaj.tjam.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
-        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
-        "&foroNumeroUnificado={oooo}"
-        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
-        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    "tjce": _ESAJ_1G.replace("{esaj_host}", "https://esaj.tjce.jus.br"),
+    "tjgo": (
+        "https://projudi.tjgo.jus.br/BuscaProcesso"
+        "?PaginaAtual=-1&PassoBusca=2&tipoConsulta=1&ProcessoNumero={cnj_q}"
     ),
-    "tjac": "https://eproc.tjac.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
-    "tjap": "https://tucujuris.tjap.jus.br/tucujuris/pages/consultar-processo/consultar-processo.html",
-    "tjro": "https://www.tjro.jus.br/consultaprocessual/",
-    "tjrr": "https://www.tjrr.jus.br/index.php/consultas/processuais",
-    "tjse": "https://www.tjse.jus.br/portal/consultas/processuais",
-    "tjto": "https://eproc1.tjto.jus.br/eprocV2_prod_1grau/externo_controlador.php?acao=processo_consulta_publica",
+    # PJe: sem deep-link confiável — página de busca + CNJ na query (manual)
+    "tjdft": (
+        "https://pje.tjdft.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjes": (
+        "https://sistemas.tjes.jus.br/consultas_processuais/"
+        "?numero={digits}"
+    ),
+    "tjpe": (
+        "https://pje.cloud.tjpe.jus.br/1g/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjpb": (
+        "https://pje.tjpb.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjrn": (
+        "https://pje1g.tjrn.jus.br/consultapublica/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjma": (
+        "https://pje.tjma.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjmt": (
+        "https://pje.tjmt.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjms": _ESAJ_1G.replace("{esaj_host}", "https://esaj.tjms.jus.br"),
+    "tjms_2g": _ESAJ_2G.replace("{esaj_host}", "https://esaj.tjms.jus.br"),
+    "tjpa": (
+        "https://pje.tjpa.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjpi": (
+        "https://www.tjpi.jus.br/themisweb/modules/processo/ConsultaPublica.mtw"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjal": _ESAJ_1G.replace("{esaj_host}", "https://www2.tjal.jus.br"),
+    "tjam": _ESAJ_1G.replace("{esaj_host}", "https://consultasaj.tjam.jus.br"),
+    # TJAC: eproc 1G (há também e-SAJ legado em esaj.tjac.jus.br)
+    "tjac": _EPROC.replace("{eproc_host}", "https://eproc1g.tjac.jus.br/eproc"),
+    "tjac_2g": _EPROC.replace("{eproc_host}", "https://eproc2g.tjac.jus.br/eproc"),
+    "tjap": (
+        "https://tucujuris.tjap.jus.br/tucujuris/pages/consultar-processo/"
+        "consultar-processo.html?numeroProcesso={cnj_q}"
+    ),
+    "tjro": (
+        "https://pjepg.tjro.jus.br/consulta/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjrr": (
+        "https://consultaprojudi.tjrr.jus.br/"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "tjse": _EPROC.replace("{eproc_host}", "https://eproc1g.tjse.jus.br/eproc"),
+    "tjse_2g": _EPROC.replace("{eproc_host}", "https://eproc2g.tjse.jus.br/eproc"),
+    # TJTO usa ação processo_seleciona_publica (consulta_publica clássica 404)
+    "tjto": (
+        "https://eproc1.tjto.jus.br/eprocV2_prod_1grau/externo_controlador.php"
+        "?acao=processo_seleciona_publica&num_processo={digits}"
+    ),
     "trf1": (
         "https://processual.trf1.jus.br/consultaProcessual/numeroProcesso.php"
         "?secao=TRF1&proc={cnj_q}"
     ),
-    "trf2": "https://eproc.trf2.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
-    # PJe listView não aceita CNJ na URL — consulta unificada do tribunal
-    "trf3": "https://web.trf3.jus.br/consultas/Internet/ConsultaProcessual",
-    "trf3_1g": "https://pje1g.trf3.jus.br/pje/ConsultaPublica/listView.seam",
-    "trf3_2g": "https://pje2g.trf3.jus.br/pje/ConsultaPublica/listView.seam",
-    "trf4": "https://eproc.trf4.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
-    "trf5": "https://pje.trf5.jus.br/pje/ConsultaPublica/listView.seam",
-    "trf6": "https://eproc.trf6.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
+    "trf2": _EPROC.replace("{eproc_host}", "https://eproc.trf2.jus.br/eproc"),
+    "trf3": (
+        "https://web.trf3.jus.br/consultas/Internet/ConsultaProcessual"
+        "?numeroProcesso={digits}"
+    ),
+    "trf3_1g": (
+        "https://pje1g.trf3.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "trf3_2g": (
+        "https://pje2g.trf3.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "trf4": _EPROC.replace(
+        "{eproc_host}", "https://eproc.trf4.jus.br/eproc2trf4"
+    ),
+    "trf5": (
+        "https://pje.trf5.jus.br/pje/ConsultaPublica/listView.seam"
+        "?numeroProcesso={cnj_q}"
+    ),
+    "trf6": _EPROC.replace("{eproc_host}", "https://eproc1g.trf6.jus.br/eproc"),
 }
 
 _FALLBACK_HOME: dict[str, str] = {
@@ -157,7 +208,13 @@ _FALLBACK_HOME: dict[str, str] = {
 _SEARCH_PREFILLED_COURTS = {
     "stf",
     "stj",
+    "tst",
+    "tse",
     "trf1",
+    "trf2",
+    "trf3",
+    "trf4",
+    "trf6",
     "tjsp",
     "tjsp_2g",
     "tjmg",
@@ -167,7 +224,37 @@ _SEARCH_PREFILLED_COURTS = {
     "tjce",
     "tjal",
     "tjam",
+    "tjsc",
+    "tjsc_2g",
+    "tjac",
+    "tjac_2g",
+    "tjse",
+    "tjse_2g",
+    "tjto",
+    "tjgo",
+    "tjrs",
+    "tjpr",
+    "tjba",
+    "tjpi",
 }
+
+# Marcadores de URL com CNJ embutido (pré-preenchimento / busca)
+_PREFILL_MARKERS = (
+    "search.do",
+    "termo=",
+    "proc=",
+    "codigoprocesso=",
+    "tipoprocesso=",
+    "txtnumprocesso=",
+    "num_processo=",
+    "processonumero=",
+    "numerotst=",
+    "listaprocesso=",
+    "txtprocesso=",
+    "numeroprocesso=",
+    "numero=",
+    "q=",
+)
 
 
 @dataclass(frozen=True)
@@ -195,6 +282,26 @@ def build_stf_lawyer_search_url(lawyer_name: str) -> str:
     )
 
 
+def build_tjrj_portal_url(process_number: str) -> str:
+    """Deep-link TJRJ que dispara auto-busca na SPA.
+
+    A tela #/consultapublicap só carrega dados se:
+    - codigoProcesso = 20 dígitos e tipoProcesso = 13 ou 14 (numeração única), ou
+    - codigoProcesso no formato interno TJRJ (NNNNNNN-DD-AAAA.J.TR.OOOO) + tipo 1/2.
+
+    Só o CNJ com pontos (…03.2026.8.19…) abre a página em branco (“Não há”).
+    """
+    parts = normalize_cnj(process_number)
+    if not parts:
+        return "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublica"
+    digits = parts.numero_digits
+    # 13 = numeração única (caminho que a SPA formata e consulta por-numeracao-unica)
+    return (
+        "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublicap"
+        f"?codigoProcesso={digits}&tipoProcesso=13"
+    )
+
+
 def only_digits_safe(value: str) -> str:
     return "".join(c for c in (value or "") if c.isdigit())
 
@@ -218,9 +325,20 @@ def _is_useless_portal_url(url: str | None) -> bool:
         return True
     if "dje.tjsp.jus.br" in low and "processo" not in low and "?" not in low:
         return True
-    # TJRJ: busca pública sem codigoProcesso (ou só numProcesso) não pré-carrega
-    if "tjrj.jus.br/consultaprocessual" in low and "codigoprocesso=" not in low:
-        return True
+    # TJRJ: precisa codigoProcesso + tipoProcesso; senão a SPA abre “Não há”
+    if "tjrj.jus.br/consultaprocessual" in low:
+        if "codigoprocesso=" not in low:
+            return True
+        if "tipoprocesso=" not in low:
+            return True
+        # CNJ com ponto (padrão CNJ) sem dígitos/tipo 13 costuma falhar o auto-load
+        if "tipoprocesso=13" not in low and "tipoprocesso=14" not in low:
+            # aceita 1/2 se vier com formato interno TJRJ (hífen no ano)
+            if re.search(r"codigoprocesso=\d{7}-\d{2}-\d{4}\.", low):
+                pass
+            elif "codigoprocesso=" in low:
+                # ex.: só ?codigoProcesso=0000000-00.0000.8.19.0000
+                return True
     # e-SAJ open.do / homepage sem search.do — não leva ao processo
     if re.search(r"esaj\.[^/]+/cpopg/open\.do/?$", low) or re.search(
         r"esaj\.[^/]+/cposg/open\.do/?$", low
@@ -228,6 +346,12 @@ def _is_useless_portal_url(url: str | None) -> bool:
         return True
     if "/cpopg/open.do" in low and "search.do" not in low and "show.do" not in low:
         return True
+    # eproc sem número — formulário vazio
+    if "externo_controlador.php" in low and (
+        "processo_consulta_publica" in low or "processo_seleciona_publica" in low
+    ):
+        if "txtnumprocesso=" not in low and "num_processo=" not in low:
+            return True
     # PDF da comunicação no STJ — não é consulta do processo
     if "justica.web.stj.jus.br/api/pcp/documentos" in low:
         return True
@@ -287,7 +411,7 @@ def _format_portal(template: str, parts: Any) -> str:
         j=j,
         tr=tr,
         oooo=oooo,
-        cnj_q=quote(cnj),
+        cnj_q=quote(cnj, safe=".-"),
         digits_q=quote(digits),
     )
 
@@ -322,6 +446,11 @@ def _is_second_degree(
 
 
 def _resolve_court_key(numero_cnj: str | None, tribunal: str | None) -> str | None:
+    """Resolve chave do portal.
+
+    Preferência: CNJ (fonte da verdade) → sigla explícita do tribunal.
+    Evita match por substring frouxo (ex.: tjpr ⊃ tj).
+    """
     parts = normalize_cnj(numero_cnj or "")
     settings = get_settings()
     resolver = TribunalResolver(settings.config_path("tribunais.yaml"))
@@ -331,16 +460,19 @@ def _resolve_court_key(numero_cnj: str | None, tribunal: str | None) -> str | No
         key = (resolved.get("key") or "").lower() or None
         if not key and parts.segmento == "1":
             key = "stf"
-    if not key and tribunal:
+    if tribunal:
         t = tribunal.strip().lower().replace(" ", "")
-        if t in {"tjsp_2g"}:
-            return "tjsp_2g"
+        if t.endswith("_2g"):
+            return t
         portais = _portais_map()
         if t in portais or t in _FALLBACK_HOME:
-            key = t
-        else:
-            for candidate in set(portais) | set(_FALLBACK_HOME):
-                if candidate in t or t in candidate:
+            # Se CNJ e tribunal divergem, prioriza CNJ (já em key); senão usa tribunal
+            if not key:
+                key = t
+        elif not key:
+            # match exato por sufixo conhecido apenas
+            for candidate in sorted(set(portais) | set(_FALLBACK_HOME), key=len, reverse=True):
+                if t == candidate or t.replace("tj", "") == candidate.replace("tj", ""):
                     key = candidate
                     break
     return key
@@ -356,7 +488,8 @@ def _classify_link(court_key: str, url: str) -> OfficialLink:
             link_type="PROCESS_DEEP_LINK",
             confidence="high",
         )
-    if "listview.seam" in low and "proc" not in low and "numero" not in low:
+    # PJe listView quase nunca pré-carrega — sempre busca manual
+    if "listview.seam" in low:
         return OfficialLink(
             url=url,
             court=court,
@@ -364,27 +497,37 @@ def _classify_link(court_key: str, url: str) -> OfficialLink:
             confidence="low",
             requires_manual_search=True,
         )
-    if (
-        court_key in _SEARCH_PREFILLED_COURTS
-        or "search.do" in low
-        or "termo=" in low
-        or "proc=" in low
-        or "codigoprocesso=" in low
-    ):
+    has_prefill = any(m in low for m in _PREFILL_MARKERS)
+    if court_key in _SEARCH_PREFILLED_COURTS or has_prefill:
+        strong = any(
+            m in low
+            for m in (
+                "search.do",
+                "termo=",
+                "codigoprocesso=",
+                "txtnumprocesso=",
+                "num_processo=",
+                "numerotst=",
+                "txtprocesso=",
+                "processonumero=",
+                "numeroprocesso=",  # numeroProcesso=
+                "listaprocesso=",
+            )
+        )
         return OfficialLink(
             url=url,
             court=court,
             link_type="PROCESS_SEARCH_PREFILLED",
-            confidence="high"
-            if "search.do" in low or "termo=" in low or "codigoprocesso=" in low
-            else "medium",
+            confidence="high" if strong else "medium",
+            requires_manual_search=not strong,
         )
-    if "?" in url:
+    if "?" in url or "#" in url:
         return OfficialLink(
             url=url,
             court=court,
             link_type="PROCESS_SEARCH_PREFILLED",
             confidence="medium",
+            requires_manual_search=True,
         )
     return OfficialLink(
         url=url,
@@ -469,7 +612,7 @@ def resolve_official_link_result(
                 if isinstance(payload.get("datajud"), dict)
                 else None
             )
-    if key in {"tjsp", "tjms"} and _is_second_degree(
+    if key in {"tjsp", "tjms", "tjac", "tjse", "tjsc"} and _is_second_degree(
         parts=parts,
         classe=str(classe) if classe else None,
         grau=str(grau) if grau else None,
@@ -483,6 +626,15 @@ def resolve_official_link_result(
         return OfficialLink(
             url=url,
             court="STF",
+            link_type="PROCESS_SEARCH_PREFILLED",
+            confidence="high",
+        )
+
+    if key == "tjrj" and parts:
+        url = build_tjrj_portal_url(parts.numero_formatado)
+        return OfficialLink(
+            url=url,
+            court="TJRJ",
             link_type="PROCESS_SEARCH_PREFILLED",
             confidence="high",
         )

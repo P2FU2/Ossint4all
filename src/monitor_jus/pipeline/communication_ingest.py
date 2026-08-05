@@ -153,6 +153,23 @@ def ingest(
             "matched_criteria": evidence.matched_criteria,
         }
         existing.discovery_channels_json = merged_channels
+        # Releitura: religa critérios (ex.: OAB que faltava no 1º match por nome)
+        cnj_existing = normalize_cnj(extracted.get("process_number") or existing.numero_cnj or "")
+        if cnj_existing and evidence.matched_criteria:
+            proc_existing = session.scalar(
+                select(Process).where(Process.numero_cnj == cnj_existing.numero_formatado)
+            )
+            if proc_existing:
+                for crit_value in evidence.matched_criteria:
+                    crit = session.scalar(
+                        select(Criterion).where(
+                            Criterion.active.is_(True),
+                            Criterion.value == crit_value,
+                        )
+                    )
+                    if crit:
+                        repo.link_criterion_process(crit.id, proc_existing.id)
+                result["process_id"] = proc_existing.id
         result["updated"] = True
         session.flush()
         return result

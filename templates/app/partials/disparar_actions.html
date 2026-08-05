@@ -4,98 +4,182 @@
 {% set disc = ops.discovery or {} %}
 {% set boot = ops.bootstrap or {} %}
 
-<div class="panel">
-  <h2>Configurar Discovery / Bootstrap {{ tip("Valores gravados em config/ops.yaml (não no .env). Valem na próxima execução.") }}</h2>
-  <p class="muted" style="margin-top:-6px;margin-bottom:12px">
-    Arquivo: <span class="mono">{{ ops.path or "config/ops.yaml" }}</span>
-  </p>
+<div class="panel ops-panel">
+  <div class="ops-panel-head">
+    <div>
+      <h2>Configurar Discovery / Bootstrap {{ tip("Valores gravados em config/ops.yaml (não no .env). Valem na próxima execução.") }}</h2>
+      <p class="muted ops-path">
+        Arquivo: <span class="mono">{{ ops.path or "config/ops.yaml" }}</span>
+      </p>
+    </div>
+  </div>
+
   <form method="post" action="/app/actions/ops-config" class="ops-config-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
     <div class="ops-grid">
-      <fieldset>
-        <legend>Discovery {{ tip("Botão Discovery: varredura histórica no DJEN pelas OABs/nomes monitorados.") }}</legend>
-        <label>Janela (dias) {{ tip("Quantos dias para trás buscar comunicações no DJEN. Ex.: 1095 ≈ 3 anos.") }}
-          <input type="number" name="discovery_lookback_days" min="7" max="3650" value="{{ disc.lookback_days or 1095 }}" />
-        </label>
-        <label>Máx. páginas {{ tip("Limite de páginas por critério na API do DJEN (cada página ~50 itens).") }}
-          <input type="number" name="discovery_max_pages" min="5" max="200" value="{{ disc.max_pages or 80 }}" />
-        </label>
-        <div class="ops-checks">
-          <label><input type="checkbox" name="search_oabs" value="1" {% if disc.search_oabs %}checked{% endif %} /> Buscar OABs</label>
-          <label><input type="checkbox" name="search_names" value="1" {% if disc.search_names %}checked{% endif %} /> Buscar nomes</label>
-          <label><input type="checkbox" name="search_processes" value="1" {% if disc.search_processes %}checked{% endif %} /> Buscar processos</label>
-          <label><input type="checkbox" name="search_companies" value="1" {% if disc.search_companies %}checked{% endif %} /> Buscar empresas</label>
+      <section class="ops-card" aria-labelledby="ops-discovery-title">
+        <header class="ops-card-head">
+          <div class="ops-card-title-row">
+            <h3 id="ops-discovery-title">Discovery</h3>
+            {{ tip("Botão Discovery: varredura histórica no DJEN pelas OABs/nomes monitorados.") }}
+          </div>
+          <p class="ops-card-desc">Janela e limites da busca histórica no DJEN.</p>
+        </header>
+
+        <div class="ops-fields">
+          <div class="ops-field">
+            <label for="discovery_lookback_days">
+              Janela (dias)
+              {{ tip("Quantos dias para trás buscar comunicações no DJEN. Ex.: 1095 ≈ 3 anos.") }}
+            </label>
+            <input id="discovery_lookback_days" type="number" name="discovery_lookback_days" min="7" max="3650" value="{{ disc.lookback_days or 1095 }}" />
+            <span class="ops-hint">≈ 3 anos se 1095</span>
+          </div>
+          <div class="ops-field">
+            <label for="discovery_max_pages">
+              Máx. páginas
+              {{ tip("Limite de páginas por critério na API do DJEN (cada página ~50 itens).") }}
+            </label>
+            <input id="discovery_max_pages" type="number" name="discovery_max_pages" min="5" max="200" value="{{ disc.max_pages or 80 }}" />
+            <span class="ops-hint">~50 itens por página</span>
+          </div>
         </div>
-      </fieldset>
-      <fieldset>
-        <legend>Bootstrap {{ tip("Leitura inicial / completar acervo: discovery longa + DataJud nas capas incompletas, sem flood no e-mail.") }}</legend>
-        <label>Janela (dias) {{ tip("Lookback do DJEN no Bootstrap. Use igual ou maior que o Discovery se quiser cobrir processos antigos.") }}
-          <input type="number" name="bootstrap_lookback_days" min="7" max="3650" value="{{ boot.lookback_days or 1095 }}" />
-        </label>
-        <label>Máx. páginas {{ tip("Limite de páginas DJEN durante o Bootstrap.") }}
-          <input type="number" name="bootstrap_max_pages" min="5" max="200" value="{{ boot.max_pages or 80 }}" />
-        </label>
+
+        <div class="ops-toggles" role="group" aria-label="O que buscar no Discovery">
+          <label class="ops-toggle">
+            <input type="checkbox" name="search_oabs" value="1" {% if disc.search_oabs %}checked{% endif %} />
+            <span>OABs</span>
+          </label>
+          <label class="ops-toggle">
+            <input type="checkbox" name="search_names" value="1" {% if disc.search_names %}checked{% endif %} />
+            <span>Nomes</span>
+          </label>
+          <label class="ops-toggle">
+            <input type="checkbox" name="search_processes" value="1" {% if disc.search_processes %}checked{% endif %} />
+            <span>Processos</span>
+          </label>
+          <label class="ops-toggle">
+            <input type="checkbox" name="search_companies" value="1" {% if disc.search_companies %}checked{% endif %} />
+            <span>Empresas</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="ops-card" aria-labelledby="ops-bootstrap-title">
+        <header class="ops-card-head">
+          <div class="ops-card-title-row">
+            <h3 id="ops-bootstrap-title">Bootstrap</h3>
+            {{ tip("Leitura inicial / completar acervo: discovery longa + DataJud nas capas incompletas, sem flood no e-mail.") }}
+          </div>
+          <p class="ops-card-desc">Primeira varredura e preenchimento de capas faltantes.</p>
+        </header>
+
+        <div class="ops-fields">
+          <div class="ops-field">
+            <label for="bootstrap_lookback_days">
+              Janela (dias)
+              {{ tip("Lookback do DJEN no Bootstrap. Use igual ou maior que o Discovery se quiser cobrir processos antigos.") }}
+            </label>
+            <input id="bootstrap_lookback_days" type="number" name="bootstrap_lookback_days" min="7" max="3650" value="{{ boot.lookback_days or 1095 }}" />
+            <span class="ops-hint">recomendado ≥ Discovery</span>
+          </div>
+          <div class="ops-field">
+            <label for="bootstrap_max_pages">
+              Máx. páginas
+              {{ tip("Limite de páginas DJEN durante o Bootstrap.") }}
+            </label>
+            <input id="bootstrap_max_pages" type="number" name="bootstrap_max_pages" min="5" max="200" value="{{ boot.max_pages or 80 }}" />
+            <span class="ops-hint">por critério DJEN</span>
+          </div>
+        </div>
+
         <div class="ops-checks">
-          <label>
+          <label class="ops-check">
             <input type="checkbox" name="complete_missing_capa" value="1" {% if boot.complete_missing_capa %}checked{% endif %} />
-            Completar capas faltantes (DataJud)
-            {{ tip("Depois do DJEN, consulta DataJud nos processos do acervo sem situação/classe para preencher o banco.") }}
+            <span class="ops-check-body">
+              <span class="ops-check-title">
+                Completar capas faltantes (DataJud)
+                {{ tip("Depois do DJEN, consulta DataJud nos processos do acervo sem situação/classe para preencher o banco.") }}
+              </span>
+              <span class="ops-check-hint">Preenche situação/classe vazias no acervo</span>
+            </span>
           </label>
-          <label>
+          <label class="ops-check">
             <input type="checkbox" name="ignore_events_for_digest" value="1" {% if boot.ignore_events_for_digest %}checked{% endif %} />
-            Não enviar eventos do bootstrap no digest
-            {{ tip("Marca publicações do bootstrap como baseline (IGNORED) — não viram ‘novidade’ no e-mail.") }}
+            <span class="ops-check-body">
+              <span class="ops-check-title">
+                Não enviar eventos do bootstrap no digest
+                {{ tip("Marca publicações do bootstrap como baseline (IGNORED) — não viram ‘novidade’ no e-mail.") }}
+              </span>
+              <span class="ops-check-hint">Evita flood de e-mail na 1ª leitura</span>
+            </span>
           </label>
         </div>
-      </fieldset>
+      </section>
     </div>
-    <div class="actions" style="margin-top:12px">
+
+    <div class="ops-form-actions">
       <button class="btn secondary" type="submit">Salvar configuração</button>
     </div>
   </form>
 </div>
 
-<div class="panel">
-  <h2>Disparar</h2>
-  <p class="muted" style="margin-top:-6px;margin-bottom:12px">
-    Bootstrap e Discovery são bloqueados se já houver um em andamento.
-    Use a configuração acima antes de disparar.
-  </p>
-  <div class="actions">
-    <form method="post" action="/app/actions/enqueue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <input type="hidden" name="run_type" value="DAILY_DIGEST" />
-      <button class="btn" data-confirm="Enfileirar digest?">
-        Digest {{ tip("Gera o relatório HTML do dia e envia por e-mail (Resend). Inclui novidades PENDING_NOTIFY e o portfólio.") }}
-      </button>
-    </form>
-    <form method="post" action="/app/actions/enqueue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
-      <button class="btn secondary" data-confirm="Enfileirar Discovery histórico com a janela configurada?">
-        Discovery {{ tip("Busca no DJEN (comunicações) pelas OABs/nomes ativos, na janela de dias configurada. Achados podem virar novidade no próximo digest.") }}
-      </button>
-    </form>
-    <form method="post" action="/app/actions/enqueue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <input type="hidden" name="run_type" value="BOOTSTRAP" />
-      <button class="btn secondary" data-confirm="Rodar Bootstrap (discovery histórica + completar capas faltantes)? Continuar?">
-        Bootstrap {{ tip("Varredura longa no DJEN para popular/completar o acervo; opcionalmente enriquece processos sem situação no DataJud. Não flooda o e-mail (baseline).") }}
-      </button>
-    </form>
-    <form method="post" action="/app/actions/enqueue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <input type="hidden" name="run_type" value="RECONCILIATION" />
-      <button class="btn secondary" data-confirm="Enfileirar reconciliação?">
-        Reconciliação {{ tip("Varre o acervo no DataJud (relações, capas, tribunais). Não é novidade em tempo real — reconcilia o que já está no banco.") }}
-      </button>
-    </form>
-    <form method="post" action="/app/actions/enqueue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <input type="hidden" name="run_type" value="PROCESS_REFRESH" />
-      <button class="btn ghost" data-confirm="Enfileirar refresh dos processos devidos?">
-        Refresh {{ tip("Atualiza capa/movimentos no DataJud só dos processos com next_check vencido (fila de acompanhamento contínuo).") }}
-      </button>
-    </form>
+<div class="panel ops-panel">
+  <div class="ops-panel-head">
+    <div>
+      <h2>Disparar</h2>
+      <p class="muted ops-path">
+        Bootstrap e Discovery são bloqueados se já houver um em andamento.
+        Salve a configuração acima antes de disparar.
+      </p>
+    </div>
+  </div>
+
+  <div class="run-actions" role="group" aria-label="Ações manuais">
+    <div class="run-action">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="DAILY_DIGEST" />
+        <button class="btn" type="submit" data-confirm="Enfileirar digest?">Digest</button>
+      </form>
+      {{ tip("Gera o relatório HTML do dia e envia por e-mail (Resend). Inclui novidades PENDING_NOTIFY e o portfólio.") }}
+    </div>
+
+    <div class="run-action">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
+        <button class="btn secondary" type="submit" data-confirm="Enfileirar Discovery histórico com a janela configurada?">Discovery</button>
+      </form>
+      {{ tip("Busca no DJEN (comunicações) pelas OABs/nomes ativos, na janela de dias configurada. Achados podem virar novidade no próximo digest.") }}
+    </div>
+
+    <div class="run-action">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="BOOTSTRAP" />
+        <button class="btn secondary" type="submit" data-confirm="Rodar Bootstrap (discovery histórica + completar capas faltantes)? Continuar?">Bootstrap</button>
+      </form>
+      {{ tip("Varredura longa no DJEN para popular/completar o acervo; opcionalmente enriquece processos sem situação no DataJud. Não flooda o e-mail (baseline).") }}
+    </div>
+
+    <div class="run-action">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="RECONCILIATION" />
+        <button class="btn secondary" type="submit" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
+      </form>
+      {{ tip("Varre o acervo no DataJud (relações, capas, tribunais). Não é novidade em tempo real — reconcilia o que já está no banco.") }}
+    </div>
+
+    <div class="run-action">
+      <form method="post" action="/app/actions/enqueue">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="run_type" value="PROCESS_REFRESH" />
+        <button class="btn ghost" type="submit" data-confirm="Enfileirar refresh dos processos devidos?">Refresh</button>
+      </form>
+      {{ tip("Atualiza capa/movimentos no DataJud só dos processos com next_check vencido (fila de acompanhamento contínuo).") }}
+    </div>
   </div>
 </div>

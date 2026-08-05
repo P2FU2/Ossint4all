@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from monitor_jus.canonical_oab import canonicalize_oab, OabCanonicalizeError
 from monitor_jus.config import Settings, get_settings, load_fontes
-from monitor_jus.db.models import Criterion, SourceCheckpoint
+from monitor_jus.db.models import Criterion, CriterionLink, SourceCheckpoint
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.ops_config import load_ops
@@ -545,11 +545,19 @@ def run_discovery(
 
 
 def backfill_oab_links_from_payloads(session: Session) -> int:
-    """Religa processos às OABs monitoradas com base no payload (match tipado)."""
-    from monitor_jus.db.models import Process
+    """Religa processos às OABs monitoradas a partir do payload (DJEN estruturado + texto).
+
+    Também varre comunicações do processo (`_extracted.oabs`) — cobre histórico
+    descoberto só por nome em que a OAB veio nos destinatárioadvogados.
+    """
+    from monitor_jus.db.models import Communication, Process
     from monitor_jus.db.repository import Repository
-    from monitor_jus.matching import extract_oabs_from_text
-    from monitor_jus.canonical_oab import canonicalize_oab
+    from monitor_jus.oab_match import (
+        criterion_matches_oab,
+        extract_oabs_from_payload,
+        oab_identity,
+        parse_oab_criterion_value,
+    )
 
     repo = Repository(session)
     oab_criteria = [
@@ -557,22 +565,41 @@ def backfill_oab_links_from_payloads(session: Session) -> int:
         for c in session.scalars(select(Criterion).where(Criterion.active.is_(True))).all()
         if c.criterion_type == "OAB"
     ]
+    if not oab_criteria:
+        return 0
+
+    # OABs já vistas por comunicação (chave → identidades)
+    comm_oabs: dict[str, set[tuple[str, str]]] = {}
+    for comm in session.scalars(select(Communication)).all():
+        cnj = (comm.numero_cnj or "").strip()
+        if not cnj:
+            continue
+        ids = extract_oabs_from_payload(comm.payload)
+        if ids:
+            comm_oabs.setdefault(cnj, set()).update(ids)
+
     linked = 0
     for proc in session.scalars(select(Process)).all():
-        blob = ""
-        if isinstance(proc.payload, dict):
-            import json
-
-            blob = json.dumps(proc.payload, ensure_ascii=False)
-        oabs = extract_oabs_from_text(blob)
+        identities = extract_oabs_from_payload(proc.payload)
+        if proc.numero_cnj and proc.numero_cnj in comm_oabs:
+            identities |= comm_oabs[proc.numero_cnj]
+        if not identities:
+            continue
         for crit in oab_criteria:
-            try:
-                crit_oab = canonicalize_oab(crit.value)
-            except OabCanonicalizeError:
+            parsed = parse_oab_criterion_value(crit.value)
+            if not parsed:
                 continue
-            for hit in oabs:
-                if hit.matches_criterion(crit_oab):
-                    repo.link_criterion_process(crit.id, proc.id)
+            want = oab_identity(parsed[0], parsed[1])
+            if want in identities or any(
+                criterion_matches_oab(crit.value, ident) for ident in identities
+            ):
+                before = session.scalar(
+                    select(CriterionLink).where(
+                        CriterionLink.criterion_id == crit.id,
+                        CriterionLink.process_id == proc.id,
+                    )
+                )
+                repo.link_criterion_process(crit.id, proc.id)
+                if before is None:
                     linked += 1
-                    break
     return linked

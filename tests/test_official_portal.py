@@ -117,25 +117,28 @@ def test_tjsp_esaj_link():
 CNJ_TJRJ = "3062640-09.2025.8.19.0001"
 
 
-def test_tjrj_uses_consultapublicap_codigo_processo():
+def test_tjrj_uses_digits_and_tipo_processo_13():
     result = resolve_official_link_result(CNJ_TJRJ, tribunal="TJRJ")
     assert result.link_type == "PROCESS_SEARCH_PREFILLED"
     assert "consultapublicap" in result.url
-    assert f"codigoProcesso={CNJ_TJRJ}" in result.url
+    assert "codigoProcesso=30626400920258190001" in result.url
+    assert "tipoProcesso=13" in result.url
     assert "numProcesso=" not in result.url
+    # CNJ com ponto sozinho não deve ser usado (página em branco)
+    assert "3062640-09.2025" not in result.url
 
 
-def test_tjrj_rejects_empty_search_and_rebuilds():
+def test_tjrj_rejects_blank_cnj_only_detail_and_rebuilds():
     result = resolve_official_link_result(
         CNJ_TJRJ,
         tribunal="TJRJ",
         existing=(
             "https://www3.tjrj.jus.br/consultaprocessual/"
-            f"#/consultapublica?numProcesso={CNJ_TJRJ}"
+            f"#/consultapublicap?codigoProcesso={CNJ_TJRJ}"
         ),
     )
-    assert "consultapublicap" in result.url
-    assert f"codigoProcesso={CNJ_TJRJ}" in result.url
+    assert "tipoProcesso=13" in result.url
+    assert "codigoProcesso=30626400920258190001" in result.url
 
 
 CNJ_TJMS = "0800123-45.2023.8.12.0001"

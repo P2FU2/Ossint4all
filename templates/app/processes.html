@@ -33,7 +33,7 @@
         {% endfor %}
       </select>
     </label>
-    <label>OAB / critério {{ tip("Formato sugerido: 2556/RJ ou OAB 138094/SP. Também aceita nome do responsável.") }}
+    <label>OAB / critério {{ tip("Filtra pelos vínculos/critérios do processo (ex.: 2556/RJ, OAB 138094/SP ou trecho do nome). Tribunal do processo ≠ seccional da OAB.") }}
       <input name="oab" value="{{ filters.oab }}" placeholder="ex.: 2556/RJ ou OAB 138094/SP" />
     </label>
     <label>Situação {{ tip("Situação oficial inferida (Extinto, Em grau de recurso, etc.).") }}

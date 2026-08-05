@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Critérios {{ tip("OABs, CPFs, nomes e processos usados na discovery. Contagem = processos vinculados a cada critério.") }}</h1>
+    <h1>Critérios {{ tip("OABs, nomes e outros filtros da discovery. A coluna Processos conta vínculos CriterionLink — um CNJ pode aparecer no NOME e em uma OAB.") }}</h1>
     <p>{{ active }} ativo(s) de {{ total }} · sincronizados do YAML no banco.</p>
   </div>
   <form method="post" action="/app/actions/sync-criteria">
@@ -30,11 +30,15 @@
   {% else %}
   <p class="muted">Nenhuma OAB no YAML (ou arquivo ausente).</p>
   {% endif %}
-  <p class="muted tip-note">A edição do arquivo continua em <code>config/monitoramentos.yaml</code> no deploy. Esta tela consulta o banco e aplica o sync.</p>
+  <p class="muted tip-note">
+    Edite <code>config/monitoramentos.yaml</code> e use <strong>Sincronizar YAML</strong> —
+    isso também religa OABs do histórico (campos DJEN <span class="mono">numero_oab</span>/<span class="mono">uf_oab</span>).
+    O critério <strong>NOME</strong> lista processos achados pelo nome; muitos também têm OAB no registro e passam a aparecer nas linhas OAB após o sync.
+  </p>
 </div>
 
 <div class="panel">
-  <h2>No banco</h2>
+  <h2>No banco {{ tip("NOME sem número de OAB na coluna Valor é esperado: o critério é o nome da pessoa. A OAB fica nas linhas tipo OAB.") }}</h2>
   <div class="table-wrap">
   <table class="data">
     <thead>

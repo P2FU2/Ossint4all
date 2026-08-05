@@ -51,6 +51,8 @@ document.body.addEventListener("htmx:afterSwap", (ev) => {
 /* Tooltips em position:fixed — evitam corte por overflow dos cards */
 (function () {
   let balloon = null;
+  let activeTip = null;
+  let pinned = false; // toque/click: mantém aberto até fora
 
   function ensureBalloon() {
     if (balloon) return balloon;
@@ -64,39 +66,58 @@ document.body.addEventListener("htmx:afterSwap", (ev) => {
   function hide() {
     if (!balloon) return;
     balloon.classList.remove("is-visible");
+    activeTip = null;
+    pinned = false;
   }
 
-  function show(tipEl) {
-    const text = tipEl.getAttribute("data-tip");
-    if (!text) return;
+  function placeBalloon(tipEl) {
     const el = ensureBalloon();
-    el.textContent = text;
-    el.classList.add("is-visible");
-
     const rect = tipEl.getBoundingClientRect();
-    const margin = 10;
+    const margin = 12;
+    const gap = 10;
     const bw = el.offsetWidth;
     const bh = el.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
     let left = rect.left + rect.width / 2 - bw / 2;
-    left = Math.max(margin, Math.min(left, window.innerWidth - bw - margin));
+    left = Math.max(margin, Math.min(left, vw - bw - margin));
 
-    let top = rect.top - bh - 10;
+    // Prefere acima; se não couber, abaixo; se ainda apertado no mobile, abaixo com clamp
+    let top = rect.top - bh - gap;
     let place = "above";
     if (top < margin) {
-      top = rect.bottom + 10;
+      top = rect.bottom + gap;
       place = "below";
+    }
+    if (top + bh > vh - margin) {
+      top = Math.max(margin, Math.min(rect.top - bh - gap, vh - bh - margin));
+      place = top < rect.top ? "above" : "below";
     }
     el.dataset.place = place;
     el.style.left = `${Math.round(left)}px`;
     el.style.top = `${Math.round(top)}px`;
   }
 
+  function show(tipEl, { pin = false } = {}) {
+    const text = tipEl.getAttribute("data-tip");
+    if (!text) return;
+    const el = ensureBalloon();
+    el.textContent = text;
+    el.classList.add("is-visible");
+    activeTip = tipEl;
+    pinned = pin;
+    // medir após pintar
+    requestAnimationFrame(() => placeBalloon(tipEl));
+  }
+
   document.addEventListener("mouseover", (ev) => {
     const tip = ev.target.closest(".tip[data-tip]");
-    if (tip) show(tip);
+    if (!tip || pinned) return;
+    show(tip);
   });
   document.addEventListener("mouseout", (ev) => {
+    if (pinned) return;
     const tip = ev.target.closest(".tip[data-tip]");
     if (!tip) return;
     const to = ev.relatedTarget;
@@ -105,11 +126,51 @@ document.body.addEventListener("htmx:afterSwap", (ev) => {
   });
   document.addEventListener("focusin", (ev) => {
     const tip = ev.target.closest(".tip[data-tip]");
-    if (tip) show(tip);
+    if (tip) show(tip, { pin: true });
   });
   document.addEventListener("focusout", (ev) => {
-    if (ev.target.closest(".tip[data-tip]")) hide();
+    const tip = ev.target.closest(".tip[data-tip]");
+    if (!tip) return;
+    const to = ev.relatedTarget;
+    if (to && tip.contains(to)) return;
+    hide();
   });
-  window.addEventListener("scroll", hide, true);
-  window.addEventListener("resize", hide);
+
+  // Toque / click: tip ao lado do botão não dispara o submit
+  document.addEventListener(
+    "click",
+    (ev) => {
+      const tip = ev.target.closest(".tip[data-tip]");
+      if (tip) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (activeTip === tip && pinned) {
+          hide();
+        } else {
+          show(tip, { pin: true });
+        }
+        return;
+      }
+      if (pinned && balloon && !balloon.contains(ev.target)) {
+        hide();
+      }
+    },
+    true
+  );
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (activeTip && pinned) {
+        placeBalloon(activeTip);
+      } else {
+        hide();
+      }
+    },
+    true
+  );
+  window.addEventListener("resize", () => {
+    if (activeTip) placeBalloon(activeTip);
+    else hide();
+  });
 })();

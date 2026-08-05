@@ -21,9 +21,9 @@
 <div class="section-label">Acervo {{ tip("Totais derivados dos processos já descobertos e salvos na base.") }}</div>
 <div class="kpi-grid">
   <div class="kpi">
-    <div class="label">Processos {{ tip("Quantidade total de CNJs no acervo. Em tramitação = com indício de andamento; encerrados = arquivados/extintos etc.") }}</div>
+    <div class="label">Processos {{ tip("Total de CNJs únicos no acervo. Em tramitação + encerrados + sem status claro = total.") }}</div>
     <div class="value">{{ portfolio.total_processes }}</div>
-    <div class="hint">{{ portfolio.active_count }} em tramitação · {{ portfolio.closed_count }} encerrados</div>
+    <div class="hint">{{ portfolio.active_count }} em tramitação · {{ portfolio.closed_count }} encerrados{% if portfolio.undefined_count %} · {{ portfolio.undefined_count }} sem status{% endif %}</div>
   </div>
   <div class="kpi">
     <div class="label">Sem status claro {{ tip("Capa ou movimentações sem situação útil (ex.: ---, inconsistente). Não significa processo ativo.") }}</div>
@@ -76,22 +76,23 @@
 
   <div>
     <div class="panel">
-      <h2>Por OAB {{ tip("Contagem por OAB cadastrada como critério. Processos no TJRJ podem ter vindo de OAB/SP, OAB/DF ou busca por nome — tribunal ≠ seccional da OAB.") }}</h2>
+      <h2>Por OAB {{ tip("CNJs em que a inscrição aparece no registro (DJEN/payload) ou no vínculo do critério. Um processo pode entrar em mais de uma OAB. Tribunal do processo ≠ seccional da OAB.") }}</h2>
       {% if portfolio.by_oab %}
       <div class="chip-cloud">
         {% for k, v in portfolio.by_oab.items() %}
-        <span class="badge soft {% if v == 0 %}badge-zero{% endif %}" title="{{ k }}: {{ v }} processo(s) vinculado(s) a este critério">{{ k }}: {{ v }}</span>
+        <span class="badge soft {% if v == 0 %}badge-zero{% endif %}" title="{{ k }}: {{ v }} processo(s) com esta OAB no registro ou vínculo">{{ k }}: {{ v }}</span>
         {% endfor %}
       </div>
       <p class="muted tip-note">
-        Contagem = processos vinculados à inscrição. Se aparecer 0, sincronize Critérios ou rode discovery —
-        a OAB no YAML deve ser igual à do tribunal (ex.: <span class="mono">2556/RJ</span>, sem sufixo A).
-        Tribunal (TJRJ) ≠ seccional da OAB.
+        {{ portfolio.oab_attributed_count or 0 }} processo(s) com OAB monitorada no registro ·
+        {{ portfolio.without_oab_count or 0 }} só por nome (sem OAB no DJEN).
+        A soma das OABs pode ser menor que o total do acervo — e um CNJ pode contar em mais de uma inscrição.
+        Em Critérios, use <strong>Sincronizar YAML</strong> para religar o histórico.
       </p>
       {% else %}
       <p class="muted">Sem critérios OAB ativos.</p>
       {% endif %}
-      <h2 style="margin-top:20px">Por tribunal {{ tip("Distribuição dos processos pelo tribunal do CNJ/capa — independente da seccional da OAB que descobriu o processo.") }}</h2>
+      <h2 style="margin-top:20px">Por tribunal {{ tip("Distribuição dos CNJs pelo tribunal da capa/número — independente da seccional da OAB. A soma das chips = total do acervo.") }}</h2>
       {% if portfolio.by_tribunal %}
       <div class="chip-cloud">
         {% for k, v in portfolio.by_tribunal.items() %}

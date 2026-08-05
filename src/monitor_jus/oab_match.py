@@ -81,13 +81,30 @@ def parse_oab_filter(text: str) -> tuple[str, str] | None:
 
 
 def extract_oabs_from_payload(payload: Any) -> set[tuple[str, str]]:
-    """Extrai identidades (digits, UF) de parties/lawyers ou texto do payload."""
+    """Extrai identidades (digits, UF) de parties/lawyers, DJEN ou texto do payload."""
     found: set[tuple[str, str]] = set()
     if not payload:
         return found
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
+            # DJEN destinatarioadvogados[].advogado: numero_oab + uf_oab (campos separados)
+            numero = (
+                node.get("numero_oab")
+                or node.get("numeroOab")
+                or node.get("numeroOAB")
+            )
+            uf = node.get("uf_oab") or node.get("ufOab") or node.get("ufOAB")
+            if numero and uf:
+                num = normalize_oab_numero(str(numero))
+                sec = str(uf).strip().upper()
+                if num and len(sec) == 2 and sec.isalpha():
+                    found.add(oab_identity(num, sec))
+            # Nesting comum: {"advogado": {"numero_oab": ..., "uf_oab": ...}}
+            adv = node.get("advogado")
+            if isinstance(adv, dict):
+                walk(adv)
+
             doc_type = str(
                 node.get("document_type")
                 or node.get("type")

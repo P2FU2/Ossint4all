@@ -47,6 +47,24 @@ def test_extract_oabs_from_slash_text():
     assert ("2556", "RJ") in extract_oabs_from_payload(payload)
 
 
+def test_extract_oabs_from_djen_structured_fields():
+    """DJEN usa numero_oab + uf_oab separados — não aparece como 138094/SP no JSON."""
+    payload = {
+        "djen": {
+            "destinatarioadvogados": [
+                {
+                    "advogado": {
+                        "nome": "FERNANDO CRESPO QUEIROZ NEVES",
+                        "numero_oab": "138094",
+                        "uf_oab": "SP",
+                    }
+                }
+            ]
+        }
+    }
+    assert ("138094", "SP") in extract_oabs_from_payload(payload)
+
+
 def test_criterion_matches_ignores_letter_suffix():
     assert criterion_matches_oab("RJ:2556A", ("2556", "RJ")) is True
     assert criterion_matches_oab("RJ:2556", ("2556", "RJ")) is True
