@@ -275,6 +275,7 @@ def build_pipeline_status(session: Session, settings: Settings) -> dict[str, Any
     return {
         "stages": stages,
         "runs": run_rows,
+        "ops": live.get("ops") or {},
         "dead_letters": [
             {
                 "id": d.id,

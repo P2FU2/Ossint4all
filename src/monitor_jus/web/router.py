@@ -415,6 +415,40 @@ def app_system(request: Request, user: User = Depends(require_admin)):
     )
 
 
+@router.post("/app/actions/ops-config")
+async def app_ops_config(
+    request: Request,
+    user: User = Depends(require_admin),
+) -> RedirectResponse:
+    """Salva config/ops.yaml a partir do formulário Disparar."""
+    from monitor_jus.ops_config import save_ops
+
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    data = {
+        "discovery": {
+            "lookback_days": form.get("discovery_lookback_days"),
+            "max_pages": form.get("discovery_max_pages"),
+            "search_oabs": "search_oabs" in form,
+            "search_names": "search_names" in form,
+            "search_processes": "search_processes" in form,
+            "search_companies": "search_companies" in form,
+        },
+        "bootstrap": {
+            "lookback_days": form.get("bootstrap_lookback_days"),
+            "max_pages": form.get("bootstrap_max_pages"),
+            "complete_missing_capa": "complete_missing_capa" in form,
+            "ignore_events_for_digest": "ignore_events_for_digest" in form,
+        },
+    }
+    try:
+        path = save_ops(data)
+        _flash(request, f"Configuração salva em {path}", "ok")
+    except Exception as exc:  # noqa: BLE001
+        _flash(request, f"Falha ao salvar ops: {exc}", "error")
+    return RedirectResponse(url="/app/acompanhamento", status_code=303)
+
+
 @router.post("/app/actions/enqueue")
 def app_enqueue(
     request: Request,

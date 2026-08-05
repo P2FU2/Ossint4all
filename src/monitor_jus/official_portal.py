@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -59,7 +60,12 @@ _DEFAULT_PORTAIS: dict[str, str] = {
         "&localPesquisa.cdLocal=-1"
         "&tipoNuProcesso=UNIFICADO"
     ),
-    "tjrj": "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublica?numProcesso={cnj_q}",
+    # Detalhe público — a SPA só auto-busca com codigoProcesso (CNJ 25 chars).
+    # A home #/consultapublica?numProcesso=… abre o formulário vazio.
+    "tjrj": (
+        "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublicap"
+        "?codigoProcesso={cnj}"
+    ),
     "tjmg": (
         "https://www4.tjmg.jus.br/juridico/sf/proc_resultado2.jsp"
         "?tipoPesquisa2=1&txtProcesso={digits}&comrCodigo={oooo}"
@@ -70,7 +76,14 @@ _DEFAULT_PORTAIS: dict[str, str] = {
     "tjpr": "https://consulta.tjpr.jus.br/projudi_consulta/",
     "tjsc": "https://eproc1g.tjsc.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
     "tjba": "https://projetos.tjba.jus.br/projudi/",
-    "tjce": "https://esaj.tjce.jus.br/cpopg/open.do",
+    # Demais e-SAJ (mesmo padrão cpopg/search.do do TJSP)
+    "tjce": (
+        "https://esaj.tjce.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
+        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+        "&foroNumeroUnificado={oooo}"
+        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
+        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    ),
     "tjgo": "https://projudi.tjgo.jus.br/ConsultaPublica",
     "tjdft": "https://pje.tjdft.jus.br/consultapublica/ConsultaPublica/listView.seam",
     "tjes": "https://sistemas.tjes.jus.br/consulta/",
@@ -79,11 +92,38 @@ _DEFAULT_PORTAIS: dict[str, str] = {
     "tjrn": "https://pje1g.tjrn.jus.br/consultapublica/ConsultaPublica/listView.seam",
     "tjma": "https://pje.tjma.jus.br/pje/ConsultaPublica/listView.seam",
     "tjmt": "https://pje.tjmt.jus.br/pje/ConsultaPublica/listView.seam",
-    "tjms": "https://esaj.tjms.jus.br/cpopg/open.do",
+    "tjms": (
+        "https://esaj.tjms.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
+        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+        "&foroNumeroUnificado={oooo}"
+        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
+        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    ),
+    "tjms_2g": (
+        "https://esaj.tjms.jus.br/cposg/search.do?conversationId=&paginaConsulta=0"
+        "&cbPesquisa=NUMPROC"
+        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+        "&foroNumeroUnificado={oooo}"
+        "&dePesquisa={cnj}"
+        "&localPesquisa.cdLocal=-1"
+        "&tipoNuProcesso=UNIFICADO"
+    ),
     "tjpa": "https://pje.tjpa.jus.br/pje/ConsultaPublica/listView.seam",
     "tjpi": "https://www.tjpi.jus.br/themisconsultas/",
-    "tjal": "https://www2.tjal.jus.br/cpopg/open.do",
-    "tjam": "https://consultasaj.tjam.jus.br/cpopg/open.do",
+    "tjal": (
+        "https://www2.tjal.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
+        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+        "&foroNumeroUnificado={oooo}"
+        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
+        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    ),
+    "tjam": (
+        "https://consultasaj.tjam.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
+        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+        "&foroNumeroUnificado={oooo}"
+        "&dadosConsulta.valorConsultaNuUnificado={cnj}"
+        "&dadosConsulta.tipoNuProcesso=UNIFICADO"
+    ),
     "tjac": "https://eproc.tjac.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
     "tjap": "https://tucujuris.tjap.jus.br/tucujuris/pages/consultar-processo/consultar-processo.html",
     "tjro": "https://www.tjro.jus.br/consultaprocessual/",
@@ -95,7 +135,10 @@ _DEFAULT_PORTAIS: dict[str, str] = {
         "?secao=TRF1&proc={cnj_q}"
     ),
     "trf2": "https://eproc.trf2.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
-    "trf3": "https://pje1g.trf3.jus.br/pje/ConsultaPublica/listView.seam",
+    # PJe listView não aceita CNJ na URL — consulta unificada do tribunal
+    "trf3": "https://web.trf3.jus.br/consultas/Internet/ConsultaProcessual",
+    "trf3_1g": "https://pje1g.trf3.jus.br/pje/ConsultaPublica/listView.seam",
+    "trf3_2g": "https://pje2g.trf3.jus.br/pje/ConsultaPublica/listView.seam",
     "trf4": "https://eproc.trf4.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
     "trf5": "https://pje.trf5.jus.br/pje/ConsultaPublica/listView.seam",
     "trf6": "https://eproc.trf6.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
@@ -107,9 +150,24 @@ _FALLBACK_HOME: dict[str, str] = {
     "tst": "https://www.tst.jus.br/",
     "trf1": "https://portal.trf1.jus.br/",
     "tjsp": "https://esaj.tjsp.jus.br/cpopg/open.do",
+    "tjms": "https://esaj.tjms.jus.br/cpopg/open.do",
+    "trf3": "https://web.trf3.jus.br/consultas/Internet/ConsultaProcessual",
 }
 
-_SEARCH_PREFILLED_COURTS = {"stf", "stj", "trf1", "tjsp", "tjsp_2g", "tjmg"}
+_SEARCH_PREFILLED_COURTS = {
+    "stf",
+    "stj",
+    "trf1",
+    "tjsp",
+    "tjsp_2g",
+    "tjmg",
+    "tjrj",
+    "tjms",
+    "tjms_2g",
+    "tjce",
+    "tjal",
+    "tjam",
+}
 
 
 @dataclass(frozen=True)
@@ -159,6 +217,16 @@ def _is_useless_portal_url(url: str | None) -> bool:
     }:
         return True
     if "dje.tjsp.jus.br" in low and "processo" not in low and "?" not in low:
+        return True
+    # TJRJ: busca pública sem codigoProcesso (ou só numProcesso) não pré-carrega
+    if "tjrj.jus.br/consultaprocessual" in low and "codigoprocesso=" not in low:
+        return True
+    # e-SAJ open.do / homepage sem search.do — não leva ao processo
+    if re.search(r"esaj\.[^/]+/cpopg/open\.do/?$", low) or re.search(
+        r"esaj\.[^/]+/cposg/open\.do/?$", low
+    ):
+        return True
+    if "/cpopg/open.do" in low and "search.do" not in low and "show.do" not in low:
         return True
     # PDF da comunicação no STJ — não é consulta do processo
     if "justica.web.stj.jus.br/api/pcp/documentos" in low:
@@ -296,12 +364,20 @@ def _classify_link(court_key: str, url: str) -> OfficialLink:
             confidence="low",
             requires_manual_search=True,
         )
-    if court_key in _SEARCH_PREFILLED_COURTS or "search.do" in low or "termo=" in low or "proc=" in low:
+    if (
+        court_key in _SEARCH_PREFILLED_COURTS
+        or "search.do" in low
+        or "termo=" in low
+        or "proc=" in low
+        or "codigoprocesso=" in low
+    ):
         return OfficialLink(
             url=url,
             court=court,
             link_type="PROCESS_SEARCH_PREFILLED",
-            confidence="high" if "search.do" in low or "termo=" in low else "medium",
+            confidence="high"
+            if "search.do" in low or "termo=" in low or "codigoprocesso=" in low
+            else "medium",
         )
     if "?" in url:
         return OfficialLink(
@@ -393,14 +469,14 @@ def resolve_official_link_result(
                 if isinstance(payload.get("datajud"), dict)
                 else None
             )
-    if key == "tjsp" and _is_second_degree(
+    if key in {"tjsp", "tjms"} and _is_second_degree(
         parts=parts,
         classe=str(classe) if classe else None,
         grau=str(grau) if grau else None,
         situacao=str(situacao) if situacao else None,
         has_second_degree=has_g2,
     ):
-        key = "tjsp_2g"
+        key = f"{key}_2g"
 
     if key == "stf" and parts:
         url = build_stf_search_url(parts.numero_formatado)

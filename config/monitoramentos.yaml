@@ -55,7 +55,10 @@ fontes:
   djen:
     enabled: true
     national_criteria_search: true
+    # DJEN_POLL horário: overlap curto para não perder publicação
     overlap_hours: 48
+    # BOOTSTRAP / HISTORICAL_DISCOVERY: ~3 anos de comunicações
+    historical_lookback_days: 1095
 
   datajud:
     enabled: true

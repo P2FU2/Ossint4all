@@ -59,37 +59,7 @@
 
   {% include "app/partials/send_report.html" %}
 
-  <div class="panel">
-    <h2>Disparar</h2>
-    <p class="muted" style="margin-top:-6px;margin-bottom:12px">Bootstrap e Discovery são bloqueados se já houver um em andamento.</p>
-    <div class="actions">
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="DAILY_DIGEST" />
-        <button class="btn" data-confirm="Enfileirar digest?">Digest</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
-        <button class="btn secondary" data-confirm="Enfileirar discovery?">Discovery</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="BOOTSTRAP" />
-        <button class="btn secondary" data-confirm="Rodar bootstrap (leitura inicial / redescoberta do acervo)? Continuar?">Bootstrap</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="RECONCILIATION" />
-        <button class="btn secondary" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="PROCESS_REFRESH" />
-        <button class="btn ghost" data-confirm="Enfileirar refresh?">Refresh</button>
-      </form>
-    </div>
-  </div>
+  {% include "app/partials/disparar_actions.html" %}
 
   <div class="panel">
     <h2>Recentes</h2>

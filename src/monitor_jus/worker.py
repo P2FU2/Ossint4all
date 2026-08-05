@@ -119,10 +119,18 @@ def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | Non
     settings = get_settings()
     if job_type == JobType.HISTORICAL_DISCOVERY.value:
         sync_criteria_from_config(session, settings)
-        return run_discovery(session, settings=settings, bootstrap_mode=False)
+        return run_discovery(
+            session,
+            settings=settings,
+            bootstrap_mode=False,
+            mode="historical",
+            purpose="discovery",
+        )
     if job_type == JobType.DJEN_POLL.value:
         sync_criteria_from_config(session, settings)
-        return run_djen_poll(session, settings=settings, bootstrap_mode=False)
+        return run_djen_poll(
+            session, settings=settings, bootstrap_mode=False, mode="incremental"
+        )
     if job_type == JobType.DIARY_SWEEP.value:
         return run_diary_sweep(session, settings=settings)
     if job_type == JobType.NATIONAL_RECONCILIATION.value:

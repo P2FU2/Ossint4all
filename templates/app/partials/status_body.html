@@ -46,32 +46,7 @@
     </div>
   </div>
 
-  <div class="panel">
-    <h2>Ações</h2>
-    <p class="muted" style="margin-top:-6px;margin-bottom:12px">Não dispare Bootstrap enquanto Discovery estiver rodando.</p>
-    <div class="actions">
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="DAILY_DIGEST" />
-        <button class="btn" data-confirm="Enfileirar DAILY_DIGEST?">Digest</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
-        <button class="btn secondary" data-confirm="Enfileirar discovery?">Discovery</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="RECONCILIATION" />
-        <button class="btn secondary" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
-      </form>
-      <form method="post" action="/app/actions/enqueue">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="BOOTSTRAP" />
-        <button class="btn ghost" data-confirm="Bootstrap só se necessário. Continuar?">Bootstrap</button>
-      </form>
-    </div>
-  </div>
+  {% include "app/partials/disparar_actions.html" %}
 
   <div class="panel">
     <h2>Runs recentes</h2>

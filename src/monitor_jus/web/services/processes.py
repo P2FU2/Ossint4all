@@ -415,17 +415,21 @@ def get_process_detail(session: Session, process_id: str) -> dict[str, Any] | No
     last_step = None
     if isinstance(payload.get("last_step"), dict):
         last_step = str(payload["last_step"].get("content") or payload["last_step"].get("nome") or "")
+    dj = payload.get("datajud") if isinstance(payload.get("datajud"), dict) else {}
+    movement_hint = last_step or (str(dj.get("last_movement_name") or "") or None)
 
     situacao_full, situacao_key = resolve_situacao_oficial(
-        proc.situacao, payload=payload, last_movement=last_step
+        proc.situacao, payload=payload, last_movement=movement_hint
     )
     if is_placeholder_status(proc.situacao) and situacao_full != "—":
         proc.situacao = situacao_full
 
-    outcome = classify_outcome(situacao_full if situacao_full != "—" else None, last_step=last_step)
-    if situacao_key in ("extinto", "arquivado", "baixado"):
+    outcome = classify_outcome(
+        situacao_full if situacao_full != "—" else None, last_step=movement_hint
+    )
+    if situacao_key in ("extinto", "arquivado", "baixado", "julgado", "cancelado", "encerrado"):
         outcome = "encerrado"
-    elif situacao_key == "em_grau_de_recurso":
+    elif situacao_key in ("suspenso", "em_grau_de_recurso"):
         outcome = "ativo"
 
     links = list(

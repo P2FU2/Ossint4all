@@ -74,6 +74,8 @@ _ENCERRADO = (
     "transitad",
     "finalizad",
     "encerrad",
+    "cancelad",
+    "cancelamento da distribui",
     "baix",
     "sobrestado definitivamente",
 )
@@ -313,6 +315,12 @@ def serialize_process_row(
         last_step = str(payload.get("last_step_content"))
 
     situacao_raw = proc.situacao
+    dj_early = payload.get("datajud") if isinstance(payload.get("datajud"), dict) else {}
+    movement_hint = (
+        last_movement
+        or last_step
+        or (str(dj_early.get("last_movement_name") or "") or None)
+    )
     # Se capa veio como "---", resolve pelo payload / última movimentação
     use_payload = payload if (payload and is_placeholder_status(situacao_raw)) else (
         payload if payload else None
@@ -320,12 +328,17 @@ def serialize_process_row(
     situacao_full, situacao_key = resolve_situacao_oficial(
         situacao_raw,
         payload=use_payload or (payload or None),
-        last_movement=last_movement or last_step,
+        last_movement=movement_hint,
     )
-    outcome = classify_outcome(situacao_full if situacao_full != "—" else None, last_step=last_step)
-    # Extinto / arquivado → encerrado
-    if situacao_key in ("extinto", "arquivado", "baixado", "julgado"):
+    outcome = classify_outcome(
+        situacao_full if situacao_full != "—" else None,
+        last_step=movement_hint,
+    )
+    # Terminais oficiais → encerrado; suspenso permanece ativo (ainda não baixado)
+    if situacao_key in ("extinto", "arquivado", "baixado", "julgado", "cancelado", "encerrado"):
         outcome = "encerrado"
+    elif situacao_key == "suspenso":
+        outcome = "ativo"
     elif situacao_key == "em_grau_de_recurso":
         outcome = "ativo"
 
@@ -333,8 +346,7 @@ def serialize_process_row(
     crits = criteria_labels or ["—"]
     crits_sorted = sorted(crits, key=lambda c: (0 if c.startswith("OAB ") else 1, c))
 
-    dj = payload.get("datajud") if isinstance(payload, dict) else None
-    dj = dj if isinstance(dj, dict) else {}
+    dj = dj_early
     summary = dj.get("instance_summary") if isinstance(dj.get("instance_summary"), dict) else {}
     inst_label = (
         summary.get("active_label")

@@ -135,7 +135,7 @@
         </td>
         <td class="cell-wide" title="{{ p.situacao }}">
           <div class="cell-clamp">
-            <span class="badge {% if p.situacao_key == 'extinto' or p.situacao_key == 'arquivado' or p.situacao_key == 'julgado' %}error{% elif p.situacao_key == 'em_grau_de_recurso' %}em_andamento{% elif p.situacao_key == 'sem_informacao' %}warn{% else %}soft{% endif %}">
+            <span class="badge {% if p.situacao_key in ['extinto', 'arquivado', 'julgado', 'cancelado', 'encerrado', 'baixado'] %}error{% elif p.situacao_key == 'suspenso' %}warn{% elif p.situacao_key == 'em_grau_de_recurso' %}em_andamento{% elif p.situacao_key == 'sem_informacao' %}warn{% else %}soft{% endif %}">
               {{ p.situacao_short or p.situacao }}
             </span>
           </div>

@@ -448,6 +448,22 @@ class Repository:
             ).all()
         )
 
+    def processes_incomplete_capa(self, *, limit: int = 500) -> list[Process]:
+        """Processos sem situação/classe úteis — candidatos a completar no bootstrap."""
+        placeholders = ("", "-", "---", "—", "n/d", "nd", "null", "none", "sem informação", "sem informacao")
+        rows = list(
+            self.session.scalars(select(Process).order_by(Process.created_at.asc())).all()
+        )
+        out: list[Process] = []
+        for proc in rows:
+            situ = (proc.situacao or "").strip().lower()
+            classe = (proc.classe or "").strip()
+            if not classe or situ in placeholders or not situ:
+                out.append(proc)
+            if len(out) >= limit:
+                break
+        return out
+
     # --- capabilities / subscriptions ---
     def upsert_capability(
         self, source: str, capability: str, *, enabled: bool, contracted: bool

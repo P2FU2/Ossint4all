@@ -50,3 +50,18 @@ def test_normalize_hits_sets_julgado_and_g2_capa():
 
 def test_situacao_key_julgado():
     assert normalize_situacao_key("Julgado") == "julgado"
+
+
+def test_normalize_hits_infer_cancelado():
+    g1 = {
+        "grau": "G1",
+        "tribunal": "TJSP",
+        "classe": {"nome": "Cumprimento Provisório de Sentença"},
+        "movimentos": [
+            {"nome": "Determinado o cancelamento da distribuição", "dataHora": "2025-01-14T10:00:00.000Z"},
+            {"nome": "Incidente Processual Cancelado", "dataHora": "2025-02-13T10:00:00.000Z"},
+        ],
+        "dataHoraUltimaAtualizacao": "2025-02-13T10:00:00.000Z",
+    }
+    norm = normalize_datajud_hits([g1])
+    assert norm["situacao"] == "Cancelado"

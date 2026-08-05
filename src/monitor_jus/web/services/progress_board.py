@@ -155,6 +155,8 @@ def build_progress_board(session: Session) -> dict[str, Any]:
     elif active:
         headline = active[0]
 
+    from monitor_jus.ops_config import ops_for_ui
+
     return {
         "active": active,
         "recent": recent,
@@ -165,4 +167,5 @@ def build_progress_board(session: Session) -> dict[str, Any]:
         "pending_count": sum(1 for j in active if j["status"] == JobStatus.PENDING.value),
         "refreshed_at": _fmt(utcnow()),
         "empty_bar": format_bar(0),
+        "ops": ops_for_ui(),
     }

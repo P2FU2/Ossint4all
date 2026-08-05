@@ -29,7 +29,10 @@ class Settings(BaseSettings):
     djen_enable: bool = True
     djen_base_url: str = "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
     djen_max_concurrency: int = 2
+    # Poll incremental (DJEN_POLL): overlap curto para não perder publicação
     djen_overlap_hours: int = 48
+    # Bootstrap / HISTORICAL_DISCOVERY: janela longa de republicações
+    djen_historical_lookback_days: int = 1095
 
     datajud_enable: bool = True
     datajud_mode: Literal["selective", "confirm_and_fallback", "fallback_only", "off"] = (

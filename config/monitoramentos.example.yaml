@@ -45,7 +45,10 @@ fontes:
   djen:
     enabled: true
     national_criteria_search: true
+    # Poll incremental (DJEN_POLL)
     overlap_hours: 48
+    # Bootstrap / discovery histórico (~3 anos)
+    historical_lookback_days: 1095
   datajud:
     enabled: true
     aliases_ativos: []

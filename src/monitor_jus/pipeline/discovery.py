@@ -13,6 +13,7 @@ from monitor_jus.config import Settings, get_settings, load_fontes
 from monitor_jus.db.models import Criterion, SourceCheckpoint
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
+from monitor_jus.ops_config import load_ops
 from monitor_jus.pipeline.communication_ingest import (
     finish_source_run,
     ingest,
@@ -26,12 +27,26 @@ from monitor_jus.validators import normalize_cnj
 logger = get_logger(__name__)
 
 
-def _overlap_window(settings: Settings, session: Session) -> tuple[date, date]:
-    fontes = load_fontes(settings)
-    djen_cfg = fontes.get("djen") or {}
-    overlap_h = int(djen_cfg.get("overlap_hours") or settings.djen_overlap_hours or 48)
+def _djen_cfg(settings: Settings) -> dict[str, Any]:
+    return load_fontes(settings).get("djen") or {}
+
+
+def _ops_bundle(settings: Settings) -> dict[str, Any]:
+    return load_ops(settings)
+
+
+def _incremental_window(settings: Settings, session: Session) -> tuple[date, date]:
+    """Janela curta do DJEN_POLL (overlap desde o último checkpoint)."""
+    ops = _ops_bundle(settings)
+    djen_cfg = _djen_cfg(settings)
+    overlap_h = int(
+        (ops.get("poll") or {}).get("overlap_hours")
+        or djen_cfg.get("overlap_hours")
+        or settings.djen_overlap_hours
+        or 48
+    )
     until = date.today()
-    # checkpoint de último sucesso
+    overlap_days = max(1, (overlap_h + 23) // 24)
     cp = session.scalar(
         select(SourceCheckpoint).where(
             SourceCheckpoint.source == "djen",
@@ -41,14 +56,73 @@ def _overlap_window(settings: Settings, session: Session) -> tuple[date, date]:
     if cp and isinstance(cp.cursor, dict) and cp.cursor.get("until"):
         try:
             last = date.fromisoformat(str(cp.cursor["until"])[:10])
-            start = last - timedelta(hours=overlap_h)  # type: ignore[arg-type]
-            # timedelta hours on date: use days
-            start = last - timedelta(days=max(1, overlap_h // 24))
+            start = last - timedelta(days=overlap_days)
         except ValueError:
-            start = until - timedelta(days=max(1, overlap_h // 24))
+            start = until - timedelta(days=overlap_days)
     else:
-        start = until - timedelta(days=max(1, overlap_h // 24))
+        start = until - timedelta(days=overlap_days)
     return start, until
+
+
+def _historical_window(
+    settings: Settings,
+    *,
+    purpose: str = "discovery",
+    lookback_days: int | None = None,
+) -> tuple[date, date]:
+    """Janela longa (BOOTSTRAP / HISTORICAL_DISCOVERY). Preferência: ops.yaml."""
+    ops = _ops_bundle(settings)
+    section = ops.get(purpose) if purpose in {"discovery", "bootstrap"} else ops.get("discovery")
+    section = section if isinstance(section, dict) else {}
+    djen_cfg = _djen_cfg(settings)
+    days = int(
+        lookback_days
+        or section.get("lookback_days")
+        or djen_cfg.get("historical_lookback_days")
+        or settings.djen_historical_lookback_days
+        or 1095
+    )
+    until = date.today()
+    return until - timedelta(days=max(1, days)), until
+
+
+def _resolve_window(
+    settings: Settings,
+    session: Session,
+    *,
+    mode: str,
+    purpose: str = "discovery",
+    lookback_days: int | None = None,
+) -> tuple[date, date]:
+    if mode == "historical":
+        return _historical_window(
+            settings, purpose=purpose, lookback_days=lookback_days
+        )
+    return _incremental_window(settings, session)
+
+
+def _search_flags(settings: Settings, purpose: str) -> dict[str, bool]:
+    ops = _ops_bundle(settings)
+    section = ops.get("discovery") if isinstance(ops.get("discovery"), dict) else {}
+    # Bootstrap herda os mesmos tipos de busca do discovery (config da UI)
+    return {
+        "OAB": bool(section.get("search_oabs", True)),
+        "NOME": bool(section.get("search_names", True)),
+        "PROCESSO": bool(section.get("search_processes", True)),
+        "CNPJ": bool(section.get("search_companies", True)),
+        "EMPRESA": bool(section.get("search_companies", True)),
+    }
+
+
+def _max_pages_for(settings: Settings, *, purpose: str, historical: bool) -> int:
+    if not historical:
+        return 10
+    ops = _ops_bundle(settings)
+    section = ops.get(purpose) if isinstance(ops.get(purpose), dict) else {}
+    try:
+        return max(5, min(200, int(section.get("max_pages") or 80)))
+    except (TypeError, ValueError):
+        return 80
 
 
 def _save_checkpoint(session: Session, until: date) -> None:
@@ -148,6 +222,7 @@ def search_oab_nationally(
     available_until: date,
     bootstrap_mode: bool,
     settings: Settings,
+    max_pages: int = 10,
 ) -> dict[str, Any]:
     try:
         oab = canonicalize_oab(crit.value)
@@ -183,7 +258,7 @@ def search_oab_nationally(
     totals = {"received": 0, "created": 0, "updated": 0, "rejected": 0}
     for criteria in variants:
         try:
-            items = client.search_all_pages(criteria, max_pages=10)
+            items = client.search_all_pages(criteria, max_pages=max_pages)
         except SourceOutcomeError as exc:
             logger.warning(
                 "djen_oab_search_failed",
@@ -213,6 +288,7 @@ def search_name_nationally(
     available_until: date,
     bootstrap_mode: bool,
     settings: Settings,
+    max_pages: int = 10,
 ) -> dict[str, Any]:
     criteria = DjenSearchCriteria(
         lawyer_name=crit.value,
@@ -220,7 +296,7 @@ def search_name_nationally(
         available_until=available_until,
     )
     try:
-        items = client.search_all_pages(criteria, max_pages=10)
+        items = client.search_all_pages(criteria, max_pages=max_pages)
     except SourceOutcomeError as exc:
         logger.warning("djen_name_search_failed", extra={"extra": {"msg": str(exc)}})
         return {"error": str(exc)}
@@ -244,6 +320,7 @@ def search_process_nationally(
     available_until: date,
     bootstrap_mode: bool,
     settings: Settings,
+    max_pages: int = 5,
 ) -> dict[str, Any]:
     parts = normalize_cnj(crit.value) or normalize_cnj(crit.label or "")
     numero = parts.numero_formatado if parts else crit.value
@@ -253,7 +330,7 @@ def search_process_nationally(
         available_until=available_until,
     )
     try:
-        items = client.search_all_pages(criteria, max_pages=5)
+        items = client.search_all_pages(criteria, max_pages=max_pages)
     except SourceOutcomeError as exc:
         return {"error": str(exc)}
     return _ingest_items(
@@ -276,6 +353,7 @@ def search_company_nationally(
     available_until: date,
     bootstrap_mode: bool,
     settings: Settings,
+    max_pages: int = 5,
 ) -> dict[str, Any]:
     name = (crit.label or crit.meta or {}).get("nome") if isinstance(crit.meta, dict) else None
     name = name or crit.label or crit.value
@@ -292,7 +370,7 @@ def search_company_nationally(
             available_until=available_until,
         )
         try:
-            items = client.search_all_pages(criteria, max_pages=5)
+            items = client.search_all_pages(criteria, max_pages=max_pages)
         except SourceOutcomeError:
             continue
         stats = _ingest_items(
@@ -314,30 +392,59 @@ def run_djen_poll(
     settings: Settings | None = None,
     *,
     bootstrap_mode: bool = False,
+    mode: str = "incremental",
+    purpose: str = "discovery",
+    lookback_days: int | None = None,
 ) -> dict[str, Any]:
+    """Poll DJEN.
+
+    mode:
+      - incremental: overlap curto desde checkpoint (DJEN_POLL horário/diário)
+      - historical: lookback longo, ignora checkpoint (BOOTSTRAP / HISTORICAL_DISCOVERY)
+    purpose: qual bloco do ops.yaml usar (discovery | bootstrap)
+    """
     settings = settings or get_settings()
     fontes = load_fontes(settings)
     if (fontes.get("djen") or {}).get("enabled") is False or not settings.djen_enable:
         return {"status": "skipped", "reason": "djen_disabled"}
 
     client = DjenClient(settings)
-    available_from, available_until = _overlap_window(settings, session)
+    available_from, available_until = _resolve_window(
+        settings,
+        session,
+        mode=mode,
+        purpose=purpose,
+        lookback_days=lookback_days,
+    )
+    historical = mode == "historical"
+    max_pages = _max_pages_for(settings, purpose=purpose, historical=historical)
+    flags = _search_flags(settings, purpose)
     criteria = list(session.scalars(select(Criterion).where(Criterion.active.is_(True))).all())
+    criteria = [c for c in criteria if flags.get(c.criterion_type, True)]
+    label = "HISTÓRICO" if historical else "POLL"
     report_progress(
         stage="djen_poll",
         done=0,
         total=max(len(criteria), 1),
-        message=f"DJEN_POLL · {len(criteria)} critério(s)",
+        message=(
+            f"DJEN {label} · {len(criteria)} critério(s) · "
+            f"{available_from.isoformat()} → {available_until.isoformat()}"
+        ),
         force=True,
     )
 
     summary: dict[str, Any] = {
+        "mode": mode,
+        "purpose": purpose,
         "window": {"from": available_from.isoformat(), "until": available_until.isoformat()},
+        "search_flags": flags,
+        "max_pages": max_pages,
         "oabs": [],
         "names": [],
         "processes": [],
         "companies": [],
         "errors": [],
+        "skipped_criteria": 0,
     }
 
     for idx, crit in enumerate(criteria):
@@ -359,6 +466,7 @@ def run_djen_poll(
                         available_until=available_until,
                         bootstrap_mode=bootstrap_mode,
                         settings=settings,
+                        max_pages=max_pages,
                     )
                 )
             elif crit.criterion_type == "NOME":
@@ -371,6 +479,7 @@ def run_djen_poll(
                         available_until=available_until,
                         bootstrap_mode=bootstrap_mode,
                         settings=settings,
+                        max_pages=max_pages,
                     )
                 )
             elif crit.criterion_type == "PROCESSO":
@@ -383,6 +492,7 @@ def run_djen_poll(
                         available_until=available_until,
                         bootstrap_mode=bootstrap_mode,
                         settings=settings,
+                        max_pages=max(5, max_pages // 4),
                     )
                 )
             elif crit.criterion_type in {"CNPJ", "EMPRESA"}:
@@ -395,6 +505,7 @@ def run_djen_poll(
                         available_until=available_until,
                         bootstrap_mode=bootstrap_mode,
                         settings=settings,
+                        max_pages=max(5, max_pages // 4),
                     )
                 )
         except Exception as exc:  # noqa: BLE001
@@ -402,12 +513,14 @@ def run_djen_poll(
             logger.exception("djen_poll_criterion_failed")
             summary["errors"].append({"criterion": crit.value, "error": str(exc)})
 
-    _save_checkpoint(session, available_until)
+    # Checkpoint só para poll incremental (histórico não “fecha” a janela curta)
+    if not historical:
+        _save_checkpoint(session, available_until)
     report_progress(
         stage="djen_poll",
         done=len(criteria),
         total=max(len(criteria), 1),
-        message="DJEN_POLL concluído",
+        message=f"DJEN {label} concluído",
         force=True,
     )
     return summary
@@ -418,9 +531,17 @@ def run_discovery(
     settings: Settings | None = None,
     *,
     bootstrap_mode: bool = False,
+    mode: str = "historical",
+    purpose: str = "discovery",
 ) -> dict[str, Any]:
-    """Compat: discovery = DJEN_POLL nacional."""
-    return run_djen_poll(session, settings=settings, bootstrap_mode=bootstrap_mode)
+    """Discovery nacional — por padrão histórico (bootstrap / HISTORICAL_DISCOVERY)."""
+    return run_djen_poll(
+        session,
+        settings=settings,
+        bootstrap_mode=bootstrap_mode,
+        mode=mode,
+        purpose=purpose,
+    )
 
 
 def backfill_oab_links_from_payloads(session: Session) -> int:

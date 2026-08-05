@@ -111,13 +111,26 @@ def _apply_datajud_enrichment(proc: Any, norm: dict[str, Any]) -> None:
     }
 
 
-def run_tracking(session: Session, settings: Settings | None = None) -> dict[str, Any]:
+def run_tracking(
+    session: Session,
+    settings: Settings | None = None,
+    *,
+    only_incomplete: bool = False,
+    force_all_incomplete: bool = False,
+) -> dict[str, Any]:
     settings = settings or get_settings()
     repo = Repository(session)
     datajud = DataJudClient(settings)
     freq_cfg = load_yaml(settings.config_path("check_frequency.yaml"))
 
-    due = repo.processes_due()
+    if only_incomplete:
+        due = repo.processes_incomplete_capa(limit=800)
+        label = "CAPA_INCOMPLETA"
+    else:
+        due = repo.processes_due()
+        label = "PROCESS_REFRESH"
+    # force_all_incomplete: ignore next_check_at (já filtrado por incompletos)
+    _ = force_all_incomplete
     refreshed = 0
     skipped_stf = 0
     outcomes: list[dict[str, Any]] = []
@@ -126,7 +139,7 @@ def run_tracking(session: Session, settings: Settings | None = None) -> dict[str
         stage="tracking",
         done=0,
         total=n_due,
-        message=f"PROCESS_REFRESH · {len(due)} processo(s)",
+        message=f"{label} · {len(due)} processo(s)",
         force=True,
     )
 

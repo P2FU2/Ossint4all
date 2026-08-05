@@ -114,6 +114,57 @@ def test_tjsp_esaj_link():
     assert "1000123-45.2023.8.26.0100" in link
 
 
+CNJ_TJRJ = "3062640-09.2025.8.19.0001"
+
+
+def test_tjrj_uses_consultapublicap_codigo_processo():
+    result = resolve_official_link_result(CNJ_TJRJ, tribunal="TJRJ")
+    assert result.link_type == "PROCESS_SEARCH_PREFILLED"
+    assert "consultapublicap" in result.url
+    assert f"codigoProcesso={CNJ_TJRJ}" in result.url
+    assert "numProcesso=" not in result.url
+
+
+def test_tjrj_rejects_empty_search_and_rebuilds():
+    result = resolve_official_link_result(
+        CNJ_TJRJ,
+        tribunal="TJRJ",
+        existing=(
+            "https://www3.tjrj.jus.br/consultaprocessual/"
+            f"#/consultapublica?numProcesso={CNJ_TJRJ}"
+        ),
+    )
+    assert "consultapublicap" in result.url
+    assert f"codigoProcesso={CNJ_TJRJ}" in result.url
+
+
+CNJ_TJMS = "0800123-45.2023.8.12.0001"
+
+
+def test_tjms_uses_esaj_search_not_open():
+    result = resolve_official_link_result(CNJ_TJMS, tribunal="TJMS")
+    assert "esaj.tjms.jus.br" in result.url
+    assert "search.do" in result.url
+    assert "open.do" not in result.url
+    assert "0800123-45.2023" in result.url
+
+
+def test_tjms_rejects_open_do_homepage():
+    result = resolve_official_link_result(
+        CNJ_TJMS,
+        tribunal="TJMS",
+        existing="https://esaj.tjms.jus.br/cpopg/open.do",
+    )
+    assert "search.do" in result.url
+
+
+def test_trf3_avoids_empty_pje_listview():
+    cnj = "0000123-45.2023.4.03.6100"
+    result = resolve_official_link_result(cnj, tribunal="TRF3")
+    assert "listview.seam" not in result.url.lower()
+    assert "trf3.jus.br" in result.url.lower()
+
+
 def test_prefers_payload_url_when_useful():
     link = resolve_official_link(
         CNJ_TJSP_1G,

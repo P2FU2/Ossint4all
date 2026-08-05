@@ -1,4 +1,4 @@
-"""Bootstrap histórico — baseline sem flood de novidades."""
+"""Bootstrap histórico — baseline sem flood de novidades + completa capas faltantes."""
 
 from __future__ import annotations
 
@@ -6,15 +6,17 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from monitor_jus.config import Settings, get_settings, load_monitoramentos
-from monitor_jus.db.models import BootstrapState, Criterion, CriterionLink
+from monitor_jus.db.models import BootstrapState, Criterion, Event
 from monitor_jus.db.repository import Repository
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.models import NotifyStatus
+from monitor_jus.ops_config import load_ops
 from monitor_jus.pipeline.discovery import run_discovery
+from monitor_jus.pipeline.tracking import run_tracking
 from monitor_jus.progress import report as report_progress
 from monitor_jus.security import only_digits
 from monitor_jus.validators import normalize_cnj, normalize_oab_numero, validate_cpf, validate_oab
@@ -36,26 +38,57 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
     repo = Repository(session)
     state = ensure_bootstrap_row(session)
     first_run = not (state.completed and state.baseline_at)
+    ops = load_ops(settings)
+    boot_cfg = ops.get("bootstrap") if isinstance(ops.get("bootstrap"), dict) else {}
+    complete_capa = bool(boot_cfg.get("complete_missing_capa", True))
+    ignore_events = bool(boot_cfg.get("ignore_events_for_digest", True))
 
+    total_steps = 3 if complete_capa else 2
     report_progress(
         stage="bootstrap",
         done=0,
-        total=2,
-        message="Bootstrap · discovery baseline",
+        total=total_steps,
+        message="Bootstrap · discovery histórica no DJEN",
         force=True,
     )
-    # Sempre redescobre/atualiza o acervo; só na 1ª execução move o cursor do digest
-    result = run_discovery(session, settings=settings, bootstrap_mode=True)
-    report_progress(stage="bootstrap_finalize", done=1.5, total=2, message="Finalizando baseline")
-    # Marca eventos criados no bootstrap como IGNORED (não vão para digest)
-    from monitor_jus.db.models import Event
-    from sqlalchemy import update
-
-    session.execute(
-        update(Event)
-        .where(Event.notify_status == NotifyStatus.PENDING_NOTIFY.value)
-        .values(notify_status=NotifyStatus.IGNORED.value)
+    # Discovery longa (ops.yaml → bootstrap.lookback_days); eventos ignorados no digest
+    result = run_discovery(
+        session,
+        settings=settings,
+        bootstrap_mode=ignore_events,
+        mode="historical",
+        purpose="bootstrap",
     )
+    report_progress(
+        stage="bootstrap_finalize",
+        done=1,
+        total=total_steps,
+        message="Finalizando baseline (eventos)",
+        force=True,
+    )
+
+    if ignore_events:
+        session.execute(
+            update(Event)
+            .where(Event.notify_status == NotifyStatus.PENDING_NOTIFY.value)
+            .values(notify_status=NotifyStatus.IGNORED.value)
+        )
+
+    capa_result: dict[str, Any] | None = None
+    if complete_capa:
+        report_progress(
+            stage="bootstrap_capa",
+            done=2,
+            total=total_steps,
+            message="Completando capas faltantes (DataJud)",
+            force=True,
+        )
+        capa_result = run_tracking(
+            session,
+            settings=settings,
+            only_incomplete=True,
+            force_all_incomplete=True,
+        )
 
     now = datetime.now(timezone.utc)
     if first_run:
@@ -66,16 +99,24 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
     session.flush()
     report_progress(
         stage="bootstrap",
-        done=2,
-        total=2,
+        done=total_steps,
+        total=total_steps,
         message="Bootstrap concluído",
         force=True,
     )
-    logger.info("bootstrap_completed", extra={"extra": result})
+    logger.info(
+        "bootstrap_completed",
+        extra={"extra": {"discovery": result, "capa": capa_result}},
+    )
     return {
         "status": "completed" if first_run else "refreshed",
         "baseline_at": (state.baseline_at or now).isoformat(),
         "discovery": result,
+        "capa_completion": capa_result,
+        "ops": {
+            "lookback_days": boot_cfg.get("lookback_days"),
+            "complete_missing_capa": complete_capa,
+        },
     }
 
 

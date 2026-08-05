@@ -15,6 +15,7 @@ from monitor_jus.instances import (
     summarize_instances,
 )
 from monitor_jus.official_portal import resolve_official_link
+from monitor_jus.pipeline.status_oficial import normalize_situacao_key, situacao_label
 from monitor_jus.sources.datajud import grau_rank, prefer_datajud_hit
 
 _JULGADO_RE = re.compile(
@@ -24,6 +25,17 @@ _JULGADO_RE = re.compile(
 _RECURSO_RE = re.compile(
     r"(remetid[oa].*tribunal|grau\s+de\s+recurso|recurso|remessa.*tribunal|col[eé]gio\s+recursal)",
     re.IGNORECASE,
+)
+# Ordem: terminais primeiro (badge e-SAJ / modal cposg)
+_SITUACAO_PRIORITY = (
+    "cancelado",
+    "extinto",
+    "encerrado",
+    "julgado",
+    "baixado",
+    "arquivado",
+    "suspenso",
+    "em_grau_de_recurso",
 )
 
 
@@ -75,7 +87,10 @@ def _assunto_principal(source: dict[str, Any]) -> str | None:
 
 
 def _infer_situacao_from_hits(sources: list[dict[str, Any]]) -> str | None:
-    """Infere status de capa a partir de G1/G2 e movimentos."""
+    """Infere status de capa a partir de G1/G2 e movimentos.
+
+    Cobre badges e-SAJ (Cancelado, Suspenso) e modal cposg ("2º Grau Encerrado").
+    """
     if not sources:
         return None
 
@@ -83,15 +98,28 @@ def _infer_situacao_from_hits(sources: list[dict[str, Any]]) -> str | None:
     has_g2 = any(grau_rank(g) >= 2 for g in graus)
     has_g1 = any(grau_rank(g) == 1 for g in graus)
 
-    # Varre movimentos do grau preferido e de todos
     preferred = prefer_datajud_hit(sources)
-    blobs: list[str] = []
+    # Movimentos do mais recente ao mais antigo (preferido primeiro)
+    ordered_movs: list[str] = []
+    seen: set[str] = set()
     for src in [preferred, *sources]:
         for mov in reversed(src.get("movimentos") or []):
-            if isinstance(mov, dict) and mov.get("nome"):
-                blobs.append(str(mov["nome"]))
+            if not isinstance(mov, dict) or not mov.get("nome"):
+                continue
+            nome = str(mov["nome"]).strip()
+            if not nome or nome in seen:
+                continue
+            seen.add(nome)
+            ordered_movs.append(nome)
 
-    joined = " | ".join(blobs[:30])
+    for nome in ordered_movs:
+        key = normalize_situacao_key(nome)
+        if key in _SITUACAO_PRIORITY:
+            if key == "arquivado" and "definitiv" in nome.lower():
+                return "Extinto"
+            return situacao_label(key)
+
+    joined = " | ".join(ordered_movs[:30])
     if _JULGADO_RE.search(joined):
         return "Julgado"
 
@@ -109,6 +137,9 @@ def _infer_situacao_from_hits(sources: list[dict[str, Any]]) -> str | None:
         # Duas capas: 1º grau = "Em grau de recurso"; sem julgamento explícito no G2
         return "Em grau de recurso"
     if has_g2:
+        # Modal cposg frequentemente mostra "2º Grau Encerrado" sem movimento homônimo
+        if re.search(r"\bencerrad", joined, re.IGNORECASE):
+            return "Encerrado"
         return "Em tramitação"
     if has_g1 and _RECURSO_RE.search(joined):
         return "Em grau de recurso"
