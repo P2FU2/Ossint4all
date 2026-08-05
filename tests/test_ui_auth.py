@@ -16,8 +16,8 @@ def ui_client(tmp_path, monkeypatch):
     monkeypatch.setenv("UI_SESSION_SECRET", "test-ui-secret")
     monkeypatch.setenv("UI_ADMIN_USER", "admin")
     monkeypatch.setenv("UI_ADMIN_PASSWORD", "senha-forte-123")
-    monkeypatch.setenv("JUDIT_WEBHOOK_AUTH_MODE", "static_token")
-    monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", "tok")
+    monkeypatch.setenv("DJEN_ENABLE", "true")
+    monkeypatch.setenv("DATAJUD_ENABLE", "true")
 
     from monitor_jus.config import get_settings
     from monitor_jus.db.session import reset_engine

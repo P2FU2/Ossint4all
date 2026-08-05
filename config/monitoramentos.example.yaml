@@ -1,30 +1,56 @@
 monitoramentos:
   oabs:
-    - numero: "123456"
+    - numero: "138094"
       seccional: "SP"
-      responsavel: "Advogado 1"
+      responsavel: "Nome do Advogado"
+      ativo: true
 
-    - numero: "654321"
-      seccional: "DF"
-      responsavel: "Advogado 2"
+    - numero: "2556"
+      seccional: "RJ"
+      responsavel: "Nome do Advogado"
+      ativo: true
+      sufixo: null
 
-  cpfs:
-    - cpf: "00000000000"
-      nome: "Pessoa 1"
-
-    - cpf: "11111111111"
-      nome: "Pessoa 2"
+  cpfs: []
 
   nomes:
-    - "Nome Completo 1"
-    - "Nome Completo 2"
+    - nome: "Nome Completo do Advogado"
+      ativo: true
+      requires_secondary_evidence: true
 
-  processos:
-    - "0000000-00.0000.0.00.0000"
+  processos: []
 
-  empresas:
-    - nome: "Empresa Exemplo Ltda."
-      cnpj: "00000000000100"
+  empresas: []
 
-# Opcional: restringe fallback DataJud a estes aliases
-tribunais_ativos: []
+cobertura:
+  mode: "national"
+  instancias:
+    primeiro_grau: true
+    segundo_grau: true
+    superiores: true
+    stf: true
+  segmentos:
+    estadual: true
+    federal: true
+    trabalho: true
+    eleitoral: true
+    militar: true
+  tribunais_destaque:
+    - STF
+    - STJ
+    - TRF1
+  tribunais_ativos: []
+
+fontes:
+  djen:
+    enabled: true
+    national_criteria_search: true
+    overlap_hours: 48
+  datajud:
+    enabled: true
+    aliases_ativos: []
+    excluded_courts:
+      - STF
+  cna:
+    enabled: false
+    api_token: null

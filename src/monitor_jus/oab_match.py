@@ -138,10 +138,23 @@ def extract_oabs_from_payload(payload: Any) -> set[tuple[str, str]]:
 
 
 def criterion_matches_oab(crit_value: str, identity: tuple[str, str]) -> bool:
+    """Match tipado: UF+dígitos — UI/filtros. Confirmação forte usa CanonicalOab."""
     parsed = parse_oab_criterion_value(crit_value)
     if not parsed:
         return False
     return oab_identity(parsed[0], parsed[1]) == identity
+
+
+def criterion_confirms_oab(crit_value: str, hit_numero: str, hit_uf: str) -> bool:
+    """Confirmação forte: sufixo faz parte da identidade (RJ-2556 ≠ RJ-2556A)."""
+    from monitor_jus.canonical_oab import canonicalize_oab, OabCanonicalizeError
+
+    try:
+        crit = canonicalize_oab(crit_value)
+        hit = canonicalize_oab(f"{hit_uf}-{hit_numero}" if hit_uf else hit_numero, default_state=hit_uf)
+    except OabCanonicalizeError:
+        return False
+    return crit.matches_criterion(hit)
 
 
 def filter_matches_oab_text(filter_text: str, criteria_labels: str) -> bool:

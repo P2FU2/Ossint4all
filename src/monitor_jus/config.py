@@ -26,26 +26,10 @@ class Settings(BaseSettings):
     tz: str = "America/Sao_Paulo"
     job_max_attempts: int = 3
 
-    judit_api_key: str = ""
-    judit_requests_base_url: str = "https://requests.production.judit.io"
-    judit_tracking_base_url: str = "https://tracking.production.judit.io"
-    judit_enable_historical_search: bool = False
-    judit_enable_oab: bool = False
-    judit_enable_cpf_cnpj: bool = False
-    judit_enable_name: bool = False
-    judit_enable_process_tracking: bool = False
-    judit_enable_document_tracking: bool = False
-    judit_enable_djen: bool = False
-    judit_enable_attachments: bool = False
-    judit_max_concurrency: int = 3
-
-    judit_webhook_auth_mode: Literal["none", "static_token", "hmac", "ip_allowlist"] = (
-        "static_token"
-    )
-    judit_webhook_token: str = ""
-    judit_webhook_signature_header: str = ""
-    judit_webhook_signature_algorithm: str = "sha256"
-    judit_webhook_allowed_ips: str = ""
+    djen_enable: bool = True
+    djen_base_url: str = "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
+    djen_max_concurrency: int = 2
+    djen_overlap_hours: int = 48
 
     datajud_enable: bool = True
     datajud_mode: Literal["selective", "confirm_and_fallback", "fallback_only", "off"] = (
@@ -55,6 +39,9 @@ class Settings(BaseSettings):
     datajud_api_key_url: str = "https://datajud-wiki.cnj.jus.br/api-publica/acesso/"
     datajud_max_concurrency: int = 3
     datajud_base_url: str = "https://api-publica.datajud.cnj.jus.br"
+
+    cna_enabled: bool = False
+    cna_api_token: str = ""
 
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-4"
@@ -73,16 +60,10 @@ class Settings(BaseSettings):
     config_dir: str = "config"
     outbox_dir: str = "data/outbox"
 
-    # Painel web (login humano — separado do API_TRIGGER_TOKEN)
     ui_session_secret: str = "change-me-ui-session-secret"
     ui_admin_user: str = "admin"
     ui_admin_password: str = ""
     ui_session_hours: int = 72
-
-    @field_validator("judit_webhook_allowed_ips", mode="before")
-    @classmethod
-    def _ips(cls, v: Any) -> str:
-        return v or ""
 
     @property
     def is_production(self) -> bool:
@@ -91,22 +72,6 @@ class Settings(BaseSettings):
     @property
     def openrouter_fallback_list(self) -> list[str]:
         return [m.strip() for m in self.openrouter_fallback_models.split(",") if m.strip()]
-
-    @property
-    def webhook_allowed_ip_list(self) -> list[str]:
-        return [i.strip() for i in self.judit_webhook_allowed_ips.split(",") if i.strip()]
-
-    def judit_flags(self) -> dict[str, bool]:
-        return {
-            "historical_search": self.judit_enable_historical_search,
-            "oab": self.judit_enable_oab,
-            "cpf_cnpj": self.judit_enable_cpf_cnpj,
-            "name": self.judit_enable_name,
-            "process_tracking": self.judit_enable_process_tracking,
-            "document_tracking": self.judit_enable_document_tracking,
-            "djen": self.judit_enable_djen,
-            "attachments": self.judit_enable_attachments,
-        }
 
     def config_path(self, name: str) -> Path:
         return Path(self.config_dir) / name
@@ -132,3 +97,19 @@ def load_monitoramentos(settings: Settings | None = None) -> dict[str, Any]:
             return load_yaml(example)
         return {"monitoramentos": {}}
     return load_yaml(path)
+
+
+def load_cobertura(settings: Settings | None = None) -> dict[str, Any]:
+    cfg = load_monitoramentos(settings)
+    cobertura = dict(cfg.get("cobertura") or {})
+    # merge tribunais_destaque.yaml
+    s = settings or get_settings()
+    extra = load_yaml(s.config_path("tribunais_destaque.yaml"))
+    if not cobertura.get("tribunais_destaque") and extra.get("tribunais_destaque"):
+        cobertura["tribunais_destaque"] = extra["tribunais_destaque"]
+    return cobertura
+
+
+def load_fontes(settings: Settings | None = None) -> dict[str, Any]:
+    cfg = load_monitoramentos(settings)
+    return dict(cfg.get("fontes") or {})

@@ -2,10 +2,9 @@ confirmar_datajud:
   processo_descoberto: true
   movimentacao_processual: false
   evento_corrigido: true
-  dados_incompletos_judit: true
-  falha_judit: true
+  dados_incompletos: true
   reconciliacao_semanal: true
 
 # Segmento CNJ do STF — nunca consultar DataJud
 nunca_consultar_segmentos:
-  - "1"  # STF (quando aplicável na numeração)
+  - "1"  # STF

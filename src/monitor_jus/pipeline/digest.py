@@ -99,12 +99,18 @@ def build_and_send_digest(
 
     report_progress(stage="digest_html", done=3, total=5, message="Gerando HTML")
     quarantine_count = repo.count_quarantine_open()
+    from monitor_jus.report.html_report import recent_source_failures
+
+    source_failures = recent_source_failures(session)
     html = render_digest_html(
         events,
         quarantine_count=quarantine_count,
         settings=settings,
         zero=not events,
         portfolio=portfolio,
+        failures=[
+            f"{f['source']}/{f['court']}: {f['error']}" for f in source_failures
+        ],
     )
     html_path, pdf_path = _artifact_paths(settings, digest.id, digest.reference_date)
     html_path.parent.mkdir(parents=True, exist_ok=True)

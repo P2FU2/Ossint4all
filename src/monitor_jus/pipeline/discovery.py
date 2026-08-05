@@ -1,325 +1,457 @@
-"""Descoberta de processos via Judit (OAB/CPF/CNPJ/nome)."""
+"""Descoberta nacional via DJEN (busca por critérios — sem tribunal prévio)."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from monitor_jus.config import Settings, get_settings
-from monitor_jus.db.models import Criterion
-from monitor_jus.db.repository import Repository
+from monitor_jus.canonical_oab import canonicalize_oab, OabCanonicalizeError
+from monitor_jus.config import Settings, get_settings, load_fontes
+from monitor_jus.db.models import Criterion, SourceCheckpoint
 from monitor_jus.exceptions import SourceOutcomeError
 from monitor_jus.logging_setup import get_logger
-from monitor_jus.pipeline.normalize import normalize_datajud_source
-from monitor_jus.oab_match import (
-    criterion_matches_oab,
-    extract_oabs_from_payload,
-    parse_oab_criterion_value,
+from monitor_jus.pipeline.communication_ingest import (
+    finish_source_run,
+    ingest,
+    start_source_run,
 )
-from monitor_jus.pipeline.portfolio import criterion_display_label
-from monitor_jus.pipeline.status_oficial import clean_status_text, extract_status_from_payload
 from monitor_jus.progress import raise_if_cancelled, report as report_progress
-from monitor_jus.sources.datajud import DataJudClient
-from monitor_jus.sources.judit.lawsuits import JuditLawsuitsService
-from monitor_jus.sources.judit.requests import JuditRequestsService
+from monitor_jus.sources.djen.client import DjenClient
+from monitor_jus.sources.djen.criteria import DjenSearchCriteria
 from monitor_jus.validators import normalize_cnj
 
 logger = get_logger(__name__)
 
 
-def _extract_cnjs_from_judit_response(data: dict[str, Any]) -> list[str]:
-    found: list[str] = []
-    stack: list[Any] = [data]
-    while stack:
-        cur = stack.pop()
-        if isinstance(cur, dict):
-            for k, v in cur.items():
-                if k in ("code", "cnj", "numero_cnj", "numeroProcesso", "lawsuit_cnj") and v:
-                    parts = normalize_cnj(str(v))
-                    if parts:
-                        found.append(parts.numero_formatado)
-                else:
-                    stack.append(v)
-        elif isinstance(cur, list):
-            stack.extend(cur)
-    return list(dict.fromkeys(found))
+def _overlap_window(settings: Settings, session: Session) -> tuple[date, date]:
+    fontes = load_fontes(settings)
+    djen_cfg = fontes.get("djen") or {}
+    overlap_h = int(djen_cfg.get("overlap_hours") or settings.djen_overlap_hours or 48)
+    until = date.today()
+    # checkpoint de último sucesso
+    cp = session.scalar(
+        select(SourceCheckpoint).where(
+            SourceCheckpoint.source == "djen",
+            SourceCheckpoint.checkpoint_key == "last_poll_success",
+        )
+    )
+    if cp and isinstance(cp.cursor, dict) and cp.cursor.get("until"):
+        try:
+            last = date.fromisoformat(str(cp.cursor["until"])[:10])
+            start = last - timedelta(hours=overlap_h)  # type: ignore[arg-type]
+            # timedelta hours on date: use days
+            start = last - timedelta(days=max(1, overlap_h // 24))
+        except ValueError:
+            start = until - timedelta(days=max(1, overlap_h // 24))
+    else:
+        start = until - timedelta(days=max(1, overlap_h // 24))
+    return start, until
 
 
-def _link_oab_criteria_from_payload(
-    repo: Repository,
-    oab_criteria: list[Criterion],
-    process_id: str,
-    payload: dict[str, Any] | None,
-) -> int:
-    """Vincula OABs monitoradas quando a inscrição aparece nas partes do processo."""
-    if not payload or not oab_criteria:
-        return 0
-    identities = extract_oabs_from_payload(payload)
-    if not identities:
-        return 0
-    linked = 0
-    for crit in oab_criteria:
-        for identity in identities:
-            if criterion_matches_oab(crit.value, identity):
-                repo.link_criterion_process(crit.id, process_id)
-                linked += 1
-                break
-    return linked
+def _save_checkpoint(session: Session, until: date) -> None:
+    cp = session.scalar(
+        select(SourceCheckpoint).where(
+            SourceCheckpoint.source == "djen",
+            SourceCheckpoint.checkpoint_key == "last_poll_success",
+        )
+    )
+    cursor = {"until": until.isoformat(), "at": datetime.now(timezone.utc).isoformat()}
+    if not cp:
+        from uuid import uuid4
+
+        session.add(
+            SourceCheckpoint(
+                id=str(uuid4()),
+                source="djen",
+                checkpoint_key="last_poll_success",
+                cursor=cursor,
+            )
+        )
+    else:
+        cp.cursor = cursor
+    session.flush()
+
+
+def _ingest_items(
+    session: Session,
+    items: list[dict[str, Any]],
+    *,
+    channel: str,
+    bootstrap_mode: bool,
+    settings: Settings,
+    job_type: str,
+    criteria_id: str | None,
+) -> dict[str, int]:
+    run = start_source_run(
+        session,
+        job_type=job_type,
+        source="DJEN",
+        criteria_id=criteria_id,
+    )
+    created = updated = rejected = 0
+    try:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            out = ingest(
+                session,
+                source="DJEN",
+                discovery_channel=channel,
+                raw_payload=item,
+                settings=settings,
+                bootstrap_mode=bootstrap_mode,
+                source_run_id=run.id,
+            )
+            if out.get("created"):
+                created += 1
+            elif out.get("updated"):
+                updated += 1
+            if out.get("rejected") or out.get("quarantined"):
+                rejected += 1
+        finish_source_run(
+            run,
+            status="SUCCESS",
+            items_received=len(items),
+            items_created=created,
+            items_updated=updated,
+            items_rejected=rejected,
+        )
+    except Exception as exc:  # noqa: BLE001
+        finish_source_run(
+            run,
+            status="FAILED",
+            items_received=len(items),
+            items_created=created,
+            items_updated=updated,
+            items_rejected=rejected,
+            error_code=getattr(exc, "code", "FAILED"),
+            error_message=str(exc),
+        )
+        raise
+    return {
+        "received": len(items),
+        "created": created,
+        "updated": updated,
+        "rejected": rejected,
+    }
+
+
+def search_oab_nationally(
+    session: Session,
+    client: DjenClient,
+    crit: Criterion,
+    *,
+    available_from: date,
+    available_until: date,
+    bootstrap_mode: bool,
+    settings: Settings,
+) -> dict[str, Any]:
+    try:
+        oab = canonicalize_oab(crit.value)
+    except OabCanonicalizeError as exc:
+        return {"error": str(exc)}
+    if not oab.state:
+        return {"error": "OAB sem UF"}
+
+    variants = [
+        DjenSearchCriteria(
+            oab_number=f"{oab.number}{oab.suffix or ''}",
+            oab_state=oab.state,
+            available_from=available_from,
+            available_until=available_until,
+        ),
+        DjenSearchCriteria(
+            oab_number=oab.number,
+            oab_state=oab.state,
+            available_from=available_from,
+            available_until=available_until,
+        ),
+    ]
+    # nome complementar (não confirma sozinho)
+    if crit.label:
+        variants.append(
+            DjenSearchCriteria(
+                lawyer_name=crit.label,
+                available_from=available_from,
+                available_until=available_until,
+            )
+        )
+
+    totals = {"received": 0, "created": 0, "updated": 0, "rejected": 0}
+    for criteria in variants:
+        try:
+            items = client.search_all_pages(criteria, max_pages=10)
+        except SourceOutcomeError as exc:
+            logger.warning(
+                "djen_oab_search_failed",
+                extra={"extra": {"criterion": crit.value, "code": exc.code, "msg": str(exc)}},
+            )
+            continue
+        stats = _ingest_items(
+            session,
+            items,
+            channel="OAB_SEARCH" if criteria.oab_number else "NAME_SEARCH",
+            bootstrap_mode=bootstrap_mode,
+            settings=settings,
+            job_type="DJEN_POLL",
+            criteria_id=crit.id,
+        )
+        for k in totals:
+            totals[k] += stats[k]
+    return totals
+
+
+def search_name_nationally(
+    session: Session,
+    client: DjenClient,
+    crit: Criterion,
+    *,
+    available_from: date,
+    available_until: date,
+    bootstrap_mode: bool,
+    settings: Settings,
+) -> dict[str, Any]:
+    criteria = DjenSearchCriteria(
+        lawyer_name=crit.value,
+        available_from=available_from,
+        available_until=available_until,
+    )
+    try:
+        items = client.search_all_pages(criteria, max_pages=10)
+    except SourceOutcomeError as exc:
+        logger.warning("djen_name_search_failed", extra={"extra": {"msg": str(exc)}})
+        return {"error": str(exc)}
+    return _ingest_items(
+        session,
+        items,
+        channel="NAME_SEARCH",
+        bootstrap_mode=bootstrap_mode,
+        settings=settings,
+        job_type="DJEN_POLL",
+        criteria_id=crit.id,
+    )
+
+
+def search_process_nationally(
+    session: Session,
+    client: DjenClient,
+    crit: Criterion,
+    *,
+    available_from: date,
+    available_until: date,
+    bootstrap_mode: bool,
+    settings: Settings,
+) -> dict[str, Any]:
+    parts = normalize_cnj(crit.value) or normalize_cnj(crit.label or "")
+    numero = parts.numero_formatado if parts else crit.value
+    criteria = DjenSearchCriteria(
+        process_number=numero,
+        available_from=available_from,
+        available_until=available_until,
+    )
+    try:
+        items = client.search_all_pages(criteria, max_pages=5)
+    except SourceOutcomeError as exc:
+        return {"error": str(exc)}
+    return _ingest_items(
+        session,
+        items,
+        channel="PROCESS_SEARCH",
+        bootstrap_mode=bootstrap_mode,
+        settings=settings,
+        job_type="DJEN_POLL",
+        criteria_id=crit.id,
+    )
+
+
+def search_company_nationally(
+    session: Session,
+    client: DjenClient,
+    crit: Criterion,
+    *,
+    available_from: date,
+    available_until: date,
+    bootstrap_mode: bool,
+    settings: Settings,
+) -> dict[str, Any]:
+    name = (crit.label or crit.meta or {}).get("nome") if isinstance(crit.meta, dict) else None
+    name = name or crit.label or crit.value
+    aliases = []
+    if isinstance(crit.meta, dict):
+        aliases = list(crit.meta.get("aliases") or [])
+    totals = {"received": 0, "created": 0, "updated": 0, "rejected": 0}
+    for term in [name, *aliases]:
+        if not term:
+            continue
+        criteria = DjenSearchCriteria(
+            text=str(term),
+            available_from=available_from,
+            available_until=available_until,
+        )
+        try:
+            items = client.search_all_pages(criteria, max_pages=5)
+        except SourceOutcomeError:
+            continue
+        stats = _ingest_items(
+            session,
+            items,
+            channel="COMPANY_SEARCH",
+            bootstrap_mode=bootstrap_mode,
+            settings=settings,
+            job_type="DJEN_POLL",
+            criteria_id=crit.id,
+        )
+        for k in totals:
+            totals[k] += stats[k]
+    return totals
+
+
+def run_djen_poll(
+    session: Session,
+    settings: Settings | None = None,
+    *,
+    bootstrap_mode: bool = False,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    fontes = load_fontes(settings)
+    if (fontes.get("djen") or {}).get("enabled") is False or not settings.djen_enable:
+        return {"status": "skipped", "reason": "djen_disabled"}
+
+    client = DjenClient(settings)
+    available_from, available_until = _overlap_window(settings, session)
+    criteria = list(session.scalars(select(Criterion).where(Criterion.active.is_(True))).all())
+    report_progress(
+        stage="djen_poll",
+        done=0,
+        total=max(len(criteria), 1),
+        message=f"DJEN_POLL · {len(criteria)} critério(s)",
+        force=True,
+    )
+
+    summary: dict[str, Any] = {
+        "window": {"from": available_from.isoformat(), "until": available_until.isoformat()},
+        "oabs": [],
+        "names": [],
+        "processes": [],
+        "companies": [],
+        "errors": [],
+    }
+
+    for idx, crit in enumerate(criteria):
+        raise_if_cancelled()
+        report_progress(
+            stage="djen_poll",
+            done=idx,
+            total=max(len(criteria), 1),
+            message=f"Buscando {crit.criterion_type}:{crit.value}",
+        )
+        try:
+            if crit.criterion_type == "OAB":
+                summary["oabs"].append(
+                    search_oab_nationally(
+                        session,
+                        client,
+                        crit,
+                        available_from=available_from,
+                        available_until=available_until,
+                        bootstrap_mode=bootstrap_mode,
+                        settings=settings,
+                    )
+                )
+            elif crit.criterion_type == "NOME":
+                summary["names"].append(
+                    search_name_nationally(
+                        session,
+                        client,
+                        crit,
+                        available_from=available_from,
+                        available_until=available_until,
+                        bootstrap_mode=bootstrap_mode,
+                        settings=settings,
+                    )
+                )
+            elif crit.criterion_type == "PROCESSO":
+                summary["processes"].append(
+                    search_process_nationally(
+                        session,
+                        client,
+                        crit,
+                        available_from=available_from,
+                        available_until=available_until,
+                        bootstrap_mode=bootstrap_mode,
+                        settings=settings,
+                    )
+                )
+            elif crit.criterion_type in {"CNPJ", "EMPRESA"}:
+                summary["companies"].append(
+                    search_company_nationally(
+                        session,
+                        client,
+                        crit,
+                        available_from=available_from,
+                        available_until=available_until,
+                        bootstrap_mode=bootstrap_mode,
+                        settings=settings,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Falha de um critério não interrompe os demais
+            logger.exception("djen_poll_criterion_failed")
+            summary["errors"].append({"criterion": crit.value, "error": str(exc)})
+
+    _save_checkpoint(session, available_until)
+    report_progress(
+        stage="djen_poll",
+        done=len(criteria),
+        total=max(len(criteria), 1),
+        message="DJEN_POLL concluído",
+        force=True,
+    )
+    return summary
+
+
+def run_discovery(
+    session: Session,
+    settings: Settings | None = None,
+    *,
+    bootstrap_mode: bool = False,
+) -> dict[str, Any]:
+    """Compat: discovery = DJEN_POLL nacional."""
+    return run_djen_poll(session, settings=settings, bootstrap_mode=bootstrap_mode)
 
 
 def backfill_oab_links_from_payloads(session: Session) -> int:
-    """Religa processos já no acervo às OABs monitoradas com base no payload."""
+    """Religa processos às OABs monitoradas com base no payload (match tipado)."""
     from monitor_jus.db.models import Process
+    from monitor_jus.db.repository import Repository
+    from monitor_jus.matching import extract_oabs_from_text
+    from monitor_jus.canonical_oab import canonicalize_oab
 
     repo = Repository(session)
     oab_criteria = [
         c
         for c in session.scalars(select(Criterion).where(Criterion.active.is_(True))).all()
-        if c.criterion_type == "OAB" and parse_oab_criterion_value(c.value)
+        if c.criterion_type == "OAB"
     ]
-    if not oab_criteria:
-        return 0
     linked = 0
     for proc in session.scalars(select(Process)).all():
-        payload = proc.payload if isinstance(proc.payload, dict) else None
-        linked += _link_oab_criteria_from_payload(repo, oab_criteria, proc.id, payload)
-    session.flush()
-    return linked
+        blob = ""
+        if isinstance(proc.payload, dict):
+            import json
 
-
-def _parse_dt(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value
-    text = str(value).replace("Z", "+00:00")
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
-
-
-def _lawsuit_fields(full: dict[str, Any], page_item: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Extrai capa/status de resposta Judit (lawsuit ou response_data)."""
-    data = full or {}
-    if page_item and isinstance(page_item.get("response_data"), dict):
-        data = {**page_item["response_data"], **data}
-    elif page_item and not data:
-        data = page_item
-
-    tribunal = (
-        data.get("tribunal_acronym")
-        or data.get("tribunal")
-        or data.get("court")
-    )
-    if isinstance(tribunal, dict):
-        tribunal = tribunal.get("name") or tribunal.get("acronym")
-
-    last_step = data.get("last_step") if isinstance(data.get("last_step"), dict) else {}
-    # Não gravar "---" / placeholders: preferir status oficial inferido do payload
-    situacao = extract_status_from_payload(data if isinstance(data, dict) else None)
-    if not situacao:
-        situacao = clean_status_text(last_step.get("content"))
-    return {
-        "tribunal": str(tribunal) if tribunal else None,
-        "classe": _first_name(data.get("classifications") or data.get("classe")),
-        "assunto": _first_name(data.get("subjects") or data.get("assunto")),
-        "orgao_julgador": data.get("county") or data.get("orgao_julgador"),
-        "grau": (str(data.get("instance") or data.get("grau") or "")[:64] or None),
-        "situacao": situacao,
-        "data_distribuicao": _parse_dt(data.get("distribution_date") or data.get("data_distribuicao")),
-        "last_movement_at": _parse_dt(last_step.get("step_date") or last_step.get("date")),
-        "payload": data if data else None,
-    }
-
-
-def _first_name(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    if isinstance(value, list) and value:
-        first = value[0]
-        if isinstance(first, dict):
-            name = first.get("name") or first.get("nome")
-            return str(name) if name else None
-        return str(first)
-    return None
-
-
-def run_discovery(
-    session: Session,
-    *,
-    settings: Settings | None = None,
-    bootstrap_mode: bool = False,
-) -> dict[str, Any]:
-    settings = settings or get_settings()
-    repo = Repository(session)
-    requests_svc = JuditRequestsService(settings=settings)
-    lawsuits = JuditLawsuitsService()
-    datajud = DataJudClient(settings)
-
-    outcomes: list[dict[str, Any]] = []
-    discovered = 0
-    criteria = list(session.scalars(select(Criterion).where(Criterion.active.is_(True))).all())
-    oab_criteria = [c for c in criteria if c.criterion_type == "OAB"]
-    n_crit = max(len(criteria), 1)
-    report_progress(
-        stage="discovery",
-        done=0,
-        total=n_crit,
-        message=f"Discovery · {len(criteria)} critério(s)",
-        force=True,
-    )
-
-    for crit_i, crit in enumerate(criteria):
-        raise_if_cancelled()
-        label = criterion_display_label(crit)
-        crit_prefix = f"critério {crit_i + 1}/{n_crit}"
-        report_progress(
-            stage="discovery_search",
-            done=crit_i,
-            total=n_crit,
-            message=f"{crit_prefix} · Buscando {label}",
-        )
-        try:
-            page_items: list[dict[str, Any]] = []
-            if crit.criterion_type == "OAB":
-                sec, numero = crit.value.split(":", 1)
-                resp = requests_svc.search_by_oab(numero, sec)
-            elif crit.criterion_type == "CPF":
-                resp = requests_svc.search_by_document(crit.value, "cpf")
-            elif crit.criterion_type == "CNPJ":
-                resp = requests_svc.search_by_document(crit.value, "cnpj")
-            elif crit.criterion_type == "NOME":
-                resp = requests_svc.search_by_name(crit.value)
-            elif crit.criterion_type == "PROCESSO":
-                parts = normalize_cnj(crit.value)
-                if not parts:
-                    report_progress(
-                        done=crit_i + 1,
-                        total=n_crit,
-                        message=f"{crit_prefix} · Pulado {label}",
-                    )
-                    continue
-                resp = {"page_data": [{"response_data": {"code": parts.numero_formatado}}]}
-            else:
-                report_progress(
-                    done=crit_i + 1,
-                    total=n_crit,
-                    message=f"{crit_prefix} · Tipo ignorado {label}",
-                )
+            blob = json.dumps(proc.payload, ensure_ascii=False)
+        oabs = extract_oabs_from_text(blob)
+        for crit in oab_criteria:
+            try:
+                crit_oab = canonicalize_oab(crit.value)
+            except OabCanonicalizeError:
                 continue
-
-            if isinstance(resp, dict):
-                raw_pages = resp.get("page_data") or []
-                if isinstance(raw_pages, list):
-                    page_items = [p for p in raw_pages if isinstance(p, dict)]
-
-            cnjs = _extract_cnjs_from_judit_response(resp if isinstance(resp, dict) else {})
-            # mapa cnj -> item de página para enriquecer capa
-            cnj_item: dict[str, dict[str, Any]] = {}
-            for item in page_items:
-                for cnj in _extract_cnjs_from_judit_response(item):
-                    cnj_item[cnj] = item
-
-            n_cnj = max(len(cnjs), 1)
-            for cnj_i, cnj in enumerate(cnjs):
-                raise_if_cancelled()
-                parts = normalize_cnj(cnj)
-                if not parts:
-                    continue
-                # progresso fracionário dentro do critério
-                frac = crit_i + ((cnj_i + 1) / n_cnj)
-                report_progress(
-                    stage="discovery_enrich",
-                    done=frac,
-                    total=n_crit,
-                    message=(
-                        f"{crit_prefix} · {label} · "
-                        f"CNJ {cnj_i + 1}/{len(cnjs)} · {parts.numero_formatado}"
-                    ),
-                )
-                full: dict[str, Any] = {}
-                try:
-                    full = lawsuits.get_full_process(parts.numero_digits) or {}
-                except SourceOutcomeError as exc:
-                    outcomes.append({"criterion": crit.value, "code": exc.code, "msg": exc.message})
-
-                proc_kwargs: dict[str, Any] = {
-                    **_lawsuit_fields(full if isinstance(full, dict) else {}, cnj_item.get(cnj)),
-                    "baseline": bootstrap_mode,
-                }
-                # confirmação DataJud seletiva
-                if datajud.should_confirm("processo_descoberto"):
-                    try:
-                        dj = datajud.search_by_cnj(parts.numero_formatado)
-                        if dj:
-                            norm = normalize_datajud_source(dj)
-                            proc_kwargs.update(
-                                {
-                                    "tribunal": norm.get("tribunal") or proc_kwargs.get("tribunal"),
-                                    "classe": norm.get("classe") or proc_kwargs.get("classe"),
-                                    "assunto": norm.get("assunto") or proc_kwargs.get("assunto"),
-                                    "orgao_julgador": norm.get("orgao_julgador")
-                                    or proc_kwargs.get("orgao_julgador"),
-                                    "grau": norm.get("grau") or proc_kwargs.get("grau"),
-                                }
-                            )
-                    except SourceOutcomeError as exc:
-                        outcomes.append({"source": "datajud", "code": exc.code, "msg": exc.message})
-
-                proc = repo.upsert_process(parts.numero_formatado, parts.numero_digits, **proc_kwargs)
-                repo.link_criterion_process(crit.id, proc.id)
-                payload = proc_kwargs.get("payload")
-                if isinstance(payload, dict):
-                    _link_oab_criteria_from_payload(repo, oab_criteria, proc.id, payload)
-                discovered += 1
-            outcomes.append({"criterion": crit.value, "status": "ok", "cnjs": len(cnjs)})
-            report_progress(
-                stage="discovery",
-                done=crit_i + 1,
-                total=n_crit,
-                message=(
-                    f"{crit_prefix} · OK {label} · {len(cnjs)} CNJ(s) · "
-                    f"total descobertos {discovered}"
-                ),
-            )
-        except SourceOutcomeError as exc:
-            outcomes.append(
-                {
-                    "criterion": crit.value,
-                    "code": exc.code,
-                    "msg": exc.message,
-                    "kind": "skip" if exc.code.startswith("SKIPPED") else "fail",
-                }
-            )
-            logger.warning("discovery_outcome", extra={"extra": {"code": exc.code, "c": crit.value}})
-            report_progress(
-                done=crit_i + 1,
-                total=n_crit,
-                message=f"{crit_prefix} · Falha/skip {label}: {exc.code}",
-            )
-
-    report_progress(
-        stage="discovery_oab_backfill",
-        done=n_crit,
-        total=n_crit,
-        message="Relacionando OABs pelas partes do processo…",
-        force=True,
-    )
-    oab_linked = backfill_oab_links_from_payloads(session)
-    report_progress(
-        stage="discovery",
-        done=n_crit,
-        total=n_crit,
-        message=f"Discovery concluído · {discovered} processo(s) · OAB backfill {oab_linked}",
-        force=True,
-    )
-    return {
-        "discovered": discovered,
-        "outcomes": outcomes,
-        "bootstrap": bootstrap_mode,
-        "oab_links_backfilled": oab_linked,
-    }
+            for hit in oabs:
+                if hit.matches_criterion(crit_oab):
+                    repo.link_criterion_process(crit.id, proc.id)
+                    linked += 1
+                    break
+    return linked

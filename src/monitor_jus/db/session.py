@@ -88,6 +88,18 @@ def _ensure_schema_compat(engine: Engine) -> None:
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress_message VARCHAR(512)",
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eta_seconds DOUBLE PRECISION",
                 "ALTER TABLE digests ADD COLUMN IF NOT EXISTS pdf_path VARCHAR(512)",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS official_link VARCHAR(1024)",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS official_link_type VARCHAR(64)",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS datajud_last_checked_at TIMESTAMPTZ",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS datajud_last_success_at TIMESTAMPTZ",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS datajud_last_movement_at TIMESTAMPTZ",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS datajud_fingerprint VARCHAR(128)",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS refresh_priority INTEGER DEFAULT 50",
+                "ALTER TABLE processes ADD COLUMN IF NOT EXISTS requires_reconciliation BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE communications ADD COLUMN IF NOT EXISTS match_status VARCHAR(32)",
+                "ALTER TABLE communications ADD COLUMN IF NOT EXISTS match_evidence_json JSON",
+                "ALTER TABLE communications ADD COLUMN IF NOT EXISTS discovery_channels_json JSON",
+                "ALTER TABLE communications ADD COLUMN IF NOT EXISTS notification_status VARCHAR(32)",
             ]
         )
     elif dialect == "sqlite":
@@ -101,6 +113,18 @@ def _ensure_schema_compat(engine: Engine) -> None:
                 "ALTER TABLE jobs ADD COLUMN progress_message VARCHAR(512)",
                 "ALTER TABLE jobs ADD COLUMN eta_seconds REAL",
                 "ALTER TABLE digests ADD COLUMN pdf_path VARCHAR(512)",
+                "ALTER TABLE processes ADD COLUMN official_link VARCHAR(1024)",
+                "ALTER TABLE processes ADD COLUMN official_link_type VARCHAR(64)",
+                "ALTER TABLE processes ADD COLUMN datajud_last_checked_at DATETIME",
+                "ALTER TABLE processes ADD COLUMN datajud_last_success_at DATETIME",
+                "ALTER TABLE processes ADD COLUMN datajud_last_movement_at DATETIME",
+                "ALTER TABLE processes ADD COLUMN datajud_fingerprint VARCHAR(128)",
+                "ALTER TABLE processes ADD COLUMN refresh_priority INTEGER DEFAULT 50",
+                "ALTER TABLE processes ADD COLUMN requires_reconciliation BOOLEAN DEFAULT 0",
+                "ALTER TABLE communications ADD COLUMN match_status VARCHAR(32)",
+                "ALTER TABLE communications ADD COLUMN match_evidence_json JSON",
+                "ALTER TABLE communications ADD COLUMN discovery_channels_json JSON",
+                "ALTER TABLE communications ADD COLUMN notification_status VARCHAR(32)",
             ]
         )
     if not statements:

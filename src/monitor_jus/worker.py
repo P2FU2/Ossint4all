@@ -21,10 +21,11 @@ from monitor_jus.logging_setup import get_logger, setup_logging
 from monitor_jus.metrics import incr
 from monitor_jus.models import JobStatus, JobType, RunStatus
 from monitor_jus.pipeline.bootstrap import run_bootstrap, sync_criteria_from_config
+from monitor_jus.pipeline.diary_sweep import run_diary_sweep
 from monitor_jus.pipeline.digest import build_and_send_digest
-from monitor_jus.pipeline.discovery import run_discovery
+from monitor_jus.pipeline.discovery import run_djen_poll, run_discovery
+from monitor_jus.pipeline.reconciliation import run_national_reconciliation
 from monitor_jus.pipeline.tracking import run_tracking
-from monitor_jus.pipeline.webhook_ingest import ingest_webhook_raw
 from monitor_jus.progress import bind_job, clear_job, complete as progress_complete, fail as progress_fail
 
 logger = get_logger(__name__)
@@ -49,7 +50,6 @@ def process_job(job_id: str) -> None:
             progress_complete("Concluído")
             repo.complete_job(job)
             if job.run_id:
-                # se todos jobs do run terminaram, marca success
                 from sqlalchemy import select
                 from monitor_jus.db.models import Job as JobModel
 
@@ -117,11 +117,16 @@ def process_job(job_id: str) -> None:
 
 def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | None) -> dict[str, Any]:
     settings = get_settings()
-    if job_type == JobType.WEBHOOK_INGEST.value:
-        return ingest_webhook_raw(session, payload["webhook_id"], settings)
     if job_type == JobType.HISTORICAL_DISCOVERY.value:
         sync_criteria_from_config(session, settings)
         return run_discovery(session, settings=settings, bootstrap_mode=False)
+    if job_type == JobType.DJEN_POLL.value:
+        sync_criteria_from_config(session, settings)
+        return run_djen_poll(session, settings=settings, bootstrap_mode=False)
+    if job_type == JobType.DIARY_SWEEP.value:
+        return run_diary_sweep(session, settings=settings)
+    if job_type == JobType.NATIONAL_RECONCILIATION.value:
+        return run_national_reconciliation(session, settings=settings)
     if job_type == JobType.DAILY_DIGEST.value:
         return build_and_send_digest(
             session,
@@ -140,11 +145,10 @@ def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | Non
     if job_type == JobType.PROCESS_REFRESH.value:
         return run_tracking(session, settings=settings)
     if job_type == JobType.RECONCILIATION.value:
-        return run_tracking(session, settings=settings)
+        return run_national_reconciliation(session, settings=settings)
     if job_type == "BOOTSTRAP":
         sync_criteria_from_config(session, settings)
         return run_bootstrap(session, settings)
-    # subjobs do digest podem ser tratados de forma monolítica na v1
     if job_type in (
         JobType.LOAD_PENDING_EVENTS.value,
         JobType.GENERATE_SUMMARIES.value,
@@ -164,7 +168,6 @@ def worker_loop(poll_seconds: float = 2.0) -> None:
     while True:
         claimed = None
         with session_scope() as session:
-            # Ceifa RUNNING zumbis (redeploy/crash) antes de pegar o próximo
             from monitor_jus.web.services.actions import cleanup_stale_jobs
 
             cleaned = cleanup_stale_jobs(session)
@@ -173,7 +176,7 @@ def worker_loop(poll_seconds: float = 2.0) -> None:
 
             repo = Repository(session)
             pending = repo.count_jobs_by_status(JobStatus.PENDING.value)
-            incr("jobs_pending", 0)  # emit snapshot via gauge-like log
+            incr("jobs_pending", 0)
             from monitor_jus.metrics import set_gauge
 
             set_gauge("jobs_pending", float(pending))

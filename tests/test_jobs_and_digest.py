@@ -62,7 +62,7 @@ def test_digest_marks_notified_only_after_sent(tmp_path, monkeypatch):
             event_type="MOVIMENTACAO_PROCESSUAL",
             event_identity_key="k1",
             notify_status=NotifyStatus.PENDING_NOTIFY.value,
-            source_name="judit",
+            source_name="djen",
             payload_hash="h1",
             title="t",
             description="d",

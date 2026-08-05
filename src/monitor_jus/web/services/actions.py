@@ -22,14 +22,22 @@ ALLOWED_RUN_TYPES = {
     RunType.DAILY_DIGEST.value,
     RunType.BOOTSTRAP.value,
     RunType.HISTORICAL_DISCOVERY.value,
+    RunType.DJEN_POLL.value,
+    RunType.DIARY_SWEEP.value,
+    RunType.NATIONAL_RECONCILIATION.value,
     RunType.RECONCILIATION.value,
     RunType.DELIVERY_RETRY.value,
     RunType.PROCESS_REFRESH.value,
 }
 
 # Jobs pesados que não devem sobrepor discovery/bootstrap
-_HEAVY_JOB_TYPES = {"BOOTSTRAP", "HISTORICAL_DISCOVERY"}
-_HEAVY_RUN_TYPES = {RunType.BOOTSTRAP.value, RunType.HISTORICAL_DISCOVERY.value}
+_HEAVY_JOB_TYPES = {"BOOTSTRAP", "HISTORICAL_DISCOVERY", "DJEN_POLL", "DIARY_SWEEP"}
+_HEAVY_RUN_TYPES = {
+    RunType.BOOTSTRAP.value,
+    RunType.HISTORICAL_DISCOVERY.value,
+    RunType.DJEN_POLL.value,
+    RunType.DIARY_SWEEP.value,
+}
 _ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value, JobStatus.RETRY.value)
 
 

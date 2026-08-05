@@ -245,7 +245,16 @@ def _filtered_process_rows(
 
     field, direction = _normalize_sort(sort_by, sort_dir)
     filtered = sort_process_rows(filtered, sort_by=field, sort_dir=direction)
-    return filtered, sorted(tribunals), len(procs)
+    from monitor_jus.config import get_settings, load_cobertura
+
+    highlight = [
+        str(c).upper()
+        for c in (load_cobertura(get_settings()).get("tribunais_destaque") or ["STF", "STJ", "TRF1"])
+    ]
+    for h in highlight:
+        tribunals.add(h)
+    ordered = [*highlight, *[t for t in sorted(tribunals) if t.upper() not in {x.upper() for x in highlight}]]
+    return filtered, ordered, len(procs)
 
 
 def list_processes(

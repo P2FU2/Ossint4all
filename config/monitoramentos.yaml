@@ -3,24 +3,67 @@ monitoramentos:
     - numero: "138094"
       seccional: "SP"
       responsavel: "Fernando Crespo Queiroz Neves"
+      ativo: true
 
-    # Inscrição no DJE/tribunais: 2556/RJ (sem sufixo A — 2556A não retorna na Judit)
     - numero: "2556"
       seccional: "RJ"
       responsavel: "Fernando Crespo Queiroz Neves"
+      ativo: true
+      sufixo: null
 
     - numero: "74043"
       seccional: "DF"
       responsavel: "Fernando Crespo Queiroz Neves"
+      ativo: true
 
   cpfs: []
 
   nomes:
-    - "Fernando Crespo Queiroz Neves"
+    - nome: "Fernando Crespo Queiroz Neves"
+      ativo: true
+      requires_secondary_evidence: true
 
   processos: []
 
   empresas: []
 
-# Opcional: restringe fallback DataJud a estes aliases
-tribunais_ativos: []
+cobertura:
+  mode: "national"
+
+  instancias:
+    primeiro_grau: true
+    segundo_grau: true
+    superiores: true
+    stf: true
+
+  segmentos:
+    estadual: true
+    federal: true
+    trabalho: true
+    eleitoral: true
+    militar: true
+
+  tribunais_destaque:
+    - STF
+    - STJ
+    - TRF1
+
+  # Vazio = cobertura automática nacional (não restringe ao acervo)
+  tribunais_ativos: []
+
+fontes:
+  djen:
+    enabled: true
+    national_criteria_search: true
+    overlap_hours: 48
+
+  datajud:
+    enabled: true
+    # Vazio = roteamento automático por alias público
+    aliases_ativos: []
+    excluded_courts:
+      - STF
+
+  cna:
+    enabled: false
+    api_token: null

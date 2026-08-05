@@ -1,0 +1,12 @@
+# Sempre presentes no filtro/dashboard de acervo (mesmo com contagem 0)
+tribunais_destaque:
+  - STF
+  - STJ
+  - TRF1
+
+# Cobertura superior (além do STF tratado à parte)
+tribunais_superiores:
+  - STJ
+  - TST
+  - TSE
+  - STM

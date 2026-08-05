@@ -33,38 +33,26 @@ OUTCOME_LABELS = {
 
 
 def build_coverage(settings: Settings) -> list[dict[str, Any]]:
-    flags = settings.judit_flags()
     rows = [
-        {"label": "Movimentações / lawsuits — Judit", "enabled": True, "reason": ""},
         {
-            "label": "Descoberta por OAB — Judit",
-            "enabled": flags["oab"] and flags["historical_search"],
+            "label": "Busca nacional por critérios — DJEN",
+            "enabled": settings.djen_enable,
             "reason": "desabilitada",
         },
         {
-            "label": "Descoberta por CPF/CNPJ — Judit",
-            "enabled": flags["cpf_cnpj"] and flags["historical_search"],
+            "label": "Sweep complementar por tribunal — DJEN",
+            "enabled": settings.djen_enable,
             "reason": "desabilitada",
         },
         {
-            "label": "Busca por nome — Judit",
-            "enabled": flags["name"],
-            "reason": "desabilitada",
-        },
-        {
-            "label": "Tracking de processos — Judit",
-            "enabled": flags["process_tracking"],
-            "reason": "não contratado / desabilitado",
-        },
-        {
-            "label": "Diários e publicações (DJEN) — Judit",
-            "enabled": flags["djen"],
-            "reason": "não contratados",
-        },
-        {
-            "label": "Confirmação oficial — DataJud",
+            "label": "Enriquecimento de capa/movimentos — DataJud",
             "enabled": settings.datajud_enable and settings.datajud_mode != "off",
             "reason": "desabilitada",
+        },
+        {
+            "label": "Validação CNA",
+            "enabled": settings.cna_enabled,
+            "reason": "desabilitada (fora do caminho crítico)",
         },
         {
             "label": "Resumo por IA — OpenRouter",
@@ -78,6 +66,36 @@ def build_coverage(settings: Settings) -> list[dict[str, Any]]:
         },
     ]
     return rows
+
+
+def recent_source_failures(session=None, *, hours: int = 48) -> list[dict[str, Any]]:
+    """Falhas parciais de fontes para o digest."""
+    if session is None:
+        return []
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select
+
+    from monitor_jus.db.models import SourceRun
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    rows = list(
+        session.scalars(
+            select(SourceRun)
+            .where(SourceRun.status == "FAILED", SourceRun.started_at >= cutoff)
+            .order_by(SourceRun.started_at.desc())
+            .limit(20)
+        ).all()
+    )
+    return [
+        {
+            "job_type": r.job_type,
+            "source": r.source,
+            "court": r.court or "—",
+            "error": (r.error_message or r.error_code or "falha")[:200],
+        }
+        for r in rows
+    ]
 
 
 def render_digest_html(

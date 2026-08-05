@@ -1,0 +1,25 @@
+jobs:
+  DJEN_POLL:
+    enabled: true
+    interval_minutes: 60
+    overlap_hours: 48
+
+  DIARY_SWEEP:
+    enabled: true
+    schedule: "daily"
+
+  PROCESS_REFRESH:
+    enabled: true
+    schedule: "continuous_due_queue"
+
+  NATIONAL_RECONCILIATION:
+    enabled: true
+    schedule: "weekly"
+
+  HISTORICAL_DISCOVERY:
+    enabled: true
+    run_on_bootstrap: true
+
+  DAILY_DIGEST:
+    enabled: true
+    schedule: "cron"

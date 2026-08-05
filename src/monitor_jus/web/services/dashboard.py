@@ -112,8 +112,8 @@ def build_dashboard(
         "pending_count": 0,
     }
     health = {
-        "judit_flags_on": 0,
-        "judit_flags_total": 0,
+        "djen_enabled": bool(settings.djen_enable),
+        "cna_enabled": bool(settings.cna_enabled),
         "email_to": settings.email_to or "—",
         "openrouter": bool(settings.openrouter_api_key),
         "datajud": bool(settings.datajud_enable and settings.datajud_api_key),
@@ -150,9 +150,6 @@ def build_dashboard(
             )
             or 0
         )
-        flags = settings.judit_flags()
-        health["judit_flags_on"] = sum(1 for v in flags.values() if v)
-        health["judit_flags_total"] = len(flags)
         live = build_progress_board(session)
 
         if quarantine_open:

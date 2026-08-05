@@ -131,7 +131,8 @@
   <div class="panel">
     <h2>Integrações &amp; fila {{ tip("Flags Judit, DataJud, OpenRouter e tamanho da fila de jobs.") }}</h2>
     <div class="tag-row">
-      <span class="badge {% if health.judit_flags_on %}ok{% else %}warn{% endif %}">Judit {{ health.judit_flags_on }}/{{ health.judit_flags_total }}</span>
+      <span class="badge {% if health.djen_enabled %}ok{% else %}warn{% endif %}">DJEN {% if health.djen_enabled %}on{% else %}off{% endif %}</span>
+      <span class="badge {% if health.datajud %}ok{% else %}warn{% endif %}">DataJud {% if health.datajud %}on{% else %}off{% endif %}</span>
       <span class="badge {% if health.datajud %}ok{% else %}warn{% endif %}">DataJud</span>
       <span class="badge {% if health.openrouter %}ok{% else %}warn{% endif %}">OpenRouter</span>
     </div>

@@ -48,7 +48,7 @@ class ProviderSubscription(Base):
     __tablename__ = "provider_subscriptions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    provider: Mapped[str] = mapped_column(String(32), default="judit")
+    provider: Mapped[str] = mapped_column(String(32), default="djen")
     external_tracking_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     tracking_type: Mapped[str] = mapped_column(String(64))
     criterion_id: Mapped[str] = mapped_column(ForeignKey("criteria.id"), index=True)
@@ -66,7 +66,7 @@ class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    provider: Mapped[str] = mapped_column(String(32), default="judit")
+    provider: Mapped[str] = mapped_column(String(32), default="djen")
     delivery_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     webhook_delivery_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -77,7 +77,7 @@ class WebhookRaw(Base):
     __tablename__ = "webhooks_raw"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    provider: Mapped[str] = mapped_column(String(32), default="judit")
+    provider: Mapped[str] = mapped_column(String(32), default="djen")
     delivery_key: Mapped[str] = mapped_column(String(128), index=True)
     headers: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
@@ -163,7 +163,6 @@ class Process(Base):
     assunto: Mapped[str | None] = mapped_column(String(255), nullable=True)
     orgao_julgador: Mapped[str | None] = mapped_column(String(255), nullable=True)
     grau: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # status/fase da Judit pode ser longo (ex.: "Conclusos para decisão ao(à) Ministro…")
     situacao: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_distribuicao: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -172,6 +171,14 @@ class Process(Base):
     check_frequency_days: Mapped[int] = mapped_column(Integer, default=1)
     baseline: Mapped[bool] = mapped_column(Boolean, default=False)
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    official_link: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    official_link_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    datajud_last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    datajud_last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    datajud_last_movement_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    datajud_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    refresh_priority: Mapped[int] = mapped_column(Integer, default=50)
+    requires_reconciliation: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -213,6 +220,10 @@ class Communication(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    match_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    match_evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    discovery_channels_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    notification_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class Event(Base):
@@ -425,3 +436,48 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SourceRun(Base):
+    """Execução de uma unidade de coleta — distingue zero novidades vs falha."""
+
+    __tablename__ = "source_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_type: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    court: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    criteria_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="RUNNING", index=True)
+    items_received: Mapped[int] = mapped_column(Integer, default=0)
+    items_created: Mapped[int] = mapped_column(Integer, default=0)
+    items_updated: Mapped[int] = mapped_column(Integer, default=0)
+    items_rejected: Mapped[int] = mapped_column(Integer, default=0)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_after: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cursor_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class ProcessRelation(Base):
+    __tablename__ = "process_relations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source_process_id: Mapped[str] = mapped_column(ForeignKey("processes.id"), index=True)
+    target_process_id: Mapped[str] = mapped_column(ForeignKey("processes.id"), index=True)
+    relation_type: Mapped[str] = mapped_column(String(64))
+    evidence_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    confidence: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_process_id",
+            "target_process_id",
+            "relation_type",
+            name="uq_process_relation",
+        ),
+    )

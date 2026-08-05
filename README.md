@@ -1,12 +1,14 @@
 # Monitor Judicial
 
-Serviço automatizado de monitoramento judicial em nuvem, com painel web autenticado.
+Serviço automatizado de monitoramento judicial nacional em nuvem, com painel web autenticado.
 
-- **Judit** — fonte operacional principal (descoberta, tracking, DJEN, webhooks)
-- **DataJud** — confirmação oficial seletiva / fallback (API pública CNJ)
+- **DJEN (Comunica API)** — fonte temporal de novidade (busca nacional por OAB/nome/processo + sweep complementar)
+- **DataJud** — enriquecimento/reconciliação de capa e movimentos (não detecta publicação)
 - **OpenRouter** — resumos (com fallback determinístico)
-- **Resend** — e-mail digest (HTML + PDF em anexos)
+- **Resend** — e-mail digest HTML
 - **Painel** — consulta do acervo + administração (jobs, critérios, cancelamento)
+
+STF: descoberta via DJEN + link oficial; sem DataJud e sem scraping HTML.
 
 ## Como funciona hoje
 

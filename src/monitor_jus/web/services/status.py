@@ -293,10 +293,8 @@ def build_pipeline_status(session: Session, settings: Settings) -> dict[str, Any
             for d in dead
         ],
         "tracking_hint": (
-            "Nenhuma assinatura Judit ativa — novidades em tempo real só aparecem "
-            "após PROCESS_REFRESH / tracking com webhooks."
-            if sub_counts.get("ACTIVE", 0) == 0
-            else ""
+            "Novidades vêm do DJEN_POLL (busca nacional por critérios) e DIARY_SWEEP. "
+            "DataJud enriquece capa/movimentos via PROCESS_REFRESH."
         ),
         "subscriptions": [
             {

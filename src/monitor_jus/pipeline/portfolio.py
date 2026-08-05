@@ -206,6 +206,29 @@ def _include_all_oab_criteria(criteria: dict[str, Criterion], by_oab: Counter[st
             by_oab[label] = 0
 
 
+def _highlight_tribunals() -> list[str]:
+    from monitor_jus.config import get_settings, load_cobertura
+
+    cobertura = load_cobertura(get_settings())
+    return [str(c).upper() for c in (cobertura.get("tribunais_destaque") or ["STF", "STJ", "TRF1"])]
+
+
+def _with_highlight_tribunals(by_tribunal: Counter[str]) -> dict[str, int]:
+    merged = Counter(by_tribunal)
+    for court in _highlight_tribunals():
+        merged.setdefault(court, 0)
+    # destaque primeiro, depois por contagem
+    highlight = _highlight_tribunals()
+    items = sorted(merged.items(), key=lambda x: (-x[1], x[0]))
+    ordered: dict[str, int] = {}
+    for h in highlight:
+        ordered[h] = int(merged.get(h, 0))
+    for k, v in items:
+        if k not in ordered:
+            ordered[k] = int(v)
+    return ordered
+
+
 def _stats_from_counters(
     *,
     total: int,
@@ -221,7 +244,7 @@ def _stats_from_counters(
         "undefined_count": by_outcome.get("indefinido", 0),
         "closed_count": by_outcome.get("encerrado", 0),
         "by_oab": dict(sorted(by_oab.items(), key=lambda x: (-x[1], x[0]))),
-        "by_tribunal": dict(sorted(by_tribunal.items(), key=lambda x: (-x[1], x[0]))),
+        "by_tribunal": _with_highlight_tribunals(by_tribunal),
         "by_outcome": dict(by_outcome),
         "processes": processes or [],
         "oab_criteria_count": oab_criteria_count,

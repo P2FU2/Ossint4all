@@ -1,0 +1,25 @@
+# Mapeamento domínio → query params da Comunica API (DJEN).
+# Ajuste após `python -m monitor_jus.sources.djen.probe`.
+# Nomes abaixo são o contrato esperado; o probe valida/ajusta.
+
+base_url: "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
+
+params:
+  text: texto
+  lawyer_name: nomeAdvogado
+  oab_number: numeroOab
+  oab_state: ufOab
+  process_number: numeroProcesso
+  court: siglaTribunal
+  available_from: dataDisponibilizacaoInicio
+  available_until: dataDisponibilizacaoFim
+  page: pagina
+  size: itensPorPagina
+
+defaults:
+  size: 50
+  max_size: 100
+
+response:
+  items_key: items
+  total_key: count

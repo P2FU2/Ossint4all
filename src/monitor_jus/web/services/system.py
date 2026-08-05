@@ -20,13 +20,18 @@ def build_system_view(session: Session, settings: Settings) -> dict[str, Any]:
     )
     users = list(session.scalars(select(User).order_by(User.username)).all())
     return {
-        "flags": settings.judit_flags(),
+        "flags": {
+            "djen": settings.djen_enable,
+            "datajud": settings.datajud_enable,
+            "cna": settings.cna_enabled,
+        },
         "email_from": settings.email_from or "—",
         "email_to": settings.email_to or "—",
         "tz": settings.tz,
         "schedule_cron": settings.schedule_cron,
         "datajud_mode": settings.datajud_mode,
         "datajud_enable": settings.datajud_enable,
+        "djen_enable": settings.djen_enable,
         "openrouter_configured": bool(settings.openrouter_api_key),
         "openrouter_model": settings.openrouter_model,
         "env": settings.env,

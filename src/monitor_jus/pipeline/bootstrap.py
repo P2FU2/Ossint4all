@@ -14,7 +14,6 @@ from monitor_jus.db.models import BootstrapState, Criterion, CriterionLink
 from monitor_jus.db.repository import Repository
 from monitor_jus.logging_setup import get_logger
 from monitor_jus.models import NotifyStatus
-from monitor_jus.oab_match import oab_identity, parse_oab_criterion_value
 from monitor_jus.pipeline.discovery import run_discovery
 from monitor_jus.progress import report as report_progress
 from monitor_jus.security import only_digits
@@ -120,87 +119,32 @@ def _sync_oab_criterion(
     meta: dict[str, Any],
 ) -> dict[str, str]:
     """
-    Garante um único critério OAB ativo por (dígitos, UF).
-    Ex.: YAML 2556/RJ migra RJ:2556A → RJ:2556 e desativa duplicatas.
+    Garante critério OAB exato UF:numero[+sufixo].
+    Não converte RJ-2556A em RJ-2556 — sufixos distintos são identidades distintas.
     """
     value = f"{sec}:{numero}"
-    target = oab_identity(numero, sec)
-    siblings = list(session.scalars(select(Criterion).where(Criterion.criterion_type == "OAB")).all())
-    matching = [
-        s
-        for s in siblings
-        if (parsed := parse_oab_criterion_value(s.value))
-        and oab_identity(parsed[0], parsed[1]) == target
-    ]
+    existing = session.scalar(
+        select(Criterion).where(Criterion.criterion_type == "OAB", Criterion.value == value)
+    )
+    if existing:
+        existing.active = True
+        if label:
+            existing.label = label
+        existing.meta = meta
+        return {"action": "unchanged", "value": value, "deactivated": "0"}
 
-    if not matching:
-        session.add(
-            Criterion(
-                id=str(uuid4()),
-                criterion_type="OAB",
-                value=value,
-                label=label,
-                meta=meta,
-                active=True,
-            )
+    session.add(
+        Criterion(
+            id=str(uuid4()),
+            criterion_type="OAB",
+            value=value,
+            label=label,
+            meta=meta,
+            active=True,
         )
-        session.flush()
-        return {"action": "created", "value": value}
-
-    canonical = next((c for c in matching if c.value == value), None)
-    if canonical is None:
-        exact = next((c for c in siblings if c.value == value), None)
-        if exact:
-            canonical = exact
-            if exact not in matching:
-                matching.append(exact)
-        else:
-            canonical = matching[0]
-
-    action = "unchanged"
-    if canonical.value != value:
-        old = canonical.value
-        canonical.value = value
-        action = "updated"
-        logger.info(
-            "oab_criterion_renamed",
-            extra={"extra": {"from": old, "to": value}},
-        )
-
-    canonical.active = True
-    if label:
-        canonical.label = label
-    canonical.meta = meta
-
-    deactivated = 0
-    for other in matching:
-        if other.id == canonical.id:
-            continue
-        links = list(
-            session.scalars(select(CriterionLink).where(CriterionLink.criterion_id == other.id)).all()
-        )
-        for link in links:
-            exists = session.scalar(
-                select(CriterionLink).where(
-                    CriterionLink.criterion_id == canonical.id,
-                    CriterionLink.process_id == link.process_id,
-                )
-            )
-            if exists or not link.process_id:
-                session.delete(link)
-            else:
-                link.criterion_id = canonical.id
-        other.active = False
-        deactivated += 1
-
+    )
     session.flush()
-    if deactivated:
-        action = "merged"
-    return {
-        "action": action,
-        "value": value,
-        "deactivated": str(deactivated),
-    }
+    return {"action": "created", "value": value, "deactivated": "0"}
 
 
 def sync_criteria_from_config(session: Session, settings: Settings | None = None) -> int:
@@ -211,7 +155,7 @@ def sync_criteria_from_config(session: Session, settings: Settings | None = None
 def sync_criteria_detailed(
     session: Session, settings: Settings | None = None
 ) -> dict[str, Any]:
-    """Carrega critérios do YAML; migra variantes OAB (2556A→2556)."""
+    """Carrega critérios do YAML (OAB com sufixo tipado; nomes com meta)."""
     settings = settings or get_settings()
     cfg = load_monitoramentos(settings)
     mon = cfg.get("monitoramentos") or {}
@@ -221,8 +165,14 @@ def sync_criteria_detailed(
     yaml_oabs: list[str] = []
 
     for oab in mon.get("oabs") or []:
+        if oab.get("ativo") is False:
+            continue
         numero = normalize_oab_numero(str(oab.get("numero", "")))
         sec = str(oab.get("seccional", "")).upper()
+        sufixo = oab.get("sufixo")
+        if sufixo:
+            numero = normalize_oab_numero(f"{numero}{sufixo}")
+        # sufixo: null explícito — não acrescentar letra
         if not validate_oab(numero, sec):
             continue
         yaml_oabs.append(f"{sec}:{numero}")
@@ -231,7 +181,12 @@ def sync_criteria_detailed(
             numero=numero,
             sec=sec,
             label=oab.get("responsavel"),
-            meta={"seccional": sec, "numero": numero},
+            meta={
+                "seccional": sec,
+                "numero": numero,
+                "sufixo": sufixo,
+                "canonical": f"{sec}-{only_digits(numero)}",
+            },
         )
         oab_actions.append(result)
         if result.get("action") in {"created", "updated", "merged"}:
@@ -245,8 +200,21 @@ def sync_criteria_detailed(
             changes += 1
 
     for nome in mon.get("nomes") or []:
-        text = str(nome).strip()
-        if text and _upsert_simple(session, ctype="NOME", value=text, label=text):
+        if isinstance(nome, dict):
+            if nome.get("ativo") is False:
+                continue
+            text = str(nome.get("nome", "")).strip()
+            meta = {
+                "requires_secondary_evidence": bool(
+                    nome.get("requires_secondary_evidence", True)
+                )
+            }
+        else:
+            text = str(nome).strip()
+            meta = {"requires_secondary_evidence": True}
+        if text and _upsert_simple(
+            session, ctype="NOME", value=text, label=text, meta=meta
+        ):
             changes += 1
 
     for proc in mon.get("processos") or []:
@@ -266,7 +234,7 @@ def sync_criteria_detailed(
             ctype="CNPJ",
             value=cnpj,
             label=emp.get("nome"),
-            meta={"nome": emp.get("nome")},
+            meta={"nome": emp.get("nome"), "aliases": emp.get("aliases") or []},
         ):
             changes += 1
 

@@ -1,20 +1,21 @@
-"""Normalização de payloads Judit / DataJud."""
+"""Normalização de payloads DataJud / DJEN."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Any
 
-from monitor_jus import NORMALIZER_VERSION, PROVIDER_SCHEMA_VERSION_JUDIT
-from monitor_jus.models import EventType, NormalizedEvent
-from monitor_jus.pipeline.identity import (
-    communication_key,
-    extract_cnj_from_payload,
-    movement_key,
-)
-from monitor_jus.sources.judit.webhooks import payload_hash
+from monitor_jus import NORMALIZER_VERSION
 from monitor_jus.official_portal import resolve_official_link
 from monitor_jus.validators import normalize_cnj
+
+
+def payload_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -29,125 +30,16 @@ def _parse_dt(value: Any) -> datetime | None:
         return None
 
 
-def normalize_judit_webhook(
-    payload: dict[str, Any],
-    classified_type: str,
-) -> NormalizedEvent | None:
-    if classified_type == "UNKNOWN":
-        return None
-
-    event_type = EventType(classified_type)
-    cnj_raw = extract_cnj_from_payload(payload)
-    parts = normalize_cnj(cnj_raw) if cnj_raw else None
-    numero = parts.numero_formatado if parts else cnj_raw
-
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    lawsuit = data.get("lawsuit") if isinstance(data, dict) else None
-    if not isinstance(lawsuit, dict):
-        lawsuit = data if isinstance(data, dict) else {}
-
-    source_event_id = None
-    for key in ("id", "event_id", "step_id", "publication_id"):
-        if payload.get(key):
-            source_event_id = str(payload[key])
-            break
-        if isinstance(data, dict) and data.get(key):
-            source_event_id = str(data[key])
-            break
-
-    steps = lawsuit.get("steps") or lawsuit.get("movements") or []
-    last_step = steps[-1] if isinstance(steps, list) and steps else {}
-    if not isinstance(last_step, dict):
-        last_step = {}
-
-    codigo = str(last_step.get("codigo") or last_step.get("code") or "") or None
-    nome = str(
-        last_step.get("nome")
-        or last_step.get("name")
-        or payload.get("title")
-        or classified_type
-    )
-    data_hora = _parse_dt(
-        last_step.get("dataHora")
-        or last_step.get("date")
-        or payload.get("published_at")
-        or payload.get("created_at")
-    )
-    orgao = str(
-        lawsuit.get("orgao_julgador")
-        or (lawsuit.get("court") or {}).get("name")
-        if isinstance(lawsuit.get("court"), dict)
-        else lawsuit.get("court")
-        or ""
-    ) or None
-    complemento = str(last_step.get("complemento") or last_step.get("content") or "") or None
-    sequencia = str(last_step.get("sequencia") or last_step.get("sequence") or "") or None
-
-    if event_type in (
-        EventType.PUBLICACAO_DJEN,
-        EventType.INTIMACAO_PROCESSUAL,
-        EventType.COMUNICACAO_OUTRA,
-    ):
-        body = str(payload.get("content") or payload.get("text") or complemento or nome)
-        identity = communication_key(
-            source_name="judit",
-            source_event_id=source_event_id,
-            communication_type=event_type.value,
-            numero_cnj=numero,
-            published_at=data_hora,
-            body=body,
-        )
-        description = body
-    else:
-        identity = movement_key(
-            source_name="judit",
-            source_event_id=source_event_id,
-            numero_cnj=numero or "",
-            codigo_movimento_tpu=codigo,
-            data_hora=data_hora,
-            complemento=complemento,
-            orgao_julgador=orgao,
-            sequencia_origem=sequencia,
-        )
-        description = complemento or nome
-
-    ph = payload_hash(payload)
-    tribunal = None
-    if isinstance(lawsuit.get("tribunal"), str):
-        tribunal = lawsuit.get("tribunal")
-    elif isinstance(lawsuit.get("court"), dict):
-        tribunal = lawsuit["court"].get("code") or lawsuit["court"].get("name")
-
-    return NormalizedEvent(
-        event_type=event_type,
-        event_identity_key=identity,
-        source_name="judit",
-        source_event_id=source_event_id,
-        numero_cnj=numero,
-        tribunal=tribunal,
-        title=nome,
-        description=description or "",
-        movement_code=codigo,
-        movement_date=data_hora,
-        orgao_julgador=orgao,
-        complemento=complemento,
-        sequencia_origem=sequencia,
-        payload=payload,
-        payload_hash=ph,
-        cached_response=payload.get("cached_response"),
-        provider_schema_version=PROVIDER_SCHEMA_VERSION_JUDIT,
-        normalizer_version=NORMALIZER_VERSION,
-        official_link=resolve_official_link(
-            numero,
-            tribunal=tribunal if isinstance(tribunal, str) else None,
-            payload=lawsuit if isinstance(lawsuit, dict) else None,
-            existing=lawsuit.get("url") if isinstance(lawsuit, dict) else None,
-        ),
-    )
-
-
 def normalize_datajud_source(source: dict[str, Any]) -> dict[str, Any]:
     """Extrai campos úteis do _source DataJud."""
+    # Aceita wrapper ES hits ou _source direto
+    if "hits" in source and isinstance(source.get("hits"), dict):
+        hits = source["hits"].get("hits") or []
+        if hits and isinstance(hits[0], dict):
+            source = hits[0].get("_source") or source
+    elif "_source" in source and isinstance(source.get("_source"), dict):
+        source = source["_source"]
+
     movimentos = source.get("movimentos") or []
     last = movimentos[-1] if movimentos else {}
     assuntos = source.get("assuntos") or []
@@ -155,16 +47,30 @@ def normalize_datajud_source(source: dict[str, Any]) -> dict[str, Any]:
     if assuntos:
         principal = next((a for a in assuntos if a.get("principal")), assuntos[0])
         assunto_principal = principal.get("nome")
+
+    last_movement_at = _parse_dt(last.get("dataHora") if isinstance(last, dict) else None)
+
     return {
         "numero_cnj_digits": source.get("numeroProcesso"),
         "tribunal": source.get("tribunal"),
-        "classe": (source.get("classe") or {}).get("nome"),
+        "classe": (source.get("classe") or {}).get("nome")
+        if isinstance(source.get("classe"), dict)
+        else source.get("classe"),
         "assunto": assunto_principal,
-        "orgao_julgador": (source.get("orgaoJulgador") or {}).get("nome"),
+        "orgao_julgador": (source.get("orgaoJulgador") or {}).get("nome")
+        if isinstance(source.get("orgaoJulgador"), dict)
+        else source.get("orgaoJulgador"),
         "grau": source.get("grau"),
         "data_ajuizamento": source.get("dataAjuizamento"),
-        "last_movement_name": last.get("nome"),
-        "last_movement_date": last.get("dataHora"),
+        "last_movement_name": last.get("nome") if isinstance(last, dict) else None,
+        "last_movement_date": last.get("dataHora") if isinstance(last, dict) else None,
+        "last_movement_at": last_movement_at,
         "movimentos": movimentos,
         "raw": source,
+        "normalizer_version": NORMALIZER_VERSION,
+        "official_link": resolve_official_link(
+            None,
+            tribunal=str(source.get("tribunal") or "") or None,
+            payload=source,
+        ),
     }
