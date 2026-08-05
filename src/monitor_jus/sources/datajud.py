@@ -1,8 +1,7 @@
-"""Cliente DataJud — confirmação seletiva / fallback."""
+"""Cliente DataJud — enriquecimento de capa/movimentos (não novidade)."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from monitor_jus.config import Settings, get_settings, load_yaml
@@ -12,8 +11,43 @@ from monitor_jus.exceptions import (
     SkippedDisabled,
 )
 from monitor_jus.http_client import RateLimitedClient
+from monitor_jus.instances import instance_rank_from_datajud_hit
 from monitor_jus.sources.base import FonteJudicial
 from monitor_jus.validators import TribunalResolver, normalize_cnj
+
+_GRAU_RANK = {"G2": 2, "G1": 1, "JE": 0, "TR": 2, "TU": 2}
+
+
+def grau_rank(grau: str | None) -> int:
+    """Rank interno DataJud G1/G2 (0–2). Para hierarquia completa use instances."""
+    if not grau:
+        return 0
+    g = str(grau).strip().upper()
+    if g in _GRAU_RANK:
+        return _GRAU_RANK[g]
+    if "2" in g:
+        return 2
+    if "1" in g:
+        return 1
+    return 0
+
+
+def prefer_datajud_hit(sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Prefere a instância mais alta (2º grau > 1º; superiores via CNJ/tribunal)."""
+    if not sources:
+        return {}
+    if len(sources) == 1:
+        return sources[0]
+
+    def sort_key(src: dict[str, Any]) -> tuple:
+        return (
+            instance_rank_from_datajud_hit(src),
+            grau_rank(src.get("grau")),
+            str(src.get("dataHoraUltimaAtualizacao") or ""),
+            len(src.get("movimentos") or []),
+        )
+
+    return max(sources, key=sort_key)
 
 
 class DataJudClient(FonteJudicial):
@@ -50,6 +84,11 @@ class DataJudClient(FonteJudicial):
         return bool(rules.get(reason, False))
 
     def search_by_cnj(self, numero: str, *, alias: str | None = None) -> dict[str, Any]:
+        """Compat: retorna o hit preferido (em geral G2)."""
+        hits = self.search_all_by_cnj(numero, alias=alias)
+        return prefer_datajud_hit(hits)
+
+    def search_all_by_cnj(self, numero: str, *, alias: str | None = None) -> list[dict[str, Any]]:
         if not self.settings.datajud_enable or self.settings.datajud_mode == "off":
             raise SkippedDisabled("DataJud desabilitado")
         if not self.settings.datajud_api_key:
@@ -79,7 +118,7 @@ class DataJudClient(FonteJudicial):
         last_error: Exception | None = None
         for a in aliases:
             try:
-                return self._search_alias(a, parts.numero_digits)
+                return self._search_alias_all(a, parts.numero_digits)
             except FailedAuthentication:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -87,7 +126,7 @@ class DataJudClient(FonteJudicial):
                 continue
         raise FailedSource(str(last_error) if last_error else "DataJud sem resultado")
 
-    def _search_alias(self, alias: str, numero_digits: str) -> dict[str, Any]:
+    def _search_alias_all(self, alias: str, numero_digits: str) -> list[dict[str, Any]]:
         url = f"{self.settings.datajud_base_url.rstrip('/')}/{alias}/_search"
         body = {
             "size": 10,
@@ -101,6 +140,9 @@ class DataJudClient(FonteJudicial):
         resp.raise_for_status()
         data = resp.json()
         hits = (((data or {}).get("hits") or {}).get("hits")) or []
-        if not hits:
-            return {}
-        return hits[0].get("_source") or {}
+        out: list[dict[str, Any]] = []
+        for h in hits:
+            src = h.get("_source") if isinstance(h, dict) else None
+            if isinstance(src, dict) and src:
+                out.append(src)
+        return out

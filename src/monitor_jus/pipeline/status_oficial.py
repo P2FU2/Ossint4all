@@ -1,12 +1,14 @@
-"""Situação oficial do processo (capa Judit / inferência de movimentação)."""
+"""Situação oficial do processo (capa / inferência de movimentação)."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # Chaves canônicas para filtro e exibição (alinhadas a e-SAJ / tribunais)
 SITUACAO_LABELS: dict[str, str] = {
     "extinto": "Extinto",
+    "julgado": "Julgado",
     "em_grau_de_recurso": "Em grau de recurso",
     "arquivado": "Arquivado",
     "baixado": "Baixado",
@@ -63,6 +65,8 @@ def normalize_situacao_key(text: str | None) -> str:
 
     if "grau de recurso" in blob or "em grau de recurso" in blob:
         return "em_grau_de_recurso"
+    if re.search(r"\bjulgad[oa]\b", blob) or "trânsito em julgado" in blob or "transito em julgado" in blob:
+        return "julgado"
     if "extint" in blob:
         return "extinto"
     if "arquiv" in blob:
@@ -121,7 +125,7 @@ def _from_steps(data: dict[str, Any]) -> str | None:
             continue
         key = normalize_situacao_key(content)
         # Preferir sinais fortes de encerramento / recurso
-        if key in ("extinto", "arquivado", "baixado", "em_grau_de_recurso", "suspenso"):
+        if key in ("extinto", "arquivado", "baixado", "em_grau_de_recurso", "suspenso", "julgado"):
             if key == "arquivado":
                 # e-SAJ costuma mostrar "Extinto" quando arquivado definitivamente
                 low = content.lower()

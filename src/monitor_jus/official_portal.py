@@ -10,7 +10,26 @@ from urllib.parse import quote
 from monitor_jus.config import get_settings, load_yaml
 from monitor_jus.validators import TribunalResolver, normalize_cnj
 
-# Portais de consulta pública conhecidos (templates com placeholders CNJ).
+# Classes típicas de 2º grau / tribunais superiores estaduais (e-SAJ cposg)
+_SECOND_DEGREE_HINTS = (
+    "agravo de instrumento",
+    "agravo interno",
+    "apelação",
+    "apelacao",
+    "embargos de declaração",
+    "embargos de declaracao",
+    "embargos infringentes",
+    "recurso inominado",
+    "mandado de segurança criminal",
+    "conflito de competência",
+    "conflito de competencia",
+    "ação rescisória",
+    "acao rescitoria",
+    "revisão criminal",
+    "revisao criminal",
+)
+
+# Portais de consulta pública (templates com placeholders CNJ).
 _DEFAULT_PORTAIS: dict[str, str] = {
     "stf": (
         "https://portal.stf.jus.br/processos/listProcesso.asp"
@@ -22,6 +41,7 @@ _DEFAULT_PORTAIS: dict[str, str] = {
     ),
     "tst": "https://consultaprocessual.tst.jus.br/consultaProcessual/consultaTstNumUnica.do",
     "tse": "https://www.tse.jus.br/servicos-eleitorais/processos/consulta-processual",
+    # 1º grau TJSP — cpopg
     "tjsp": (
         "https://esaj.tjsp.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC"
         "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
@@ -29,9 +49,24 @@ _DEFAULT_PORTAIS: dict[str, str] = {
         "&dadosConsulta.valorConsultaNuUnificado={cnj}"
         "&dadosConsulta.tipoNuProcesso=UNIFICADO"
     ),
-    "tjrj": "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublica",
-    "tjmg": "https://www4.tjmg.jus.br/juridico/sf/proc_resultado.jsp",
-    "tjrs": "https://www.tjrs.jus.br/novo/busca/?return=proc&client=wp_index",
+    # 2º grau TJSP — cposg (Agravo, Apelação, origem 0000)
+    "tjsp_2g": (
+        "https://esaj.tjsp.jus.br/cposg/search.do?conversationId=&paginaConsulta=0"
+        "&cbPesquisa=NUMPROC"
+        "&numeroDigitoAnoUnificado={nnnnnnn}-{dd}.{aaaa}"
+        "&foroNumeroUnificado={oooo}"
+        "&dePesquisa={cnj}"
+        "&localPesquisa.cdLocal=-1"
+        "&tipoNuProcesso=UNIFICADO"
+    ),
+    "tjrj": "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublica?numProcesso={cnj_q}",
+    "tjmg": (
+        "https://www4.tjmg.jus.br/juridico/sf/proc_resultado2.jsp"
+        "?tipoPesquisa2=1&txtProcesso={digits}&comrCodigo={oooo}"
+        "&tipoPessoa=X&naturezaProcesso=0&situacaoParte=X&numero=20&select=1"
+        "&tipoConsulta=1&natureza=0&ativoBaixado=X&listaProcessos={digits}"
+    ),
+    "tjrs": "https://www.tjrs.jus.br/novo/busca/?return=proc&client=wp_index&q={cnj_q}",
     "tjpr": "https://consulta.tjpr.jus.br/projudi_consulta/",
     "tjsc": "https://eproc1g.tjsc.jus.br/eproc/externo_controlador.php?acao=processo_consulta_publica",
     "tjba": "https://projetos.tjba.jus.br/projudi/",
@@ -71,11 +106,10 @@ _FALLBACK_HOME: dict[str, str] = {
     "stj": "https://processo.stj.jus.br/processo/pesquisa/",
     "tst": "https://www.tst.jus.br/",
     "trf1": "https://portal.trf1.jus.br/",
+    "tjsp": "https://esaj.tjsp.jus.br/cpopg/open.do",
 }
 
-# Templates com CNJ preenchido → deep-link ou search prefilled
-_DEEP_LINK_COURTS = {"tjsp"}
-_SEARCH_PREFILLED_COURTS = {"stf", "stj", "trf1"}
+_SEARCH_PREFILLED_COURTS = {"stf", "stj", "trf1", "tjsp", "tjsp_2g", "tjmg"}
 
 
 @dataclass(frozen=True)
@@ -110,31 +144,51 @@ def only_digits_safe(value: str) -> str:
 def _is_useless_portal_url(url: str | None) -> bool:
     if not url or not isinstance(url, str):
         return True
-    low = url.lower().strip()
+    low = url.lower().strip().rstrip("/")
     if not low.startswith("http"):
         return True
-    # Homepages / buscas vazias / provedores comerciais
     if "listview.seam" in low and "proc" not in low and "numero" not in low:
         return True
     if any(m in low for m in ("judit.io", "jusbrasil.com.br")):
         return True
-    # Homepage pura (path curto sem query de processo)
+    # DJEN frequentemente devolve só a home do DJE — inútil como portal do processo
+    if low in {
+        "https://www.dje.tjsp.jus.br",
+        "http://www.dje.tjsp.jus.br",
+        "https://dje.tjsp.jus.br",
+    }:
+        return True
+    if "dje.tjsp.jus.br" in low and "processo" not in low and "?" not in low:
+        return True
+    # PDF da comunicação no STJ — não é consulta do processo
+    if "justica.web.stj.jus.br/api/pcp/documentos" in low:
+        return True
     for home in _FALLBACK_HOME.values():
-        if low.rstrip("/") == home.rstrip("/"):
+        if low == home.rstrip("/").lower():
             return True
     return False
+
+
+def _is_esaj_show_deep_link(url: str) -> bool:
+    low = url.lower()
+    return "esaj." in low and "show.do" in low and "processo.codigo=" in low
 
 
 def _payload_url(payload: dict[str, Any] | None) -> str | None:
     if not isinstance(payload, dict):
         return None
-    for key in ("url", "lawsuit_url", "official_url", "link", "public_url"):
-        val = payload.get(key)
+    candidates: list[Any] = []
+    for key in ("url", "lawsuit_url", "official_url", "link", "public_url", "source_link"):
+        candidates.append(payload.get(key))
+    # payload aninhado do nosso ingest
+    for nest_key in ("djen", "lawsuit", "raw"):
+        nested = payload.get(nest_key)
+        if isinstance(nested, dict):
+            for key in ("link", "url", "official_url"):
+                candidates.append(nested.get(key))
+    for val in candidates:
         if isinstance(val, str) and val.startswith("http") and not _is_useless_portal_url(val):
             return val
-    nested = payload.get("lawsuit")
-    if isinstance(nested, dict):
-        return _payload_url(nested)
     return None
 
 
@@ -170,6 +224,35 @@ def _format_portal(template: str, parts: Any) -> str:
     )
 
 
+def _is_second_degree(
+    *,
+    parts: Any | None,
+    classe: str | None,
+    grau: str | None,
+    situacao: str | None = None,
+    has_second_degree: bool = False,
+) -> bool:
+    if has_second_degree:
+        return True
+    grau_l = (grau or "").lower()
+    if grau_l in {"g2", "2", "2g"} or any(
+        x in grau_l for x in ("segundo", "2º", "2o", "turma", "câmara", "camara")
+    ):
+        return True
+    if "2" in grau_l and "g1" not in grau_l:
+        return True
+    classe_l = (classe or "").lower()
+    if any(h in classe_l for h in _SECOND_DEGREE_HINTS):
+        return True
+    situ_l = (situacao or "").lower()
+    if "grau de recurso" in situ_l or situ_l == "julgado":
+        return True
+    # CNJ com origem 0000 no TJ estadual costuma ser 2º grau / tribunal
+    if parts and parts.origem == "0000" and parts.segmento == "8":
+        return True
+    return False
+
+
 def _resolve_court_key(numero_cnj: str | None, tribunal: str | None) -> str | None:
     parts = normalize_cnj(numero_cnj or "")
     settings = get_settings()
@@ -182,6 +265,8 @@ def _resolve_court_key(numero_cnj: str | None, tribunal: str | None) -> str | No
             key = "stf"
     if not key and tribunal:
         t = tribunal.strip().lower().replace(" ", "")
+        if t in {"tjsp_2g"}:
+            return "tjsp_2g"
         portais = _portais_map()
         if t in portais or t in _FALLBACK_HOME:
             key = t
@@ -194,20 +279,13 @@ def _resolve_court_key(numero_cnj: str | None, tribunal: str | None) -> str | No
 
 
 def _classify_link(court_key: str, url: str) -> OfficialLink:
-    court = court_key.upper()
+    court = court_key.upper().replace("_2G", "")
     low = url.lower()
-    if court_key in _DEEP_LINK_COURTS and "{cnj}" not in low:
+    if _is_esaj_show_deep_link(url):
         return OfficialLink(
             url=url,
-            court=court,
+            court=court if court != "UNKNOWN" else "TJSP",
             link_type="PROCESS_DEEP_LINK",
-            confidence="high",
-        )
-    if court_key in _SEARCH_PREFILLED_COURTS:
-        return OfficialLink(
-            url=url,
-            court=court,
-            link_type="PROCESS_SEARCH_PREFILLED",
             confidence="high",
         )
     if "listview.seam" in low and "proc" not in low and "numero" not in low:
@@ -218,7 +296,14 @@ def _classify_link(court_key: str, url: str) -> OfficialLink:
             confidence="low",
             requires_manual_search=True,
         )
-    if "?" in url or "numero" in low or "termo=" in low or "proc=" in low:
+    if court_key in _SEARCH_PREFILLED_COURTS or "search.do" in low or "termo=" in low or "proc=" in low:
+        return OfficialLink(
+            url=url,
+            court=court,
+            link_type="PROCESS_SEARCH_PREFILLED",
+            confidence="high" if "search.do" in low or "termo=" in low else "medium",
+        )
+    if "?" in url:
         return OfficialLink(
             url=url,
             court=court,
@@ -241,9 +326,11 @@ def resolve_official_link_result(
     payload: dict[str, Any] | None = None,
     existing: str | None = None,
     lawyer_name: str | None = None,
+    classe: str | None = None,
+    grau: str | None = None,
+    situacao: str | None = None,
 ) -> OfficialLink:
     """Resolve link oficial tipado com confiança."""
-    # STF só com advogado
     court_hint = (tribunal or "").strip().upper()
     if court_hint == "STF" and not normalize_cnj(numero_cnj or "") and lawyer_name:
         return OfficialLink(
@@ -254,11 +341,22 @@ def resolve_official_link_result(
             requires_manual_search=True,
         )
 
-    if isinstance(existing, str) and existing.startswith("http") and not _is_useless_portal_url(existing):
-        key = _resolve_court_key(numero_cnj, tribunal) or "unknown"
-        return _classify_link(key, existing)
+    # Deep-link e-SAJ já conhecido tem prioridade máxima
+    if isinstance(existing, str) and _is_esaj_show_deep_link(existing):
+        return _classify_link("tjsp", existing)
 
     from_payload = _payload_url(payload)
+    if from_payload and _is_esaj_show_deep_link(from_payload):
+        return _classify_link("tjsp", from_payload)
+
+    if isinstance(existing, str) and existing.startswith("http") and not _is_useless_portal_url(existing):
+        # Search.do genérico sem CNJ → descartar e recalcular
+        if "search.do" in existing.lower() and not (numero_cnj and only_digits_safe(numero_cnj)[:7] in existing):
+            pass
+        else:
+            key = _resolve_court_key(numero_cnj, tribunal) or "unknown"
+            return _classify_link(key, existing)
+
     if from_payload:
         key = _resolve_court_key(numero_cnj, tribunal) or "unknown"
         return _classify_link(key, from_payload)
@@ -274,6 +372,36 @@ def resolve_official_link_result(
             requires_manual_search=True,
         )
 
+    # Inferir classe/grau do payload DJEN
+    if not classe and isinstance(payload, dict):
+        djen = payload.get("djen") if isinstance(payload.get("djen"), dict) else {}
+        raw_classe = payload.get("nomeClasse") or payload.get("classe") or djen.get("nomeClasse")
+        if isinstance(raw_classe, dict):
+            classe = raw_classe.get("nome")
+        elif isinstance(raw_classe, str):
+            classe = raw_classe
+    if not grau and isinstance(payload, dict):
+        djen = payload.get("djen") if isinstance(payload.get("djen"), dict) else {}
+        grau = payload.get("grau") or djen.get("grau")
+
+    has_g2 = False
+    if isinstance(payload, dict):
+        has_g2 = bool(payload.get("has_second_degree"))
+        if not situacao:
+            situacao = payload.get("situacao") or (
+                (payload.get("datajud") or {}).get("situacao")
+                if isinstance(payload.get("datajud"), dict)
+                else None
+            )
+    if key == "tjsp" and _is_second_degree(
+        parts=parts,
+        classe=str(classe) if classe else None,
+        grau=str(grau) if grau else None,
+        situacao=str(situacao) if situacao else None,
+        has_second_degree=has_g2,
+    ):
+        key = "tjsp_2g"
+
     if key == "stf" and parts:
         url = build_stf_search_url(parts.numero_formatado)
         return OfficialLink(
@@ -285,10 +413,10 @@ def resolve_official_link_result(
 
     template = _portais_map().get(key)
     if not template:
-        home = _FALLBACK_HOME.get(key, "")
+        home = _FALLBACK_HOME.get(key.replace("_2g", ""), "")
         return OfficialLink(
             url=home,
-            court=key.upper(),
+            court=key.upper().replace("_2G", ""),
             link_type="COURT_HOMEPAGE" if home else "UNAVAILABLE",
             confidence="low" if home else "none",
             requires_manual_search=True,
@@ -298,7 +426,7 @@ def resolve_official_link_result(
         base = template.split("?")[0]
         return OfficialLink(
             url=base,
-            court=key.upper(),
+            court=key.upper().replace("_2G", ""),
             link_type="COURT_SEARCH_PAGE",
             confidence="low",
             requires_manual_search=True,
@@ -307,10 +435,10 @@ def resolve_official_link_result(
     try:
         url = _format_portal(template, parts)
     except (KeyError, ValueError, IndexError):
-        home = _FALLBACK_HOME.get(key) or template.split("?")[0]
+        home = _FALLBACK_HOME.get(key.replace("_2g", "")) or template.split("?")[0]
         return OfficialLink(
             url=home,
-            court=key.upper(),
+            court=key.upper().replace("_2G", ""),
             link_type="COURT_HOMEPAGE",
             confidence="low",
             requires_manual_search=True,
@@ -319,7 +447,7 @@ def resolve_official_link_result(
     if _is_useless_portal_url(url):
         return OfficialLink(
             url=url,
-            court=key.upper(),
+            court=key.upper().replace("_2G", ""),
             link_type="COURT_SEARCH_PAGE",
             confidence="low",
             requires_manual_search=True,
@@ -334,16 +462,20 @@ def resolve_official_link(
     tribunal: str | None = None,
     payload: dict[str, Any] | None = None,
     existing: str | None = None,
+    classe: str | None = None,
+    grau: str | None = None,
+    situacao: str | None = None,
 ) -> str | None:
-    """Compat: retorna apenas a URL (ou None se unavailable/useless)."""
+    """Compat: retorna apenas a URL (ou None se unavailable)."""
     result = resolve_official_link_result(
         numero_cnj,
         tribunal=tribunal,
         payload=payload,
         existing=existing,
+        classe=classe,
+        grau=grau,
+        situacao=situacao,
     )
     if result.link_type == "UNAVAILABLE" or not result.url:
         return None
-    if result.link_type == "COURT_HOMEPAGE":
-        return result.url
     return result.url

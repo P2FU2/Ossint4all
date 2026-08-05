@@ -76,9 +76,10 @@
       <thead>
         <tr>
           <th>CNJ</th>
-          <th>Tribunal</th>
+          <th>Tribunal / Grau</th>
           <th>Status</th>
           <th>Classe / Assunto</th>
+          <th>Órgão julgador</th>
           <th>Critério</th>
           <th>Última mov.</th>
           <th>Portal</th>
@@ -88,9 +89,10 @@
         {% for p in portfolio.processes %}
         <tr>
           <td><strong>{{ p.numero_cnj }}</strong></td>
-          <td>{{ p.tribunal }}</td>
+          <td>{{ p.tribunal }}<br><span class="muted">{{ p.instance_label or p.grau or '—' }}</span></td>
           <td>{{ p.situacao }}<br><span class="muted">{{ outcome_labels.get(p.outcome, p.outcome) }}</span></td>
           <td>{{ p.classe }}<br><span class="muted">{{ p.assunto }}</span></td>
+          <td>{{ p.orgao_julgador or '—' }}</td>
           <td>{{ p.criteria }}</td>
           <td>{{ p.last_movement_at }}</td>
           <td>

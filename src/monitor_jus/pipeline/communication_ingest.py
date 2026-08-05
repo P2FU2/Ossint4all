@@ -216,11 +216,14 @@ def ingest(
             cnj.numero_formatado,
             tribunal=extracted.get("court"),
             payload=raw_payload,
+            classe=extracted.get("nome_classe"),
         )
         proc = repo.upsert_process(
             cnj.numero_formatado,
             cnj.numero_digits,
             tribunal=extracted.get("court"),
+            classe=extracted.get("nome_classe"),
+            orgao_julgador=extracted.get("nome_orgao"),
             payload={
                 "source": source,
                 "djen": raw_payload,
@@ -231,6 +234,10 @@ def ingest(
         if hasattr(proc, "official_link"):
             proc.official_link = link.url or None
             proc.official_link_type = link.link_type
+        if extracted.get("nome_classe"):
+            proc.classe = proc.classe or extracted.get("nome_classe")
+        if extracted.get("nome_orgao"):
+            proc.orgao_julgador = proc.orgao_julgador or extracted.get("nome_orgao")
         process_id = proc.id
         result["process_id"] = process_id
 

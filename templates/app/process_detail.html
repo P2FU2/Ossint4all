@@ -4,7 +4,7 @@
 <div class="page-head">
   <div>
     <h1 class="mono">{{ process.numero_cnj }}</h1>
-    <p>{{ process.tribunal }} · {{ process.classe }} · {{ process.grau }}</p>
+    <p>{{ process.tribunal }} · {{ process.classe }} · {{ process.instance_label or process.grau }}</p>
   </div>
   <div class="actions">
     {% if process.official_link %}
@@ -38,6 +38,15 @@
     <h2>Capa</h2>
     <p><strong>Assunto:</strong> {{ process.assunto }}</p>
     <p><strong>Órgão:</strong> {{ process.orgao_julgador }}</p>
+    <p><strong>Instância:</strong> {{ process.instance_label or process.grau }}</p>
+    {% if process.instances and process.instances|length > 1 %}
+    <p><strong>Capas conhecidas:</strong>
+      {% for inst in process.instances %}
+        {{ inst.instance_label or inst.grau }}{% if not loop.last %} · {% endif %}
+      {% endfor %}
+    </p>
+    <p class="muted">1º e 2º grau são as instâncias fundamentais; o percurso pode chegar a tribunais superiores e ao STF.</p>
+    {% endif %}
     <p><strong>Última movimentação:</strong> {{ process.last_movement_at }}</p>
     {% if process.baseline %}<p><span class="badge soft">Baseline (bootstrap)</span></p>{% endif %}
     <h2 style="margin-top:18px">Critérios</h2>

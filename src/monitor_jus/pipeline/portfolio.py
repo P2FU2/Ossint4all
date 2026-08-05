@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
 
 from monitor_jus.db.models import Criterion, CriterionLink, Process
+from monitor_jus.instances import instance_from_cnj_court, instance_label
 from monitor_jus.official_portal import resolve_official_link
 from monitor_jus.pipeline.status_oficial import (
     is_placeholder_status,
@@ -323,7 +324,7 @@ def serialize_process_row(
     )
     outcome = classify_outcome(situacao_full if situacao_full != "—" else None, last_step=last_step)
     # Extinto / arquivado → encerrado
-    if situacao_key in ("extinto", "arquivado", "baixado"):
+    if situacao_key in ("extinto", "arquivado", "baixado", "julgado"):
         outcome = "encerrado"
     elif situacao_key == "em_grau_de_recurso":
         outcome = "ativo"
@@ -331,6 +332,18 @@ def serialize_process_row(
     tribunal = proc.tribunal or "N/D"
     crits = criteria_labels or ["—"]
     crits_sorted = sorted(crits, key=lambda c: (0 if c.startswith("OAB ") else 1, c))
+
+    dj = payload.get("datajud") if isinstance(payload, dict) else None
+    dj = dj if isinstance(dj, dict) else {}
+    summary = dj.get("instance_summary") if isinstance(dj.get("instance_summary"), dict) else {}
+    inst_label = (
+        summary.get("active_label")
+        or dj.get("instance_label")
+        or instance_label(
+            instance_from_cnj_court(proc.numero_cnj, tribunal, grau=proc.grau)
+        )
+    )
+    instances = dj.get("instances") if isinstance(dj.get("instances"), list) else []
 
     return {
         "id": proc.id,
@@ -343,6 +356,9 @@ def serialize_process_row(
         "situacao_key": situacao_key,
         "outcome": outcome,
         "grau": proc.grau or "—",
+        "instance_label": inst_label,
+        "instances": instances,
+        "instance_summary": summary,
         "orgao_julgador": proc.orgao_julgador or "—",
         "data_distribuicao": _fmt_dt(proc.data_distribuicao),
         "last_checked_at": _fmt_dt(proc.last_checked_at),
@@ -354,6 +370,10 @@ def serialize_process_row(
             proc.numero_cnj,
             tribunal=tribunal,
             payload=payload if payload else None,
+            existing=getattr(proc, "official_link", None),
+            classe=proc.classe,
+            grau=proc.grau,
+            situacao=situacao_full if situacao_full != "—" else proc.situacao,
         ),
     }
 

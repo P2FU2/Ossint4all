@@ -19,6 +19,7 @@ from monitor_jus.db.models import (
     Process,
     ProcessMovement,
 )
+from monitor_jus.instances import instance_from_cnj_court, instance_label
 from monitor_jus.official_portal import resolve_official_link
 from monitor_jus.pipeline.portfolio import (
     classify_outcome,
@@ -388,6 +389,23 @@ def processes_csv(session: Session, **filters: Any) -> str:
     return buf.getvalue()
 
 
+def _process_instances(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    dj = payload.get("datajud") if isinstance(payload.get("datajud"), dict) else {}
+    rows = dj.get("instances")
+    return rows if isinstance(rows, list) else []
+
+
+def _process_instance_label(proc: Process, payload: dict[str, Any]) -> str:
+    dj = payload.get("datajud") if isinstance(payload.get("datajud"), dict) else {}
+    summary = dj.get("instance_summary") if isinstance(dj.get("instance_summary"), dict) else {}
+    label = summary.get("active_label") or dj.get("instance_label")
+    if label:
+        return str(label)
+    return instance_label(
+        instance_from_cnj_court(proc.numero_cnj, proc.tribunal, grau=proc.grau)
+    )
+
+
 def get_process_detail(session: Session, process_id: str) -> dict[str, Any] | None:
     proc = session.get(Process, process_id)
     if not proc:
@@ -501,6 +519,8 @@ def get_process_detail(session: Session, process_id: str) -> dict[str, Any] | No
         "situacao": situacao_full,
         "situacao_key": situacao_key,
         "grau": proc.grau or "—",
+        "instance_label": _process_instance_label(proc, payload),
+        "instances": _process_instances(payload),
         "orgao_julgador": proc.orgao_julgador or "—",
         "outcome": outcome,
         "baseline": proc.baseline,
@@ -508,7 +528,13 @@ def get_process_detail(session: Session, process_id: str) -> dict[str, Any] | No
         "last_checked_at": _fmt(proc.last_checked_at),
         "last_movement_at": _fmt(proc.last_movement_at),
         "official_link": resolve_official_link(
-            proc.numero_cnj, tribunal=proc.tribunal, payload=payload
+            proc.numero_cnj,
+            tribunal=proc.tribunal,
+            payload=payload,
+            existing=getattr(proc, "official_link", None),
+            classe=proc.classe,
+            grau=proc.grau,
+            situacao=proc.situacao,
         ),
         "criteria": criteria_rows,
         "timeline": timeline[:120],

@@ -9,7 +9,8 @@ from monitor_jus.official_portal import (
 CNJ_STF = "0000001-00.2024.1.00.0000"
 CNJ_STJ = "0000001-00.2020.3.00.0000"
 CNJ_TRF1 = "1000123-45.2023.4.01.3400"
-CNJ_TJSP = "1000123-45.2023.8.26.0100"
+CNJ_TJSP_1G = "1000123-45.2023.8.26.0100"
+CNJ_TJSP_2G = "2136744-60.2026.8.26.0000"
 
 
 @pytest.mark.parametrize(
@@ -18,7 +19,7 @@ CNJ_TJSP = "1000123-45.2023.8.26.0100"
         ("STF", CNJ_STF, "PROCESS_SEARCH_PREFILLED"),
         ("STJ", CNJ_STJ, "PROCESS_SEARCH_PREFILLED"),
         ("TRF1", CNJ_TRF1, "PROCESS_SEARCH_PREFILLED"),
-        ("TJSP", CNJ_TJSP, "PROCESS_DEEP_LINK"),
+        ("TJSP", CNJ_TJSP_1G, "PROCESS_SEARCH_PREFILLED"),
     ],
 )
 def test_official_links(court, cnj, expected_type):
@@ -26,6 +27,33 @@ def test_official_links(court, cnj, expected_type):
     assert result.link_type == expected_type
     assert result.url.startswith("http")
     assert result.link_type != "COURT_HOMEPAGE"
+
+
+def test_tjsp_agravo_uses_cposg():
+    result = resolve_official_link_result(
+        CNJ_TJSP_2G,
+        tribunal="TJSP",
+        classe="Agravo de Instrumento",
+    )
+    assert "cposg" in result.url
+    assert "2136744-60.2026" in result.url
+    assert "cpopg" not in result.url
+
+
+def test_tjsp_origem_0000_uses_cposg():
+    result = resolve_official_link_result(CNJ_TJSP_2G, tribunal="TJSP")
+    assert "cposg" in result.url
+
+
+def test_tjsp_1g_uses_cpopg():
+    result = resolve_official_link_result(CNJ_TJSP_1G, tribunal="TJSP")
+    assert "cpopg" in result.url
+    assert "1000123-45.2023.8.26.0100" in result.url
+
+
+def test_rejects_dje_homepage():
+    assert _is_useless_portal_url("https://www.dje.tjsp.jus.br")
+    assert _is_useless_portal_url("https://www.dje.tjsp.jus.br/")
 
 
 def test_rejects_judit_homepage():
@@ -38,8 +66,32 @@ def test_rejects_empty_pje_listview():
     )
 
 
+def test_prefers_esaj_show_deep_link():
+    deep = (
+        "https://esaj.tjsp.jus.br/cpopg/show.do?"
+        "processo.codigo=2S0022OZI0000&processo.foro=100"
+        "&processo.numero=0063467-70.2025.8.26.0100"
+    )
+    result = resolve_official_link_result(
+        "0063467-70.2025.8.26.0100",
+        tribunal="TJSP",
+        existing=deep,
+    )
+    assert result.link_type == "PROCESS_DEEP_LINK"
+    assert result.url == deep
+
+
+def test_ignores_useless_djen_link_and_builds_search():
+    result = resolve_official_link_result(
+        CNJ_TJSP_1G,
+        tribunal="TJSP",
+        payload={"link": "https://www.dje.tjsp.jus.br", "djen": {"link": "https://www.dje.tjsp.jus.br"}},
+    )
+    assert "esaj.tjsp.jus.br" in result.url
+    assert "cpopg" in result.url
+
+
 def test_recomputes_link_in_email():
-    # existing useless URL is ignored in favor of recomputed portal
     result = resolve_official_link_result(
         CNJ_STJ,
         tribunal="STJ",
@@ -56,7 +108,7 @@ def test_stj_deep_link():
 
 
 def test_tjsp_esaj_link():
-    link = resolve_official_link(CNJ_TJSP, tribunal="TJSP")
+    link = resolve_official_link(CNJ_TJSP_1G, tribunal="TJSP")
     assert link is not None
     assert "esaj.tjsp.jus.br" in link
     assert "1000123-45.2023.8.26.0100" in link
@@ -64,20 +116,11 @@ def test_tjsp_esaj_link():
 
 def test_prefers_payload_url_when_useful():
     link = resolve_official_link(
-        CNJ_TJSP,
+        CNJ_TJSP_1G,
         tribunal="TJSP",
         payload={"url": "https://exemplo.jus.br/processo/abc"},
     )
     assert link == "https://exemplo.jus.br/processo/abc"
-
-
-def test_existing_link_wins_when_useful():
-    link = resolve_official_link(
-        CNJ_TJSP,
-        existing="https://portal.oficial/xyz",
-        payload={"url": "https://outro"},
-    )
-    assert link == "https://portal.oficial/xyz"
 
 
 def test_stf_lawyer_search():
