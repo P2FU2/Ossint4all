@@ -198,7 +198,7 @@ def normalize_datajud_source(source: dict[str, Any]) -> dict[str, Any]:
         "raw": source,
         "normalizer_version": NORMALIZER_VERSION,
         "official_link": resolve_official_link(
-            None,
+            source.get("numeroProcesso"),
             tribunal=str(source.get("tribunal") or "") or None,
             payload=source,
             grau=str(source.get("grau") or "") or None,
@@ -257,12 +257,21 @@ def normalize_datajud_hits(sources: list[dict[str, Any]]) -> dict[str, Any]:
     base["reached_superior"] = bool(summary.get("reached_superior"))
     base["all_sources"] = sources
     # Link: se há 2º grau no mesmo CNJ, forçar portal de 2ª instância
+    cnj_for_link = preferred.get("numeroProcesso") or base.get("numero_cnj_digits")
     if base.get("has_second_degree"):
         base["official_link"] = resolve_official_link(
-            None,
+            cnj_for_link,
             tribunal=str(preferred.get("tribunal") or "") or None,
             payload=preferred,
             grau="G2",
+            classe=base.get("classe"),
+        )
+    elif not base.get("official_link"):
+        base["official_link"] = resolve_official_link(
+            cnj_for_link,
+            tribunal=str(preferred.get("tribunal") or "") or None,
+            payload=preferred,
+            grau=str(preferred.get("grau") or "") or None,
             classe=base.get("classe"),
         )
     return base

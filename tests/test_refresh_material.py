@@ -34,6 +34,12 @@ def test_refresh_non_material_change_does_not_create_event():
     assert material_movement_changed(prev, cur) is False
 
 
+def test_refresh_first_sight_is_baseline_not_novelty():
+    prev = ("", "", "", "", "")
+    cur = ("85", "2026-08-01T12:00:00", "juntada", "1a vara", "")
+    assert material_movement_changed(prev, cur) is False
+
+
 def test_refresh_material_movement_creates_single_event(tmp_path, monkeypatch):
     url = _db(tmp_path, monkeypatch)
     monkeypatch.setenv("DATAJUD_ENABLE", "true")
@@ -149,8 +155,10 @@ def test_refresh_same_movement_twice_is_deduped(tmp_path, monkeypatch):
         session.flush()
 
     with session_scope(url) as session:
+        # 1ª leitura DataJud = baseline (não vira novidade)
         r1 = run_tracking(session, parent_job_id="j1", batch_size=10)
-        assert r1["events_created"] == 1
+        assert r1["events_created"] == 0
+        assert r1["refreshed"] == 1
 
     with session_scope(url) as session:
         from sqlalchemy import func, select
@@ -167,7 +175,7 @@ def test_refresh_same_movement_twice_is_deduped(tmp_path, monkeypatch):
             .select_from(Event)
             .where(Event.event_type == EventType.MOVIMENTACAO_PROCESSUAL.value)
         )
-        assert int(n or 0) == 1
+        assert int(n or 0) == 0
 
 
 def test_refresh_batch_reenqueues_when_backlog_exists(tmp_path, monkeypatch):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -20,11 +20,25 @@ def _norm(text: str | None) -> str:
 
 
 def _dt(value: datetime | str | None) -> str:
+    """Normaliza data para comparação estável (UTC, sem microssegundos/offset)."""
     if value is None:
         return ""
+    dt: datetime | None = None
     if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
+        dt = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return raw
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def sha256_hex(*parts: str) -> str:

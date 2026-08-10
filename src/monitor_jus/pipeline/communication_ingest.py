@@ -31,6 +31,28 @@ def _normalized_text_hash(text: str) -> str:
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:32]
 
 
+def _parse_source_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        # YYYY-MM-DD
+        if len(raw) == 10 and raw[4] == "-":
+            return datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
 def build_communication_key(
     *,
     source: str,
@@ -204,7 +226,9 @@ def ingest(
         source_event_id=extracted.get("external_id"),
         title=f"{extracted.get('court') or 'DJEN'} · {extracted.get('communication_type')}",
         body=body[:8000] if body else None,
-        published_at=None,
+        published_at=_parse_source_datetime(
+            extracted.get("publication_date") or extracted.get("availability_date")
+        ),
         payload_hash=payload_hash,
         payload=payload_extra,
         match_status=evidence.status.value,
@@ -314,6 +338,9 @@ def ingest(
             criterion_refs=evidence.matched_criteria,
             payload_hash=payload_hash,
             requires_name_validation=evidence.status == MatchStatus.PROBABLE_NAME,
+            occurred_at=_parse_source_datetime(
+                extracted.get("publication_date") or extracted.get("availability_date")
+            ),
         )
         session.add(event)
         result["event_id"] = event.id

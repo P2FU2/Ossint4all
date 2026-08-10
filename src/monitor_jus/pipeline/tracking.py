@@ -105,7 +105,11 @@ def material_movement_changed(
     previous: tuple[str, str, str, str, str],
     current: tuple[str, str, str, str, str],
 ) -> bool:
+    """True só quando há mudança material real (não baseline da 1ª leitura DataJud)."""
     if current == ("", "", "", "", ""):
+        return False
+    # Primeira observação: grava capa/estado, não vira novidade no digest
+    if previous == ("", "", "", "", ""):
         return False
     return previous != current
 
@@ -175,6 +179,23 @@ def _apply_datajud_enrichment(proc: Any, norm: dict[str, Any]) -> None:
     }
 
 
+def _parse_occurred_at(norm: dict[str, Any]) -> datetime | None:
+    raw = norm.get("last_movement_at") or norm.get("last_movement_date")
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=timezone.utc)
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            return None
+    return None
+
+
 def _maybe_create_movement_event(
     session: Session,
     repo: Repository,
@@ -192,7 +213,22 @@ def _maybe_create_movement_event(
     payload_hash = identity[:64]
     title = f"{proc.tribunal or 'Tribunal'} · {norm.get('last_movement_name') or 'Movimentação'}"
     description = str(norm.get("last_movement_name") or "")[:2000]
-    link = proc.official_link
+    link_res = resolve_official_link_result(
+        proc.numero_cnj,
+        tribunal=proc.tribunal,
+        payload={
+            "datajud": norm.get("raw"),
+            "instances": norm.get("instances"),
+            "has_second_degree": norm.get("has_second_degree"),
+        },
+        existing=proc.official_link,
+        classe=proc.classe or norm.get("classe"),
+        grau=proc.grau if not norm.get("has_second_degree") else "G2",
+    )
+    link = link_res.url or proc.official_link
+    if link_res.url and link_res.link_type not in {"UNAVAILABLE", "COURT_HOMEPAGE"}:
+        proc.official_link = link_res.url
+        proc.official_link_type = link_res.link_type
     _event, created = repo.create_event_if_absent(
         event_identity_key=identity,
         payload_hash=payload_hash,
@@ -207,6 +243,7 @@ def _maybe_create_movement_event(
         priority="media",
         tipo_movimentacao=str(norm.get("last_movement_name") or "")[:64] or None,
         official_link=link,
+        occurred_at=_parse_occurred_at(norm),
     )
     return created
 

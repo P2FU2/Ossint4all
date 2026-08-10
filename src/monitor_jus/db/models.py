@@ -245,10 +245,14 @@ class Event(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     possible_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     possible_deadline_flag: Mapped[bool] = mapped_column(Boolean, default=False)
-    official_link: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    official_link: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     criterion_refs: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     payload_hash: Mapped[str] = mapped_column(String(64))
     requires_name_validation: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Data da movimentação/publicação na fonte (não o momento da detecção)
+    occurred_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

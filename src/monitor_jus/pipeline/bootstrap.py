@@ -67,13 +67,6 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
         force=True,
     )
 
-    if ignore_events:
-        session.execute(
-            update(Event)
-            .where(Event.notify_status == NotifyStatus.PENDING_NOTIFY.value)
-            .values(notify_status=NotifyStatus.IGNORED.value)
-        )
-
     capa_result: dict[str, Any] | None = None
     if complete_capa:
         report_progress(
@@ -88,6 +81,14 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
             settings=settings,
             only_incomplete=True,
             force_all_incomplete=True,
+        )
+
+    # Baseline depois do DJEN e do DataJud (capa) — evita flood no digest
+    if ignore_events:
+        session.execute(
+            update(Event)
+            .where(Event.notify_status == NotifyStatus.PENDING_NOTIFY.value)
+            .values(notify_status=NotifyStatus.IGNORED.value)
         )
 
     now = datetime.now(timezone.utc)

@@ -569,8 +569,16 @@ def resolve_official_link_result(
         return _classify_link("tjsp", from_payload)
 
     if isinstance(existing, str) and existing.startswith("http") and not _is_useless_portal_url(existing):
-        # Search.do genérico sem CNJ → descartar e recalcular
-        if "search.do" in existing.lower() and not (numero_cnj and only_digits_safe(numero_cnj)[:7] in existing):
+        # Search.do / portal sem o CNJ na URL → descartar e recalcular
+        digits = only_digits_safe(numero_cnj or "")
+        low_ex = existing.lower()
+        missing_cnj = bool(digits) and digits[:7] not in low_ex and digits not in low_ex
+        if missing_cnj and any(
+            m in low_ex
+            for m in ("search.do", "listview.seam", "consultaprocessual", "consulta")
+        ):
+            pass
+        elif "open.do" in low_ex and "show.do" not in low_ex and "search.do" not in low_ex:
             pass
         else:
             key = _resolve_court_key(numero_cnj, tribunal) or "unknown"

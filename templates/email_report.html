@@ -47,7 +47,8 @@
     <div class="item">
       <strong>{% if e.official_link %}<a href="{{ e.official_link }}">{{ e.numero_cnj or 'Sem CNJ' }}</a>{% else %}{{ e.numero_cnj or 'Sem CNJ' }}{% endif %}</strong> — {{ e.tribunal or '—' }}
       <div class="muted">{{ e.event_type }} · prioridade {{ e.priority }} · {{ e.tipo_movimentacao or '—' }}</div>
-      <div>{{ e.summary or e.description }}</div>
+      {% if e.change_date %}<div class="muted"><strong>{{ e.change_date_label or 'Alteração em' }}:</strong> {{ e.change_date }}</div>{% endif %}
+      <div>{{ (e.summary or e.description) | md_bold }}</div>
       {% if e.possible_deadline_flag %}<div><em>Possível prazo identificado. Necessária validação jurídica na publicação oficial.</em></div>{% endif %}
       {% if e.official_link %}<div><a href="{{ e.official_link }}">Ver no portal oficial do tribunal</a></div>{% endif %}
       {% if e.criterion_refs %}<div class="muted">Critérios: {{ e.criterion_refs | join(', ') }}</div>{% endif %}
@@ -62,7 +63,8 @@
     <div class="item">
       <strong>{% if e.official_link %}<a href="{{ e.official_link }}">{{ e.numero_cnj or 'Sem CNJ' }}</a>{% else %}{{ e.numero_cnj or 'Sem CNJ' }}{% endif %}</strong> — {{ e.tribunal or '—' }} · {{ e.priority }}
       <div class="muted">{{ e.title }}</div>
-      <div>{{ e.summary or e.description }}</div>
+      {% if e.change_date %}<div class="muted"><strong>{{ e.change_date_label or 'Alteração em' }}:</strong> {{ e.change_date }}</div>{% endif %}
+      <div>{{ (e.summary or e.description) | md_bold }}</div>
       {% if e.requires_name_validation %}<div class="muted">Correspondência por nome — requer validação.</div>{% endif %}
       {% if e.official_link %}<div><a href="{{ e.official_link }}">Ver no portal oficial do tribunal</a></div>{% endif %}
     </div>

@@ -100,6 +100,8 @@ def _ensure_schema_compat(engine: Engine) -> None:
                 "ALTER TABLE communications ADD COLUMN IF NOT EXISTS match_evidence_json JSON",
                 "ALTER TABLE communications ADD COLUMN IF NOT EXISTS discovery_channels_json JSON",
                 "ALTER TABLE communications ADD COLUMN IF NOT EXISTS notification_status VARCHAR(32)",
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMPTZ",
+                "ALTER TABLE events ALTER COLUMN official_link TYPE VARCHAR(1024)",
             ]
         )
     elif dialect == "sqlite":
@@ -125,6 +127,7 @@ def _ensure_schema_compat(engine: Engine) -> None:
                 "ALTER TABLE communications ADD COLUMN match_evidence_json JSON",
                 "ALTER TABLE communications ADD COLUMN discovery_channels_json JSON",
                 "ALTER TABLE communications ADD COLUMN notification_status VARCHAR(32)",
+                "ALTER TABLE events ADD COLUMN occurred_at DATETIME",
             ]
         )
     if not statements:
