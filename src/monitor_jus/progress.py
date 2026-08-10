@@ -194,7 +194,18 @@ def raise_if_cancelled() -> None:
 
 
 def complete(message: str = "Concluído") -> None:
-    report(stage="done", done=1, total=1, message=message, force=True)
+    """Marca fim do job sem zerar o progresso (mantém done/total atuais)."""
+    st = _state
+    if st and st.total > 0:
+        report(
+            stage="done",
+            done=st.total,
+            total=st.total,
+            message=message,
+            force=True,
+        )
+    else:
+        report(stage="done", done=1, total=1, message=message, force=True)
 
 
 def fail(message: str = "Falhou") -> None:

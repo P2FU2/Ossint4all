@@ -30,6 +30,35 @@ from monitor_jus.validators import normalize_cnj
 logger = get_logger(__name__)
 
 BATCH_SIZE = 75
+# Fatia do lote normal dedicada a capas incompletas (além dos due)
+INCOMPLETE_SLICE = 15
+
+
+def _refresh_meta(proc: Any) -> dict[str, Any]:
+    payload = proc.payload if isinstance(proc.payload, dict) else {}
+    meta = payload.get("_refresh")
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+def _failure_streak(proc: Any) -> int:
+    try:
+        return max(0, int(_refresh_meta(proc).get("failure_streak") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _set_failure_streak(proc: Any, streak: int) -> None:
+    payload = dict(proc.payload) if isinstance(proc.payload, dict) else {}
+    meta = dict(payload.get("_refresh") or {}) if isinstance(payload.get("_refresh"), dict) else {}
+    if streak <= 0:
+        meta.pop("failure_streak", None)
+    else:
+        meta["failure_streak"] = int(streak)
+    if meta:
+        payload["_refresh"] = meta
+    elif "_refresh" in payload:
+        payload.pop("_refresh", None)
+    proc.payload = payload or None
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -201,6 +230,8 @@ def _maybe_create_movement_event(
     repo: Repository,
     proc: Any,
     norm: dict[str, Any],
+    *,
+    suppress_notify: bool = False,
 ) -> bool:
     identity = movement_identity_hash(
         numero_cnj=proc.numero_cnj,
@@ -229,11 +260,16 @@ def _maybe_create_movement_event(
     if link_res.url and link_res.link_type not in {"UNAVAILABLE", "COURT_HOMEPAGE"}:
         proc.official_link = link_res.url
         proc.official_link_type = link_res.link_type
+    notify = (
+        NotifyStatus.IGNORED.value
+        if suppress_notify
+        else NotifyStatus.PENDING_NOTIFY.value
+    )
     _event, created = repo.create_event_if_absent(
         event_identity_key=identity,
         payload_hash=payload_hash,
         event_type=EventType.MOVIMENTACAO_PROCESSUAL.value,
-        notify_status=NotifyStatus.PENDING_NOTIFY.value,
+        notify_status=notify,
         source_name="datajud",
         source_event_id=None,
         numero_cnj=proc.numero_cnj,
@@ -256,170 +292,265 @@ def run_tracking(
     force_all_incomplete: bool = False,
     parent_job_id: str | None = None,
     batch_size: int = BATCH_SIZE,
+    suppress_notify: bool = False,
+    update_progress_totals: bool = True,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     repo = Repository(session)
     datajud = DataJudClient(settings)
     freq_cfg = load_yaml(settings.config_path("check_frequency.yaml"))
 
-    if only_incomplete:
-        due = repo.processes_incomplete_capa(limit=batch_size)
-        label = "CAPA_INCOMPLETA"
-    else:
-        due = repo.processes_due(limit=batch_size)
-        label = "PROCESS_REFRESH"
-    _ = force_all_incomplete
+    label = "CAPA_INCOMPLETA" if only_incomplete else "PROCESS_REFRESH"
+    drain_incomplete = bool(only_incomplete and force_all_incomplete)
+    max_batches = 40 if drain_incomplete else 1
 
     refreshed = 0
     skipped_stf = 0
     events_created = 0
     errors = 0
     outcomes: list[dict[str, Any]] = []
-    n_due = max(len(due), 1)
-    report_progress(
-        stage="tracking",
-        done=0,
-        total=n_due,
-        message=f"{label} · {len(due)} processo(s)",
-        force=True,
-    )
+    due_total = 0
+    batches_done = 0
+    processed_global = 0
 
-    for idx, proc in enumerate(due):
-        report_progress(
-            stage="tracking",
-            done=idx,
-            total=n_due,
-            message=f"Atualizando {proc.numero_cnj}",
-            force=True,
-        )
-        route = resolve_process_source(proc.numero_cnj, proc.tribunal, settings=settings)
-        now = datetime.now(timezone.utc)
-        proc.datajud_last_checked_at = now
-        previous = _material_state_from_process(proc)
-
-        if route.source == "STF_DJEN_PORTAL":
-            skipped_stf += 1
-            link = resolve_official_link_result(proc.numero_cnj, tribunal="STF")
-            proc.official_link = link.url or proc.official_link
-            proc.official_link_type = link.link_type
-            proc.next_check_at = _next_check(proc.situacao, proc.last_movement_at, freq_cfg)
-            outcomes.append({"cnj": proc.numero_cnj, "route": route.source, "skipped": True})
+    def _prog(*, done: float | None, total: float | None, message: str, force: bool = False) -> None:
+        if update_progress_totals:
             report_progress(
                 stage="tracking",
-                done=idx + 1,
+                done=done,
+                total=total,
+                message=message,
+                force=force,
+            )
+        else:
+            # Nested sob Bootstrap: só mensagem (não sobrescreve done/total do pai)
+            report_progress(stage="tracking", message=message, force=force)
+
+    for _batch in range(max_batches):
+        if only_incomplete:
+            # due_only: erros/backoff não reprocessam o mesmo CNJ no mesmo drain
+            due = repo.processes_incomplete_capa(limit=batch_size, due_only=True)
+        else:
+            # Mistura capas incompletas due no refresh normal (não só no Bootstrap)
+            capa_n = min(INCOMPLETE_SLICE, max(0, batch_size // 3))
+            incomplete = (
+                repo.processes_incomplete_capa(limit=capa_n, due_only=True)
+                if capa_n
+                else []
+            )
+            due_main = repo.processes_due(limit=max(1, batch_size - len(incomplete)))
+            seen: set[str] = set()
+            due = []
+            for proc in [*incomplete, *due_main]:
+                if proc.id in seen:
+                    continue
+                seen.add(proc.id)
+                due.append(proc)
+        if not due:
+            break
+        due_total += len(due)
+        batches_done += 1
+        n_due = max(len(due), 1)
+        if batches_done == 1:
+            _prog(
+                done=0,
                 total=n_due,
+                message=(
+                    f"{label} · drenando capas ({len(due)}+)"
+                    if drain_incomplete
+                    else f"{label} · {len(due)} processo(s)"
+                ),
+                force=True,
+            )
+
+        for idx, proc in enumerate(due):
+            done_n = processed_global + idx
+            total_n = max(due_total, done_n + 1) if drain_incomplete else n_due
+            _prog(
+                done=done_n,
+                total=total_n,
+                message=f"Atualizando {proc.numero_cnj}",
+                force=True,
+            )
+            route = resolve_process_source(proc.numero_cnj, proc.tribunal, settings=settings)
+            now = datetime.now(timezone.utc)
+            proc.datajud_last_checked_at = now
+            previous = _material_state_from_process(proc)
+
+            if route.source == "STF_DJEN_PORTAL":
+                skipped_stf += 1
+                link = resolve_official_link_result(proc.numero_cnj, tribunal="STF")
+                proc.official_link = link.url or proc.official_link
+                proc.official_link_type = link.link_type
+                proc.next_check_at = _next_check(proc.situacao, proc.last_movement_at, freq_cfg)
+                outcomes.append({"cnj": proc.numero_cnj, "route": route.source, "skipped": True})
+                _prog(
+                    done=done_n + 1,
+                    total=total_n,
+                    message=f"Atualizando {proc.numero_cnj}",
+                )
+                continue
+
+            if route.source != "DATAJUD" or not route.datajud_alias:
+                proc.requires_reconciliation = True
+                proc.next_check_at = _next_check(proc.situacao, proc.last_movement_at, freq_cfg)
+                outcomes.append({"cnj": proc.numero_cnj, "route": route.source, "skipped": True})
+                _prog(
+                    done=done_n + 1,
+                    total=total_n,
+                    message=f"Atualizando {proc.numero_cnj}",
+                )
+                continue
+
+            try:
+                hits = datajud.search_all_by_cnj(proc.numero_cnj, alias=route.datajud_alias)
+                had_material = False
+                if hits:
+                    # 1ª leitura DataJud = baseline (mesmo com orgao/data vindos do DJEN).
+                    # Só conta observação DataJud prévia — não capa DJEN sozinha.
+                    payload = proc.payload if isinstance(proc.payload, dict) else {}
+                    dj_prev = (
+                        payload.get("datajud")
+                        if isinstance(payload.get("datajud"), dict)
+                        else {}
+                    )
+                    had_prior_datajud = bool(
+                        proc.datajud_fingerprint
+                        or proc.datajud_last_success_at
+                        or dj_prev.get("last_movement_code")
+                        or dj_prev.get("last_movement_name")
+                    )
+                    norm = normalize_datajud_hits(hits)
+                    current = _material_state_from_norm(norm)
+                    _apply_datajud_enrichment(proc, norm)
+                    fingerprint = hashlib.sha256(
+                        json.dumps(
+                            [{"grau": h.get("grau"), "id": h.get("id")} for h in hits],
+                            sort_keys=True,
+                            default=str,
+                        ).encode()
+                    ).hexdigest()[:64]
+                    proc.datajud_fingerprint = fingerprint
+                    proc.datajud_last_success_at = now
+                    refreshed += 1
+                    _set_failure_streak(proc, 0)
+                    if had_prior_datajud and material_movement_changed(previous, current):
+                        if _maybe_create_movement_event(
+                            session,
+                            repo,
+                            proc,
+                            norm,
+                            suppress_notify=suppress_notify,
+                        ):
+                            events_created += 1
+                            had_material = True
+                proc.last_checked_at = now
+                proc.next_check_at = _next_check(
+                    proc.situacao,
+                    proc.last_movement_at,
+                    freq_cfg,
+                    had_new_publication=had_material,
+                )
+                outcomes.append(
+                    {
+                        "cnj": proc.numero_cnj,
+                        "route": route.source,
+                        "ok": True,
+                        "hits": len(hits),
+                        "material_event": had_material,
+                        "grau": getattr(proc, "grau", None),
+                        "situacao": proc.situacao,
+                    }
+                )
+            except FailedRateLimit as exc:
+                errors += 1
+                streak = _failure_streak(proc) + 1
+                _set_failure_streak(proc, streak)
+                proc.next_check_at = _next_check(
+                    proc.situacao,
+                    proc.last_movement_at,
+                    freq_cfg,
+                    failure_streak=streak,
+                    rate_limited=True,
+                )
+                outcomes.append({"cnj": proc.numero_cnj, "code": exc.code, "error": str(exc)})
+            except SourceOutcomeError as exc:
+                errors += 1
+                streak = _failure_streak(proc) + 1
+                _set_failure_streak(proc, streak)
+                proc.next_check_at = _next_check(
+                    proc.situacao,
+                    proc.last_movement_at,
+                    freq_cfg,
+                    failure_streak=streak,
+                )
+                outcomes.append({"cnj": proc.numero_cnj, "code": exc.code, "error": str(exc)})
+            _prog(
+                done=done_n + 1,
+                total=total_n,
                 message=f"Atualizando {proc.numero_cnj}",
             )
-            continue
 
-        if route.source != "DATAJUD" or not route.datajud_alias:
-            proc.requires_reconciliation = True
-            proc.next_check_at = _next_check(proc.situacao, proc.last_movement_at, freq_cfg)
-            outcomes.append({"cnj": proc.numero_cnj, "route": route.source, "skipped": True})
-            report_progress(
-                stage="tracking",
-                done=idx + 1,
-                total=n_due,
-                message=f"Atualizando {proc.numero_cnj}",
-            )
-            continue
+        processed_global += len(due)
+        session.flush()
+        if not drain_incomplete:
+            break
+        # Evita loop infinito se capas não saem de incomplete (erro persistente)
+        if len(due) < batch_size:
+            more = repo.processes_incomplete_capa(limit=1, due_only=True)
+            if not more:
+                break
 
-        try:
-            hits = datajud.search_all_by_cnj(proc.numero_cnj, alias=route.datajud_alias)
-            had_material = False
-            if hits:
-                norm = normalize_datajud_hits(hits)
-                current = _material_state_from_norm(norm)
-                _apply_datajud_enrichment(proc, norm)
-                fingerprint = hashlib.sha256(
-                    json.dumps(
-                        [{"grau": h.get("grau"), "id": h.get("id")} for h in hits],
-                        sort_keys=True,
-                        default=str,
-                    ).encode()
-                ).hexdigest()[:64]
-                proc.datajud_fingerprint = fingerprint
-                proc.datajud_last_success_at = now
-                refreshed += 1
-                if material_movement_changed(previous, current):
-                    if _maybe_create_movement_event(session, repo, proc, norm):
-                        events_created += 1
-                        had_material = True
-            proc.last_checked_at = now
-            proc.next_check_at = _next_check(
-                proc.situacao,
-                proc.last_movement_at,
-                freq_cfg,
-                had_new_publication=had_material,
-            )
-            outcomes.append(
-                {
-                    "cnj": proc.numero_cnj,
-                    "route": route.source,
-                    "ok": True,
-                    "hits": len(hits),
-                    "material_event": had_material,
-                    "grau": getattr(proc, "grau", None),
-                    "situacao": proc.situacao,
-                }
-            )
-        except FailedRateLimit as exc:
-            errors += 1
-            proc.next_check_at = _next_check(
-                proc.situacao,
-                proc.last_movement_at,
-                freq_cfg,
-                failure_streak=1,
-                rate_limited=True,
-            )
-            outcomes.append({"cnj": proc.numero_cnj, "code": exc.code, "error": str(exc)})
-        except SourceOutcomeError as exc:
-            errors += 1
-            proc.next_check_at = _next_check(
-                proc.situacao,
-                proc.last_movement_at,
-                freq_cfg,
-                failure_streak=1,
-            )
-            outcomes.append({"cnj": proc.numero_cnj, "code": exc.code, "error": str(exc)})
-        # Heartbeat + % após cada CNJ (evita ETA/heartbeat congelados em chamada lenta)
-        report_progress(
-            stage="tracking",
-            done=idx + 1,
-            total=n_due,
-            message=f"Atualizando {proc.numero_cnj}",
-        )
-
-    session.flush()
     remaining = 0 if only_incomplete else repo.count_due_processes()
     requeued = False
     if remaining > 0 and not only_incomplete:
-        # Continuidade: key única por job pai (não usa has_active — o pai ainda está RUNNING)
+        # Continuidade: key por job pai; se a anterior já terminou, gera chave nova
+        from monitor_jus.models import JobStatus
+
         cont_key = f"refresh-cont:{parent_job_id or uuid4().hex[:12]}"
         run = repo.create_run(
             RunType.PROCESS_REFRESH.value,
             trigger_type="schedule",
             run_mode=RunMode.LIVE.value,
-            idempotency_key=f"run:{cont_key}",
+            idempotency_key=f"run:{cont_key}:{uuid4().hex[:8]}",
         )
         job = repo.enqueue_job(
             run.id,
             JobType.PROCESS_REFRESH.value,
-            payload={"continuation": True},
+            payload={"continuation": True, "parent_job_id": parent_job_id},
             max_attempts=settings.job_max_attempts,
             idempotency_key=cont_key,
         )
-        requeued = job is not None
+        terminal = {
+            JobStatus.SUCCESS.value,
+            JobStatus.DEAD.value,
+            JobStatus.CANCELLED.value,
+        }
+        if job and job.status in terminal:
+            cont_key = f"refresh-cont:{parent_job_id or 'x'}:{uuid4().hex[:8]}"
+            job = repo.enqueue_job(
+                run.id,
+                JobType.PROCESS_REFRESH.value,
+                payload={"continuation": True, "parent_job_id": parent_job_id},
+                max_attempts=settings.job_max_attempts,
+                idempotency_key=cont_key,
+            )
+        active = {
+            JobStatus.PENDING.value,
+            JobStatus.RUNNING.value,
+            JobStatus.RETRY.value,
+        }
+        requeued = bool(job and job.status in active)
 
-    report_progress(
-        stage="tracking",
-        done=n_due,
-        total=n_due,
-        message="PROCESS_REFRESH concluído",
+    _prog(
+        done=float(processed_global or 1),
+        total=float(processed_global or 1),
+        message=f"{label} concluído",
         force=True,
     )
     return {
-        "due": len(due),
+        "due": due_total,
+        "batches": batches_done,
         "refreshed": refreshed,
         "skipped_stf": skipped_stf,
         "events_created": events_created,

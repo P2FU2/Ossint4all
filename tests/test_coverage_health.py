@@ -113,6 +113,8 @@ def test_coverage_attention_and_digest(tmp_path, monkeypatch):
         assert digest["ok"] == 1
         assert digest["stale"] == 1
         assert digest["has_issues"] is True
+        assert digest.get("headline")
+        assert "pendência" in digest["headline"].lower() or "cobertura" in digest["headline"].lower()
 
 
 def test_recent_source_failures_include_criterion(tmp_path, monkeypatch):

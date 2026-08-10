@@ -229,10 +229,25 @@ def enqueue_from_ui(
         effective_run = RunType.NATIONAL_RECONCILIATION.value
         job_type = JobType.NATIONAL_RECONCILIATION.value
 
+    # Poll não deve competir com Bootstrap/Discovery (risco de flood no digest)
+    if job_type == JobType.DJEN_POLL.value:
+        for heavy in _MUTUAL_EXCLUSION_JOB_TYPES:
+            if repo.has_active_job(heavy):
+                raise ValueError(
+                    f"Há {heavy} em andamento — aguarde concluir antes do DJEN_POLL."
+                )
+    if job_type in _MUTUAL_EXCLUSION_JOB_TYPES and repo.has_active_job(
+        JobType.DJEN_POLL.value
+    ):
+        raise ValueError(
+            "Há DJEN_POLL em andamento — aguarde ou cancele antes do Bootstrap/Discovery."
+        )
+
     if job_type in {
         JobType.PROCESS_REFRESH.value,
         JobType.DAILY_DIGEST.value,
         JobType.NATIONAL_RECONCILIATION.value,
+        JobType.DELIVERY_RETRY.value,
     } and repo.has_active_job(job_type):
         raise ValueError(
             f"Já existe {job_type} ativo (PENDING/RUNNING). "

@@ -70,9 +70,9 @@
         <header class="ops-card-head">
           <div class="ops-card-title-row">
             <h3 id="ops-bootstrap-title">Bootstrap</h3>
-            {{ tip("Leitura inicial / completar acervo: discovery longa + DataJud nas capas incompletas, sem flood no e-mail.") }}
+            {{ tip("Leitura inicial do acervo: busca longa no DJEN + capas no DataJud. Se o DJEN estiver bloqueado (403), termina rápido e NÃO fecha a leitura inicial — isso é falha, não sucesso.") }}
           </div>
-          <p class="ops-card-desc">Primeira varredura e preenchimento de capas faltantes.</p>
+          <p class="ops-card-desc">Primeira varredura (minutos/horas). Conclusão em poucos segundos costuma indicar DJEN inacessível.</p>
         </header>
 
         <div class="ops-fields">
@@ -160,9 +160,9 @@
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="run_type" value="BOOTSTRAP" />
-        <button class="btn secondary" type="submit" data-confirm="Rodar Bootstrap (janela longa + capas faltantes)? Continuar?">Bootstrap</button>
+        <button class="btn secondary" type="submit" data-confirm="Rodar Bootstrap? Em condições normais demora vários minutos (busca histórica no Diário). Se terminar em segundos, o DJEN provavelmente está bloqueado.">Bootstrap</button>
       </form>
-      {{ tip("Varredura longa no DJEN + capas DataJud; eventos vão para baseline (não floodam e-mail). Frequência: 1× na 1ª carga ou ao mudar OABs/nomes monitorados — não use no dia a dia.") }}
+      {{ tip("Varredura longa no DJEN + capas DataJud; eventos vão para baseline (não floodam e-mail). Frequência: 1× na 1ª carga ou ao mudar OABs/nomes. Se o Diário estiver inacessível, o job avisa ‘incompleto’ e a leitura inicial permanece aberta.") }}
     </div>
 
     <div class="run-action">

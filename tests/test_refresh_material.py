@@ -40,6 +40,60 @@ def test_refresh_first_sight_is_baseline_not_novelty():
     assert material_movement_changed(prev, cur) is False
 
 
+def test_refresh_djen_orgao_only_first_datajud_is_baseline(tmp_path, monkeypatch):
+    """Processo com orgao do DJEN (sem payload datajud) não gera novidade na 1ª capa."""
+    url = _db(tmp_path, monkeypatch)
+    monkeypatch.setenv("DATAJUD_ENABLE", "true")
+    from monitor_jus.config import get_settings
+
+    get_settings.cache_clear()
+
+    with session_scope(url) as session:
+        repo = Repository(session)
+        proc = repo.upsert_process(
+            "1000123-45.2023.8.26.0100",
+            "10001234520238260100",
+            tribunal="TJSP",
+            orgao_julgador="1ª Vara Cível",
+            payload={},
+        )
+        proc.next_check_at = None
+        session.flush()
+
+    hit = {
+        "grau": "G1",
+        "tribunal": "TJSP",
+        "numeroProcesso": "10001234520238260100",
+        "classe": {"nome": "Procedimento Comum"},
+        "orgaoJulgador": {"nome": "1ª Vara Cível"},
+        "movimentos": [
+            {
+                "codigo": "85",
+                "nome": "Juntada de Petição",
+                "dataHora": "2026-08-01T12:00:00.000Z",
+            }
+        ],
+    }
+
+    class FakeClient:
+        def search_all_by_cnj(self, cnj, alias=None):
+            return [hit]
+
+    monkeypatch.setattr(
+        "monitor_jus.pipeline.tracking.DataJudClient",
+        lambda settings: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "monitor_jus.pipeline.tracking.resolve_process_source",
+        lambda *a, **k: SimpleNamespace(source="DATAJUD", datajud_alias="api_publica_tjsp"),
+    )
+
+    with session_scope(url) as session:
+        result = run_tracking(session, parent_job_id="job-baseline", batch_size=10)
+        assert result["events_created"] == 0
+        assert result["refreshed"] == 1
+
+
 def test_refresh_material_movement_creates_single_event(tmp_path, monkeypatch):
     url = _db(tmp_path, monkeypatch)
     monkeypatch.setenv("DATAJUD_ENABLE", "true")

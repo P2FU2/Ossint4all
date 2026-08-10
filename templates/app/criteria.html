@@ -48,8 +48,8 @@
         <th>Label / responsável</th>
         <th>Ativo</th>
         <th>Processos</th>
-        <th>Poll {{ tip("ok = sucesso DJEN nas últimas ~3h; atrasado = sem sucesso recente; falhou = último run FAILED; nunca = sem SourceRun.") }}</th>
-        <th>Último poll ok</th>
+        <th>Verificação {{ tip("em dia = busca DJEN ok nas últimas ~3h; atrasada = sem sucesso recente; com falha = última tentativa falhou; sem verificação = ainda não houve busca registrada.") }}</th>
+        <th>Última ok</th>
         <th>Última falha</th>
         <th>Criado</th>
       </tr>
@@ -63,11 +63,11 @@
         <td>{% if c.active %}<span class="badge ok">sim</span>{% else %}<span class="badge warn">não</span>{% endif %}</td>
         <td>{{ c.process_count }}</td>
         <td>
-          {% if c.poll_badge == 'ok' %}<span class="badge ok">ok</span>
-          {% elif c.poll_badge == 'falhou' %}<span class="badge error">falhou</span>
-          {% elif c.poll_badge == 'atrasado' %}<span class="badge warn">atrasado</span>
-          {% else %}<span class="badge warn">nunca</span>{% endif %}
-          {% if c.hit_max_pages %}<span class="badge warn" title="max_pages atingido recentemente">páginas</span>{% endif %}
+          {% if c.poll_badge == 'ok' %}<span class="badge ok">em dia</span>
+          {% elif c.poll_badge == 'falhou' %}<span class="badge error">com falha</span>
+          {% elif c.poll_badge == 'atrasado' %}<span class="badge warn">atrasada</span>
+          {% else %}<span class="badge warn">sem verificação</span>{% endif %}
+          {% if c.hit_max_pages %}<span class="badge warn" title="Busca limitada — muitos resultados na API">busca limitada</span>{% endif %}
         </td>
         <td class="muted">{{ c.last_poll_ok }}</td>
         <td class="muted">{{ c.last_poll_fail }}</td>

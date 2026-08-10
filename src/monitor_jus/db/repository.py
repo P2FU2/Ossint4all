@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Select, and_, or_, select, text, update
+from sqlalchemy import Select, and_, case, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from monitor_jus.db.models import (
@@ -374,13 +374,20 @@ class Repository:
         self.session.flush()
         return q
 
-    def pending_notify_events(self, since: datetime | None) -> list[Event]:
-        stmt: Select[tuple[Event]] = select(Event).where(
-            Event.notify_status == NotifyStatus.PENDING_NOTIFY.value
+    def pending_notify_events(self, since: datetime | None = None) -> list[Event]:
+        """Todos os PENDING_NOTIFY — status é a fonte da verdade (cursor não filtra)."""
+        _ = since  # mantido só por compatibilidade de assinatura / metadados do digest
+        priority_rank = case(
+            (Event.priority == "alta", 0),
+            (Event.priority == "media", 1),
+            (Event.priority == "baixa", 2),
+            else_=9,
         )
-        if since is not None:
-            stmt = stmt.where(Event.created_at > since)
-        stmt = stmt.order_by(Event.priority.asc(), Event.created_at.asc())
+        stmt: Select[tuple[Event]] = (
+            select(Event)
+            .where(Event.notify_status == NotifyStatus.PENDING_NOTIFY.value)
+            .order_by(priority_rank.asc(), Event.created_at.asc())
+        )
         return list(self.session.scalars(stmt).all())
 
     def count_quarantine_open(self) -> int:
@@ -452,6 +459,33 @@ class Repository:
             .order_by(Digest.created_at.desc())
             .limit(1)
         )
+
+    def find_building_digest(self) -> Digest | None:
+        """Digest interrompido em BUILDING (crash mid-build)."""
+        return self.session.scalar(
+            select(Digest)
+            .where(Digest.status == DigestStatus.BUILDING.value)
+            .order_by(Digest.created_at.desc())
+            .limit(1)
+        )
+
+    def release_digest_reservation(self, digest: Digest, *, reason: str = "reclaim") -> int:
+        """Devolve itens IN_DIGEST → PENDING_NOTIFY e marca digest FAILED."""
+        _ = reason
+        items = list(
+            self.session.scalars(
+                select(DigestItem).where(DigestItem.digest_id == digest.id)
+            ).all()
+        )
+        released = 0
+        for item in items:
+            event = self.session.get(Event, item.event_id)
+            if event and event.notify_status == NotifyStatus.IN_DIGEST.value:
+                event.notify_status = NotifyStatus.PENDING_NOTIFY.value
+                released += 1
+        digest.status = DigestStatus.FAILED.value
+        self.session.flush()
+        return released
 
     def digest_event_ids(self, digest_id: str) -> list[str]:
         return list(
@@ -526,12 +560,45 @@ class Repository:
             or 0
         )
 
-    def processes_incomplete_capa(self, *, limit: int = 500) -> list[Process]:
-        """Processos sem situação/classe úteis — candidatos a completar no bootstrap."""
-        placeholders = ("", "-", "---", "—", "n/d", "nd", "null", "none", "sem informação", "sem informacao")
-        rows = list(
-            self.session.scalars(select(Process).order_by(Process.created_at.asc())).all()
+    def processes_incomplete_capa(
+        self,
+        *,
+        limit: int = 500,
+        due_only: bool = False,
+        now: datetime | None = None,
+    ) -> list[Process]:
+        """Processos sem situação/classe úteis — candidatos a completar capa."""
+        placeholders = (
+            "",
+            "-",
+            "---",
+            "—",
+            "n/d",
+            "nd",
+            "null",
+            "none",
+            "sem informação",
+            "sem informacao",
         )
+        now = now or utcnow()
+        stmt = (
+            select(Process)
+            .where(
+                or_(
+                    Process.classe.is_(None),
+                    Process.classe == "",
+                    Process.situacao.is_(None),
+                    Process.situacao == "",
+                    Process.situacao.in_(list(placeholders)),
+                )
+            )
+            .order_by(Process.created_at.asc())
+        )
+        if due_only:
+            stmt = stmt.where(
+                or_(Process.next_check_at.is_(None), Process.next_check_at <= now)
+            )
+        rows = list(self.session.scalars(stmt.limit(max(limit * 3, limit))).all())
         out: list[Process] = []
         for proc in rows:
             situ = (proc.situacao or "").strip().lower()

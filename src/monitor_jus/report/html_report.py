@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
@@ -102,7 +103,7 @@ def recent_source_failures(session=None, *, hours: int = 48) -> list[dict[str, A
             select(SourceRun)
             .where(SourceRun.status == "FAILED", SourceRun.started_at >= cutoff)
             .order_by(SourceRun.started_at.desc())
-            .limit(20)
+            .limit(40)
         ).all()
     )
     crit_ids = {r.criteria_id for r in rows if r.criteria_id}
@@ -126,6 +127,82 @@ def recent_source_failures(session=None, *, hours: int = 48) -> list[dict[str, A
     return out
 
 
+def _is_djen_access_block(error: str) -> bool:
+    low = (error or "").lower()
+    return any(
+        m in low
+        for m in (
+            "403",
+            "auth failed",
+            "cloudfront",
+            "failedauthentication",
+            "bloqueio",
+            "forbidden",
+        )
+    )
+
+
+def format_source_failures_for_user(
+    failures: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Agrupa falhas técnicas em avisos curtos para o leitor do e-mail."""
+    if not failures:
+        return []
+    djen_blocks = 0
+    djen_courts: set[str] = set()
+    other: list[str] = []
+    for f in failures:
+        err = str(f.get("error") or "")
+        src = str(f.get("source") or "").upper()
+        job = str(f.get("job_type") or "")
+        court = str(f.get("court") or "").strip()
+        if src == "DJEN" and _is_djen_access_block(err):
+            djen_blocks += 1
+            if court and court != "—":
+                djen_courts.add(court.upper())
+            continue
+        # Outras falhas: sem dump técnico longo
+        if job == "DJEN_POLL" or (src == "DJEN" and f.get("criterion") not in (None, "—")):
+            crit = f.get("criterion") or "critério"
+            other.append(
+                f"Não foi possível concluir a busca de {crit} no Diário da Justiça. "
+                "Nova tentativa automática em breve."
+            )
+        elif job == "DIARY_SWEEP":
+            other.append(
+                "A varredura complementar do Diário da Justiça falhou temporariamente. "
+                "Nova tentativa automática em breve."
+            )
+        else:
+            other.append(
+                "Uma fonte de dados ficou temporariamente indisponível. "
+                "O sistema tenta de novo automaticamente."
+            )
+
+    lines: list[str] = []
+    if djen_blocks:
+        n_courts = len(djen_courts)
+        if n_courts > 1:
+            extra = f" ({n_courts} tribunais afetados na varredura complementar)"
+        elif n_courts == 1:
+            extra = f" (tribunal {next(iter(djen_courts))})"
+        else:
+            extra = ""
+        lines.append(
+            "O Diário da Justiça (DJEN) está temporariamente inacessível"
+            f"{extra}. Tentaremos de novo automaticamente — "
+            "não é necessária nenhuma ação sua."
+        )
+    # Dedup preservando ordem
+    seen: set[str] = set()
+    for line in other:
+        if line in seen:
+            continue
+        seen.add(line)
+        lines.append(line)
+    return lines[:8]
+
+
 def render_digest_html(
     events: list[Event],
     *,
@@ -146,13 +223,20 @@ def render_digest_html(
     )
     env.filters["md_bold"] = format_summary_html
     _ = portfolio  # legado: e-mail não inclui mais acervo
-    generated_at = datetime.now().strftime("%d/%m/%Y · atualizado às %H:%M")
+    try:
+        local_tz = ZoneInfo(settings.tz)
+    except Exception:  # noqa: BLE001
+        local_tz = None
+    local_now = datetime.now(local_tz) if local_tz else datetime.now()
+    generated_at = local_now.strftime("%d/%m/%Y · atualizado às %H:%M")
 
     def _fmt_change_date(e: Event) -> str:
         raw = getattr(e, "occurred_at", None) or getattr(e, "created_at", None)
         if not raw:
             return ""
         try:
+            if local_tz is not None:
+                return raw.astimezone(local_tz).strftime("%d/%m/%Y %H:%M")
             return raw.astimezone().strftime("%d/%m/%Y %H:%M")
         except Exception:  # noqa: BLE001
             return str(raw)[:16]

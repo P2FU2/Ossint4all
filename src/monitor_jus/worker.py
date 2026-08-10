@@ -49,7 +49,15 @@ def process_job(job_id: str) -> None:
             if job.status == JobStatus.CANCELLED.value:
                 logger.info("job_cancelled_after_work", extra={"job_id": job.id})
                 return
-            progress_complete("Concluído")
+            finish_msg = "Concluído"
+            if isinstance(result, dict) and result.get("user_message"):
+                finish_msg = str(result["user_message"])[:512]
+            elif isinstance(result, dict) and result.get("status") == "incomplete":
+                finish_msg = "Concluído com aviso — verifique a mensagem do job"
+            if isinstance(result, dict) and result.get("status") == "incomplete":
+                job.last_error_code = "INCOMPLETE"
+                job.last_error_message = finish_msg[:4000]
+            progress_complete(finish_msg)
             repo.complete_job(job)
             if job.run_id:
                 from sqlalchemy import select

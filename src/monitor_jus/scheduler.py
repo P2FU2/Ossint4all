@@ -103,6 +103,14 @@ def enqueue_djen_poll(*, settings: Settings | None = None, now: datetime | None 
     slot = now.strftime("%Y-%m-%d-%H")
     with session_scope() as session:
         repo = Repository(session)
+        # Evita corrida de notify com Bootstrap / Discovery histórica
+        for heavy in ("BOOTSTRAP", "HISTORICAL_DISCOVERY"):
+            if repo.has_active_job(heavy):
+                logger.info(
+                    "schedule_skip_djen_during_heavy",
+                    extra={"extra": {"active": heavy, "slot": slot}},
+                )
+                return None
         return _enqueue(
             repo,
             run_type=RunType.DJEN_POLL.value,

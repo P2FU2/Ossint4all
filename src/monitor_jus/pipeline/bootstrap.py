@@ -6,14 +6,13 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from monitor_jus.config import Settings, get_settings, load_monitoramentos
-from monitor_jus.db.models import BootstrapState, Criterion, Event
+from monitor_jus.db.models import BootstrapState, Criterion
 from monitor_jus.db.repository import Repository
 from monitor_jus.logging_setup import get_logger
-from monitor_jus.models import NotifyStatus
 from monitor_jus.ops_config import load_ops
 from monitor_jus.pipeline.discovery import run_discovery
 from monitor_jus.pipeline.tracking import run_tracking
@@ -33,6 +32,43 @@ def ensure_bootstrap_row(session: Session) -> BootstrapState:
     return row
 
 
+def _discovery_quality(result: dict[str, Any] | None) -> tuple[bool, str]:
+    """Retorna (ok, aviso_amigável). ok só com 100% dos critérios ativos."""
+    result = result or {}
+    if result.get("status") == "skipped":
+        reason = str(result.get("reason") or "desabilitado")
+        if "djen" in reason.lower():
+            return False, (
+                "Diário da Justiça (DJEN) desabilitado — a leitura histórica não rodou."
+            )
+        return False, f"Discovery ignorada ({reason})."
+    total = int(result.get("total_active_criteria") or 0)
+    ok = int(result.get("successful_criteria") or 0)
+    errors = result.get("errors") or []
+    if total == 0:
+        return False, "Nenhum critério ativo para buscar (sincronize o YAML)."
+    if ok == 0:
+        # típico: 403/auth em todos os critérios → Bootstrap “em segundos”
+        return False, (
+            "Não foi possível buscar no Diário da Justiça (DJEN). "
+            "Acesso bloqueado ou fonte indisponível — tente mais tarde. "
+            "Um Bootstrap bem-sucedido costuma levar vários minutos."
+        )
+    if ok < total:
+        return False, (
+            f"Varredura incompleta: só {ok} de {total} critérios ok"
+            + (f" ({len(errors)} falha(s))." if errors else ".")
+            + " Corrija a fonte e rode o Bootstrap de novo."
+        )
+    saturated = result.get("saturated_criteria") or []
+    if saturated:
+        return False, (
+            f"Varredura truncada: {len(saturated)} critério(s) bateram no limite de páginas. "
+            "Aumente max_pages no ops.yaml ou rode de novo — baseline não foi fechada."
+        )
+    return True, ""
+
+
 def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
     repo = Repository(session)
@@ -48,10 +84,11 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
         stage="bootstrap",
         done=0,
         total=total_steps,
-        message="Bootstrap · discovery histórica no DJEN",
+        message="Bootstrap · busca histórica no Diário da Justiça (pode demorar)",
         force=True,
     )
-    # Discovery longa (ops.yaml → bootstrap.lookback_days); eventos ignorados no digest
+    # Discovery longa (ops.yaml → bootstrap.lookback_days).
+    # Eventos DJEN já nascem IGNORED quando bootstrap_mode=True (não limpar PENDING global).
     result = run_discovery(
         session,
         settings=settings,
@@ -59,16 +96,22 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
         mode="historical",
         purpose="bootstrap",
     )
+    discovery_ok, discovery_note = _discovery_quality(result)
     report_progress(
         stage="bootstrap_finalize",
         done=1,
         total=total_steps,
-        message="Finalizando baseline (eventos)",
+        message=(
+            discovery_note
+            if not discovery_ok
+            else "Etapa DJEN ok — preparando capas"
+        ),
         force=True,
     )
 
     capa_result: dict[str, Any] | None = None
-    if complete_capa:
+    # Capas só após DJEN ok — evita side-effects com bootstrap incompleto
+    if complete_capa and discovery_ok:
         report_progress(
             stage="bootstrap_capa",
             done=2,
@@ -81,37 +124,61 @@ def run_bootstrap(session: Session, settings: Settings | None = None) -> dict[st
             settings=settings,
             only_incomplete=True,
             force_all_incomplete=True,
+            suppress_notify=ignore_events,
+            update_progress_totals=False,
         )
-
-    # Baseline depois do DJEN e do DataJud (capa) — evita flood no digest
-    if ignore_events:
-        session.execute(
-            update(Event)
-            .where(Event.notify_status == NotifyStatus.PENDING_NOTIFY.value)
-            .values(notify_status=NotifyStatus.IGNORED.value)
+    elif complete_capa and not discovery_ok:
+        report_progress(
+            stage="bootstrap_capa",
+            done=2,
+            total=total_steps,
+            message="Capas ignoradas — DJEN não concluiu",
+            force=True,
         )
 
     now = datetime.now(timezone.utc)
-    if first_run:
+    # Só fecha a “leitura inicial” se o DJEN respondeu 100%
+    if first_run and discovery_ok:
         state.baseline_at = now
         state.completed = True
         cursor = repo.get_digest_cursor()
         cursor.last_successful_digest_at = now
     session.flush()
+
+    if discovery_ok:
+        user_message = "Bootstrap concluído"
+        status = "completed" if first_run else "refreshed"
+        if capa_result is not None:
+            user_message += (
+                f" · capas: {int(capa_result.get('refreshed') or 0)} atualizada(s)"
+            )
+    else:
+        user_message = f"Bootstrap incompleto — {discovery_note}"
+        status = "incomplete"
+
     report_progress(
         stage="bootstrap",
         done=total_steps,
         total=total_steps,
-        message="Bootstrap concluído",
+        message=user_message[:512],
         force=True,
     )
     logger.info(
         "bootstrap_completed",
-        extra={"extra": {"discovery": result, "capa": capa_result}},
+        extra={
+            "extra": {
+                "discovery": result,
+                "capa": capa_result,
+                "discovery_ok": discovery_ok,
+                "status": status,
+            }
+        },
     )
     return {
-        "status": "completed" if first_run else "refreshed",
-        "baseline_at": (state.baseline_at or now).isoformat(),
+        "status": status,
+        "discovery_ok": discovery_ok,
+        "user_message": user_message,
+        "baseline_at": (state.baseline_at.isoformat() if state.baseline_at else None),
         "discovery": result,
         "capa_completion": capa_result,
         "ops": {

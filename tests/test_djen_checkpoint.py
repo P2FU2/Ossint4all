@@ -230,5 +230,6 @@ def test_djen_hit_max_pages_recorded_in_summary(tmp_path, monkeypatch):
 
     with session_scope(url) as session:
         summary = discovery_mod.run_djen_poll(session, mode="incremental")
-        assert summary["checkpoint_advanced"] is True
+        # Saturação de páginas = cobertura incompleta — não avança checkpoint
+        assert summary["checkpoint_advanced"] is False
         assert summary["saturated_criteria"] == ["OAB:SP:100000"]

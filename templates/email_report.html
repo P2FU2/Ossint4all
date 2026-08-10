@@ -74,24 +74,37 @@
     {% endif %}
 
     {% if source_health %}
-    <h2>Saúde das fontes</h2>
+    <h2>Cobertura das buscas</h2>
+    {% if source_health.headline %}
+    <p><strong>{{ source_health.headline }}</strong></p>
+    {% endif %}
+    {% if source_health.detail %}
+    <p class="muted">{{ source_health.detail }}</p>
+    {% endif %}
     <p>
-      <span class="badge ok">{{ source_health.ok }} ok</span>
-      {% if source_health.stale %}<span class="badge">{{ source_health.stale }} atrasado(s)</span>{% endif %}
-      {% if source_health.failed %}<span class="badge alta">{{ source_health.failed }} falha(s)</span>{% endif %}
-      {% if source_health.never %}<span class="badge">{{ source_health.never }} sem poll</span>{% endif %}
+      <span class="badge ok">{{ source_health.ok }} em dia</span>
+      {% if source_health.stale %}<span class="badge">{{ source_health.stale }} atrasada(s)</span>{% endif %}
+      {% if source_health.failed %}<span class="badge alta">{{ source_health.failed }} com falha</span>{% endif %}
+      {% if source_health.never %}<span class="badge">{{ source_health.never }} sem verificação</span>{% endif %}
     </p>
     {% if source_health.has_issues and source_health.rows %}
     <ul>
       {% for r in source_health.rows if r.badge != 'ok' %}
-      <li>{{ r.type }}:{{ r.value }} — {{ r.badge }}{% if r.hit_max_pages %} · max_pages{% endif %} · último ok: {{ r.last_success_at }}</li>
+      <li>
+        {{ r.label or (r.type ~ ':' ~ r.value) }} —
+        {{ r.badge_label or r.badge }}
+        {% if r.hit_max_pages %} · busca limitada (muitos resultados){% endif %}
+        {% if r.last_success_at and r.last_success_at != '—' %}
+          · última verificação ok: {{ r.last_success_at }}
+        {% endif %}
+      </li>
       {% endfor %}
     </ul>
     {% endif %}
     {% endif %}
 
     {% if failures %}
-    <h2>Fontes temporariamente indisponíveis</h2>
+    <h2>Aviso sobre as fontes</h2>
     <ul>{% for f in failures %}<li>{{ f }}</li>{% endfor %}</ul>
     {% endif %}
 

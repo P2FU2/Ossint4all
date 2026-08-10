@@ -235,13 +235,21 @@ def coverage_attention(
     return alerts
 
 
+_BADGE_USER = {
+    "ok": "em dia",
+    "atrasado": "atrasada",
+    "falhou": "com falha",
+    "nunca": "ainda sem verificação",
+}
+
+
 def digest_source_health(
     session: Session,
     *,
     stale_hours: int = STALE_HOURS,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Resumo curto para o e-mail diário."""
+    """Resumo curto para o e-mail diário (linguagem de usuário)."""
     now = now or datetime.now(timezone.utc)
     health = criterion_poll_health(session, stale_hours=stale_hours, now=now)
     criteria = list(
@@ -266,15 +274,65 @@ def digest_source_health(
             failed += 1
         else:
             never += 1
+        label = f"{crit.criterion_type} {crit.value}"
+        if crit.criterion_type == "NOME":
+            label = crit.value
+        elif crit.criterion_type == "OAB":
+            # RJ:2556 → OAB 2556/RJ
+            parts = str(crit.value).split(":")
+            if len(parts) == 2:
+                label = f"OAB {parts[1]}/{parts[0]}"
+            else:
+                label = f"OAB {crit.value}"
         rows.append(
             {
                 "type": crit.criterion_type,
                 "value": crit.value,
+                "label": label,
                 "badge": badge,
+                "badge_label": _BADGE_USER.get(badge, badge),
                 "last_success_at": h.get("last_success_at_fmt") or "—",
                 "hit_max_pages": bool(h.get("hit_max_pages_recent")),
             }
         )
+
+    has_issues = bool(stale or failed or never)
+    if total := len(criteria):
+        if ok == total and not has_issues:
+            headline = "As buscas monitoradas estão em dia."
+            detail = (
+                "OABs e nomes foram verificados recentemente no Diário da Justiça (DJEN)."
+            )
+        elif never == total:
+            headline = (
+                "Ainda não concluímos com sucesso a verificação automática "
+                "das OABs e do nome monitorados."
+            )
+            detail = (
+                "Enquanto isso, o relatório pode ficar incompleto para publicações novas "
+                "nesses critérios. O sistema tenta de novo automaticamente."
+            )
+        elif failed or stale or never:
+            parts = []
+            if never:
+                parts.append(f"{never} ainda sem verificação")
+            if failed:
+                parts.append(f"{failed} com falha recente")
+            if stale:
+                parts.append(f"{stale} atrasada(s)")
+            headline = "Há pendências na cobertura das buscas monitoradas."
+            detail = (
+                "Situação: "
+                + "; ".join(parts)
+                + ". Tentaremos novamente de forma automática."
+            )
+        else:
+            headline = "Cobertura das buscas"
+            detail = ""
+    else:
+        headline = "Nenhum critério de monitoramento ativo."
+        detail = "Sincronize as OABs/nomes no painel para começar a acompanhar."
+
     return {
         "ok": ok,
         "stale": stale,
@@ -282,5 +340,7 @@ def digest_source_health(
         "never": never,
         "total": len(criteria),
         "rows": rows,
-        "has_issues": bool(stale or failed or never),
+        "has_issues": has_issues,
+        "headline": headline,
+        "detail": detail,
     }

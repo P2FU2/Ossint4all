@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,13 @@ from monitor_jus.report.pdf_report import write_pdf
 logger = get_logger(__name__)
 
 
+def _local_now(settings: Settings) -> datetime:
+    try:
+        return datetime.now(ZoneInfo(settings.tz))
+    except Exception:  # noqa: BLE001
+        return datetime.now(timezone.utc)
+
+
 def _artifact_paths(settings: Settings, digest_id: str, reference_date: str | None) -> tuple[Path, Path]:
     base = Path(settings.outbox_dir)
     html_path = base / f"{digest_id}.html"
@@ -34,19 +42,42 @@ def _ensure_pdf(html: str, pdf_path: Path) -> Path:
     return write_pdf(html, pdf_path)
 
 
-def _format_subject_date(reference_date: str | None) -> str:
-    raw = reference_date or datetime.now().date().isoformat()
+def _format_subject_date(reference_date: str | None, *, settings: Settings | None = None) -> str:
+    if reference_date:
+        raw = reference_date
+    elif settings is not None:
+        raw = _local_now(settings).date().isoformat()
+    else:
+        raw = datetime.now(timezone.utc).date().isoformat()
     try:
         return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
     except ValueError:
         return raw
 
 
-def _digest_subject(reference_date: str | None, total_events: int) -> str:
-    day = _format_subject_date(reference_date)
+def _digest_subject(
+    reference_date: str | None,
+    total_events: int,
+    *,
+    settings: Settings | None = None,
+) -> str:
+    day = _format_subject_date(reference_date, settings=settings)
     if total_events <= 0:
         return f"[Monitor Judicial] Relatório {day} — nenhuma novidade"
     return f"[Monitor Judicial] Relatório {day} — {total_events} novidades"
+
+
+def _should_email_empty(
+    *,
+    failure_lines: list[str],
+    source_health: dict[str, Any] | None,
+) -> bool:
+    """E-mail vazio só se houver aviso útil de cobertura/fonte."""
+    if failure_lines:
+        return True
+    if source_health and source_health.get("has_issues"):
+        return True
+    return False
 
 
 def build_and_send_digest(
@@ -66,6 +97,20 @@ def build_and_send_digest(
         digest = repo.get_digest(digest_id)
         if not digest:
             raise PermanentJobError(f"Digest não encontrado: {digest_id}")
+        if digest.status == DigestStatus.SENT.value:
+            return {
+                "digest_id": digest.id,
+                "status": "SENT",
+                "total_events": digest.total_events,
+                "skipped": "already_sent",
+            }
+        if digest.status not in (
+            DigestStatus.READY.value,
+            DigestStatus.DELIVERY_PENDING.value,
+        ):
+            raise PermanentJobError(
+                f"Digest {digest_id} não está pronto para envio ({digest.status})"
+            )
         html_path = Path(digest.html_path) if digest.html_path else None
         if not html_path or not html_path.exists():
             raise PermanentJobError("HTML do digest ausente para retry")
@@ -77,9 +122,9 @@ def build_and_send_digest(
 
     # Retry de digest aberto (READY / DELIVERY_PENDING) — não cria digest B
     open_digest = repo.find_open_delivery_digest()
-    if open_digest and open_digest.html_path:
-        html_path = Path(open_digest.html_path)
-        if html_path.exists():
+    if open_digest:
+        html_path = Path(open_digest.html_path) if open_digest.html_path else None
+        if html_path and html_path.exists():
             report_progress(
                 stage="digest_retry_open",
                 done=0,
@@ -97,15 +142,34 @@ def build_and_send_digest(
                 run_id,
                 recipient=recipient,
             )
+        # HTML ausente: libera reserva e segue (evita flood de digests vazios)
+        released = repo.release_digest_reservation(
+            open_digest, reason="html_missing_reclaim"
+        )
+        logger.warning(
+            "digest_open_reclaimed",
+            extra={"extra": {"digest_id": open_digest.id, "released": released}},
+        )
+
+    # Crash mid-build: libera IN_DIGEST órfãos antes de montar o próximo
+    building = repo.find_building_digest()
+    if building:
+        released = repo.release_digest_reservation(building, reason="building_reclaim")
+        logger.warning(
+            "digest_building_reclaimed",
+            extra={"extra": {"digest_id": building.id, "released": released}},
+        )
 
     report_progress(stage="digest_load", done=0, total=5, message="Carregando eventos", force=True)
     cursor = repo.get_digest_cursor()
     since = cursor.last_successful_digest_at
-    events = repo.pending_notify_events(since)
+    # Status PENDING_NOTIFY é a fonte da verdade — cursor só como metadado da janela
+    events = repo.pending_notify_events()
     now = datetime.now(timezone.utc)
+    local = _local_now(settings)
 
     digest = repo.create_digest(
-        reference_date=now.date().isoformat(),
+        reference_date=local.date().isoformat(),
         window_start=since,
         window_end=now,
         status=DigestStatus.BUILDING.value,
@@ -130,18 +194,15 @@ def build_and_send_digest(
 
     report_progress(stage="digest_html", done=3, total=5, message="Gerando HTML")
     quarantine_count = repo.count_quarantine_open()
-    from monitor_jus.report.html_report import recent_source_failures
+    from monitor_jus.report.html_report import (
+        format_source_failures_for_user,
+        recent_source_failures,
+    )
     from monitor_jus.web.services.coverage_health import digest_source_health
 
     source_failures = recent_source_failures(session)
     source_health = digest_source_health(session)
-    failure_lines = []
-    for f in source_failures:
-        crit = f.get("criterion") or "—"
-        job = f.get("job_type") or "—"
-        failure_lines.append(
-            f"{f['source']}/{f['court']} · {job} · {crit}: {f['error']}"
-        )
+    failure_lines = format_source_failures_for_user(source_failures)
     html = render_digest_html(
         events,
         quarantine_count=quarantine_count,
@@ -169,6 +230,27 @@ def build_and_send_digest(
     session.flush()
 
     incr("digest_events_total", float(len(events)))
+
+    # Sem novidades e sem alerta de cobertura → arquiva e não manda e-mail
+    if not events and not _should_email_empty(
+        failure_lines=failure_lines, source_health=source_health
+    ):
+        repo.mark_digest_sent(digest)
+        report_progress(
+            stage="digest_send",
+            done=5,
+            total=5,
+            message="Sem novidades — e-mail omitido",
+            force=True,
+        )
+        return {
+            "digest_id": digest.id,
+            "status": "SKIPPED_EMPTY",
+            "total_events": 0,
+            "html_path": digest.html_path,
+            "pdf_path": digest.pdf_path,
+        }
+
     report_progress(stage="digest_send", done=4, total=5, message="Enviando e-mail")
     return _deliver(
         session,
@@ -190,10 +272,21 @@ def _deliver(
     run_id: str | None,
     recipient: str | None = None,
 ) -> dict[str, Any]:
+    if digest.status == DigestStatus.SENT.value:
+        return {
+            "digest_id": digest.id,
+            "status": "SENT",
+            "total_events": digest.total_events,
+            "skipped": "already_sent",
+        }
     digest.status = DigestStatus.DELIVERY_PENDING.value
     session.flush()
-    subject = _digest_subject(digest.reference_date, int(digest.total_events or 0))
-    subject_date = digest.reference_date or datetime.now().date().isoformat()
+    subject = _digest_subject(
+        digest.reference_date,
+        int(digest.total_events or 0),
+        settings=settings,
+    )
+    subject_date = digest.reference_date or _local_now(settings).date().isoformat()
 
     html_file = Path(digest.html_path) if digest.html_path else None
     attach_name_base = f"monitor-judicial-{subject_date}"
@@ -234,11 +327,12 @@ def _deliver(
         html_path=digest.html_path,
     )
     try:
+        # Não sobrescrever o HTML canônico do outbox com a nota do corpo
         result = send_html_email(
             subject=subject,
             html=html_with_note,
             settings=settings,
-            outbox_path=html_file,
+            outbox_path=None,
             attachments=attachments,
             to=to_addr,
         )

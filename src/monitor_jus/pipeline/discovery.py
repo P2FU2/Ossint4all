@@ -86,6 +86,15 @@ def _historical_window(
     return until - timedelta(days=max(1, days)), until
 
 
+def _source_job_type(*, purpose: str, mode: str) -> str:
+    """Label do SourceRun — não misturar bootstrap/histórico com saúde do DJEN_POLL."""
+    if purpose == "bootstrap":
+        return "BOOTSTRAP"
+    if mode == "historical":
+        return "HISTORICAL_DISCOVERY"
+    return "DJEN_POLL"
+
+
 def _resolve_window(
     settings: Settings,
     session: Session,
@@ -240,6 +249,7 @@ def search_oab_nationally(
     bootstrap_mode: bool,
     settings: Settings,
     max_pages: int = 10,
+    job_type: str = "DJEN_POLL",
 ) -> dict[str, Any]:
     try:
         oab = canonicalize_oab(crit.value)
@@ -302,7 +312,7 @@ def search_oab_nationally(
             channel="OAB_SEARCH" if criteria.oab_number else "NAME_SEARCH",
             bootstrap_mode=bootstrap_mode,
             settings=settings,
-            job_type="DJEN_POLL",
+            job_type=job_type,
             criteria_id=crit.id,
             cursor=_page_cursor(
                 page_result, available_from=available_from, available_until=available_until
@@ -328,6 +338,7 @@ def search_name_nationally(
     bootstrap_mode: bool,
     settings: Settings,
     max_pages: int = 10,
+    job_type: str = "DJEN_POLL",
 ) -> dict[str, Any]:
     criteria = DjenSearchCriteria(
         lawyer_name=crit.value,
@@ -346,7 +357,7 @@ def search_name_nationally(
         channel="NAME_SEARCH",
         bootstrap_mode=bootstrap_mode,
         settings=settings,
-        job_type="DJEN_POLL",
+        job_type=job_type,
         criteria_id=crit.id,
         cursor=_page_cursor(
             page_result, available_from=available_from, available_until=available_until
@@ -369,6 +380,7 @@ def search_process_nationally(
     bootstrap_mode: bool,
     settings: Settings,
     max_pages: int = 5,
+    job_type: str = "DJEN_POLL",
 ) -> dict[str, Any]:
     parts = normalize_cnj(crit.value) or normalize_cnj(crit.label or "")
     numero = parts.numero_formatado if parts else crit.value
@@ -388,7 +400,7 @@ def search_process_nationally(
         channel="PROCESS_SEARCH",
         bootstrap_mode=bootstrap_mode,
         settings=settings,
-        job_type="DJEN_POLL",
+        job_type=job_type,
         criteria_id=crit.id,
         cursor=_page_cursor(
             page_result, available_from=available_from, available_until=available_until
@@ -411,8 +423,12 @@ def search_company_nationally(
     bootstrap_mode: bool,
     settings: Settings,
     max_pages: int = 5,
+    job_type: str = "DJEN_POLL",
 ) -> dict[str, Any]:
-    name = (crit.label or crit.meta or {}).get("nome") if isinstance(crit.meta, dict) else None
+    # meta.nome tem prioridade; label/value são fallback (nunca chamar .get em str)
+    name = None
+    if isinstance(crit.meta, dict):
+        name = crit.meta.get("nome")
     name = name or crit.label or crit.value
     aliases = []
     if isinstance(crit.meta, dict):
@@ -452,7 +468,7 @@ def search_company_nationally(
             channel="COMPANY_SEARCH",
             bootstrap_mode=bootstrap_mode,
             settings=settings,
-            job_type="DJEN_POLL",
+            job_type=job_type,
             criteria_id=crit.id,
             cursor=_page_cursor(
                 page_result, available_from=available_from, available_until=available_until
@@ -500,23 +516,39 @@ def run_djen_poll(
     historical = mode == "historical"
     max_pages = _max_pages_for(settings, purpose=purpose, historical=historical)
     flags = _search_flags(settings, purpose)
-    criteria = list(session.scalars(select(Criterion).where(Criterion.active.is_(True))).all())
-    criteria = [c for c in criteria if flags.get(c.criterion_type, True)]
-    label = "HISTÓRICO" if historical else "POLL"
-    report_progress(
-        stage="djen_poll",
-        done=0,
-        total=max(len(criteria), 1),
-        message=(
-            f"DJEN {label} · {len(criteria)} critério(s) · "
-            f"{available_from.isoformat()} → {available_until.isoformat()}"
-        ),
-        force=True,
+    source_job = _source_job_type(purpose=purpose, mode=mode)
+    # Nested sob Bootstrap: não sobrescrever done/total do job pai (3 etapas)
+    nest_progress = purpose == "bootstrap"
+    all_active = list(
+        session.scalars(select(Criterion).where(Criterion.active.is_(True))).all()
     )
+    # Só tipos com busca implementada — CPF/outros não entram no total (senão checkpoint trava)
+    searchable = {k for k, on in flags.items() if on}
+    skipped_unsupported = [
+        c for c in all_active if c.criterion_type not in flags
+    ]
+    criteria = [c for c in all_active if c.criterion_type in searchable]
+    label = "HISTÓRICO" if historical else "POLL"
+    n_crit = max(len(criteria), 1)
+    window_msg = (
+        f"DJEN {label} · {len(criteria)} critério(s) · "
+        f"{available_from.isoformat()} → {available_until.isoformat()}"
+    )
+    if nest_progress:
+        report_progress(stage="djen_poll", message=window_msg, force=True)
+    else:
+        report_progress(
+            stage="djen_poll",
+            done=0,
+            total=n_crit,
+            message=window_msg,
+            force=True,
+        )
 
     summary: dict[str, Any] = {
         "mode": mode,
         "purpose": purpose,
+        "source_job_type": source_job,
         "window": {"from": available_from.isoformat(), "until": available_until.isoformat()},
         "search_flags": flags,
         "max_pages": max_pages,
@@ -525,7 +557,10 @@ def run_djen_poll(
         "processes": [],
         "companies": [],
         "errors": [],
-        "skipped_criteria": 0,
+        "skipped_criteria": len(skipped_unsupported),
+        "skipped_unsupported": [
+            f"{c.criterion_type}:{c.value}" for c in skipped_unsupported[:20]
+        ],
         "total_active_criteria": len(criteria),
         "successful_criteria": 0,
         "checkpoint_advanced": False,
@@ -534,12 +569,16 @@ def run_djen_poll(
 
     for idx, crit in enumerate(criteria):
         raise_if_cancelled()
-        report_progress(
-            stage="djen_poll",
-            done=idx,
-            total=max(len(criteria), 1),
-            message=f"Buscando {crit.criterion_type}:{crit.value}",
-        )
+        msg = f"Buscando {crit.criterion_type}:{crit.value}"
+        if nest_progress:
+            report_progress(stage="djen_poll", message=msg)
+        else:
+            report_progress(
+                stage="djen_poll",
+                done=idx,
+                total=n_crit,
+                message=msg,
+            )
         result: dict[str, Any] | None = None
         try:
             if crit.criterion_type == "OAB":
@@ -552,6 +591,7 @@ def run_djen_poll(
                     bootstrap_mode=bootstrap_mode,
                     settings=settings,
                     max_pages=max_pages,
+                    job_type=source_job,
                 )
                 summary["oabs"].append(result)
             elif crit.criterion_type == "NOME":
@@ -564,6 +604,7 @@ def run_djen_poll(
                     bootstrap_mode=bootstrap_mode,
                     settings=settings,
                     max_pages=max_pages,
+                    job_type=source_job,
                 )
                 summary["names"].append(result)
             elif crit.criterion_type == "PROCESSO":
@@ -576,6 +617,7 @@ def run_djen_poll(
                     bootstrap_mode=bootstrap_mode,
                     settings=settings,
                     max_pages=max(5, max_pages // 4),
+                    job_type=source_job,
                 )
                 summary["processes"].append(result)
             elif crit.criterion_type in {"CNPJ", "EMPRESA"}:
@@ -588,6 +630,7 @@ def run_djen_poll(
                     bootstrap_mode=bootstrap_mode,
                     settings=settings,
                     max_pages=max(5, max_pages // 4),
+                    job_type=source_job,
                 )
                 summary["companies"].append(result)
             else:
@@ -608,11 +651,13 @@ def run_djen_poll(
             logger.exception("djen_poll_criterion_failed")
             summary["errors"].append({"criterion": crit.value, "error": str(exc)})
 
-    # Checkpoint só com sucesso total — falha parcial mantém cursor (overlap refaz janela)
+    # Checkpoint só com sucesso total e sem saturação de páginas.
+    # total==0: não avançar (nada foi buscado).
     if not historical:
         total = int(summary["total_active_criteria"])
         ok = int(summary["successful_criteria"])
-        if total == 0 or ok == total:
+        saturated = summary["saturated_criteria"]
+        if total > 0 and ok == total and not saturated:
             _save_checkpoint(session, available_until)
             summary["checkpoint_advanced"] = True
         else:
@@ -623,16 +668,21 @@ def run_djen_poll(
                         "successful": ok,
                         "total": total,
                         "errors": len(summary["errors"]),
+                        "saturated": len(saturated),
                     }
                 },
             )
-    report_progress(
-        stage="djen_poll",
-        done=len(criteria),
-        total=max(len(criteria), 1),
-        message=f"DJEN {label} concluído",
-        force=True,
-    )
+    done_msg = f"DJEN {label} concluído"
+    if nest_progress:
+        report_progress(stage="djen_poll", message=done_msg, force=True)
+    else:
+        report_progress(
+            stage="djen_poll",
+            done=len(criteria),
+            total=n_crit,
+            message=done_msg,
+            force=True,
+        )
     return summary
 
 
