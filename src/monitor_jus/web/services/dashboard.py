@@ -191,6 +191,11 @@ def build_dashboard(
                     ),
                 }
             )
+        from monitor_jus.web.services.coverage_health import coverage_attention
+
+        attention.extend(
+            coverage_attention(session, djen_enabled=bool(settings.djen_enable))
+        )
         if not attention:
             attention.append({"level": "ok", "text": "Nenhum alerta operacional no momento"})
 

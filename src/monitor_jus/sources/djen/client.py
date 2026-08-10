@@ -90,10 +90,13 @@ class DjenClient:
         criteria: DjenSearchCriteria,
         *,
         max_pages: int = 20,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
+        """Busca paginada. Retorna items + metadados (inclui hit_max_pages se truncou)."""
         items: list[dict[str, Any]] = []
         page = criteria.page
-        for _ in range(max_pages):
+        pages_fetched = 0
+        hit_max_pages = False
+        for i in range(max(1, max_pages)):
             page_criteria = DjenSearchCriteria(
                 text=criteria.text,
                 lawyer_name=criteria.lawyer_name,
@@ -108,6 +111,7 @@ class DjenClient:
             )
             data = self.search(page_criteria)
             batch = data.get("items") or []
+            pages_fetched += 1
             items.extend(batch)
             total = data.get("total")
             if not batch:
@@ -116,8 +120,16 @@ class DjenClient:
                 break
             if len(batch) < criteria.size:
                 break
+            # Há indício de mais páginas, mas atingimos o teto
+            if i + 1 >= max_pages:
+                hit_max_pages = True
+                break
             page += 1
-        return items
+        return {
+            "items": items,
+            "pages_fetched": pages_fetched,
+            "hit_max_pages": hit_max_pages,
+        }
 
     def _normalize_response(self, data: Any) -> dict[str, Any]:
         from monitor_jus.config import load_yaml

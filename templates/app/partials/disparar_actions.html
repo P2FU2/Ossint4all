@@ -22,19 +22,19 @@
         <header class="ops-card-head">
           <div class="ops-card-title-row">
             <h3 id="ops-discovery-title">Discovery</h3>
-            {{ tip("Botão Discovery: varredura histórica no DJEN pelas OABs/nomes monitorados.") }}
+            {{ tip("Botão Discovery: janela curta no DJEN (não é Bootstrap). Use Bootstrap para acervo longo.") }}
           </div>
-          <p class="ops-card-desc">Janela e limites da busca histórica no DJEN.</p>
+          <p class="ops-card-desc">Janela curta e limites da busca no DJEN (padrão 90 dias).</p>
         </header>
 
         <div class="ops-fields">
           <div class="ops-field">
             <label for="discovery_lookback_days">
               Janela (dias)
-              {{ tip("Quantos dias para trás buscar comunicações no DJEN. Ex.: 1095 ≈ 3 anos.") }}
+              {{ tip("Dias para trás no Discovery. Padrão 90. Bootstrap usa janela própria (ex.: 1095).") }}
             </label>
-            <input id="discovery_lookback_days" type="number" name="discovery_lookback_days" min="7" max="3650" value="{{ disc.lookback_days or 1095 }}" />
-            <span class="ops-hint">≈ 3 anos se 1095</span>
+            <input id="discovery_lookback_days" type="number" name="discovery_lookback_days" min="7" max="3650" value="{{ disc.lookback_days or 90 }}" />
+            <span class="ops-hint">curta · padrão 90</span>
           </div>
           <div class="ops-field">
             <label for="discovery_max_pages">

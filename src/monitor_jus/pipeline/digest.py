@@ -131,16 +131,24 @@ def build_and_send_digest(
     report_progress(stage="digest_html", done=3, total=5, message="Gerando HTML")
     quarantine_count = repo.count_quarantine_open()
     from monitor_jus.report.html_report import recent_source_failures
+    from monitor_jus.web.services.coverage_health import digest_source_health
 
     source_failures = recent_source_failures(session)
+    source_health = digest_source_health(session)
+    failure_lines = []
+    for f in source_failures:
+        crit = f.get("criterion") or "—"
+        job = f.get("job_type") or "—"
+        failure_lines.append(
+            f"{f['source']}/{f['court']} · {job} · {crit}: {f['error']}"
+        )
     html = render_digest_html(
         events,
         quarantine_count=quarantine_count,
         settings=settings,
         zero=not events,
-        failures=[
-            f"{f['source']}/{f['court']}: {f['error']}" for f in source_failures
-        ],
+        failures=failure_lines,
+        source_health=source_health,
     )
     html_path, pdf_path = _artifact_paths(settings, digest.id, digest.reference_date)
     html_path.parent.mkdir(parents=True, exist_ok=True)

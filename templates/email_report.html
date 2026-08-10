@@ -71,6 +71,23 @@
     {% endfor %}
     {% endif %}
 
+    {% if source_health %}
+    <h2>Saúde das fontes</h2>
+    <p>
+      <span class="badge ok">{{ source_health.ok }} ok</span>
+      {% if source_health.stale %}<span class="badge">{{ source_health.stale }} atrasado(s)</span>{% endif %}
+      {% if source_health.failed %}<span class="badge alta">{{ source_health.failed }} falha(s)</span>{% endif %}
+      {% if source_health.never %}<span class="badge">{{ source_health.never }} sem poll</span>{% endif %}
+    </p>
+    {% if source_health.has_issues and source_health.rows %}
+    <ul>
+      {% for r in source_health.rows if r.badge != 'ok' %}
+      <li>{{ r.type }}:{{ r.value }} — {{ r.badge }}{% if r.hit_max_pages %} · max_pages{% endif %} · último ok: {{ r.last_success_at }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+
     {% if failures %}
     <h2>Fontes temporariamente indisponíveis</h2>
     <ul>{% for f in failures %}<li>{{ f }}</li>{% endfor %}</ul>

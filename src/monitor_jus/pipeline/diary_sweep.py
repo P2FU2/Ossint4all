@@ -96,7 +96,8 @@ def run_diary_sweep(
                 available_until=until,
                 size=50,
             )
-            items = client.search_all_pages(criteria, max_pages=5)
+            page_result = client.search_all_pages(criteria, max_pages=5)
+            items = page_result.get("items") or []
             for item in items:
                 if not isinstance(item, dict):
                     continue
@@ -121,6 +122,12 @@ def run_diary_sweep(
                 items_created=created,
                 items_updated=updated,
                 items_rejected=rejected,
+                cursor={
+                    "pages_fetched": page_result.get("pages_fetched"),
+                    "hit_max_pages": bool(page_result.get("hit_max_pages")),
+                    "available_from": start.isoformat() if hasattr(start, "isoformat") else str(start),
+                    "available_until": until.isoformat() if hasattr(until, "isoformat") else str(until),
+                },
             )
             results.append(
                 {

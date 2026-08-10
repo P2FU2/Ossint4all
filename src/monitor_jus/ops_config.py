@@ -14,7 +14,7 @@ OPS_FILENAME = "ops.yaml"
 
 _DEFAULTS: dict[str, Any] = {
     "discovery": {
-        "lookback_days": 1095,
+        "lookback_days": 90,
         "max_pages": 80,
         "search_oabs": True,
         "search_names": True,
@@ -86,7 +86,7 @@ def _sanitize(data: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "discovery": {
-            "lookback_days": _int(disc.get("lookback_days"), 1095, 7, 3650),
+            "lookback_days": _int(disc.get("lookback_days"), 90, 7, 3650),
             "max_pages": _int(disc.get("max_pages"), 80, 5, 200),
             "search_oabs": _bool(disc.get("search_oabs"), True),
             "search_names": _bool(disc.get("search_names"), True),

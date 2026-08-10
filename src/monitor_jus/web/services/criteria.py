@@ -51,9 +51,12 @@ def _yaml_preview(settings: Settings) -> dict[str, Any]:
 
 
 def list_criteria(session: Session, settings: Settings | None = None) -> dict[str, Any]:
+    from monitor_jus.web.services.coverage_health import criterion_poll_health
+
     criteria = list(
         session.scalars(select(Criterion).order_by(Criterion.criterion_type, Criterion.value)).all()
     )
+    health = criterion_poll_health(session)
     rows = []
     for c in criteria:
         proc_count = int(
@@ -64,6 +67,13 @@ def list_criteria(session: Session, settings: Settings | None = None) -> dict[st
             )
             or 0
         )
+        h = health.get(c.id) or {
+            "badge": "nunca",
+            "last_success_at_fmt": "—",
+            "last_failure_at_fmt": "—",
+            "hit_max_pages_recent": False,
+            "stale": True,
+        }
         rows.append(
             {
                 "id": c.id,
@@ -73,6 +83,11 @@ def list_criteria(session: Session, settings: Settings | None = None) -> dict[st
                 "active": c.active,
                 "process_count": proc_count,
                 "created_at": c.created_at.astimezone().strftime("%d/%m/%Y") if c.created_at else "—",
+                "poll_badge": h.get("badge") or "nunca",
+                "last_poll_ok": h.get("last_success_at_fmt") or "—",
+                "last_poll_fail": h.get("last_failure_at_fmt") or "—",
+                "hit_max_pages": bool(h.get("hit_max_pages_recent")),
+                "poll_stale": bool(h.get("stale")),
             }
         )
     out: dict[str, Any] = {

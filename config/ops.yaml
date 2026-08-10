@@ -2,8 +2,8 @@
 # Não use .env para estes valores — o painel grava aqui.
 
 discovery:
-  # Janela histórica do botão Discovery (dias para trás no DJEN)
-  lookback_days: 1095
+  # Janela curta do botão Discovery / HISTORICAL_DISCOVERY (não confundir com Bootstrap)
+  lookback_days: 90
   max_pages: 80
   search_oabs: true
   search_names: true
@@ -11,7 +11,7 @@ discovery:
   search_companies: true
 
 bootstrap:
-  # Janela histórica do Bootstrap (completa o acervo com comunicações antigas)
+  # Janela longa do Bootstrap (acervo histórico completo)
   lookback_days: 1095
   max_pages: 80
   # Após o DJEN: enriquecer no DataJud processos sem situação/classe

@@ -76,7 +76,7 @@ def recent_source_failures(session=None, *, hours: int = 48) -> list[dict[str, A
 
     from sqlalchemy import select
 
-    from monitor_jus.db.models import SourceRun
+    from monitor_jus.db.models import Criterion, SourceRun
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     rows = list(
@@ -87,15 +87,25 @@ def recent_source_failures(session=None, *, hours: int = 48) -> list[dict[str, A
             .limit(20)
         ).all()
     )
-    return [
-        {
-            "job_type": r.job_type,
-            "source": r.source,
-            "court": r.court or "—",
-            "error": (r.error_message or r.error_code or "falha")[:200],
-        }
-        for r in rows
-    ]
+    crit_ids = {r.criteria_id for r in rows if r.criteria_id}
+    crit_labels: dict[str, str] = {}
+    if crit_ids:
+        for c in session.scalars(select(Criterion).where(Criterion.id.in_(crit_ids))).all():
+            crit_labels[c.id] = f"{c.criterion_type}:{c.value}"
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        criterion = crit_labels.get(r.criteria_id or "", "")
+        out.append(
+            {
+                "job_type": r.job_type or "—",
+                "source": r.source,
+                "court": r.court or "—",
+                "criterion": criterion or "—",
+                "criteria_id": r.criteria_id,
+                "error": (r.error_message or r.error_code or "falha")[:200],
+            }
+        )
+    return out
 
 
 def render_digest_html(
@@ -107,6 +117,7 @@ def render_digest_html(
     settings: Settings | None = None,
     zero: bool = False,
     portfolio: dict[str, Any] | None = None,
+    source_health: dict[str, Any] | None = None,
 ) -> str:
     """HTML do digest — somente novidades (portfolio ignorado)."""
     settings = settings or get_settings()
@@ -150,5 +161,6 @@ def render_digest_html(
         totals_by_tribunal=totals_by_tribunal,
         skipped=skipped or [],
         failures=failures or [],
+        source_health=source_health,
         zero=zero or not events,
     )

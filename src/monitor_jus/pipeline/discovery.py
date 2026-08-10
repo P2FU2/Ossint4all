@@ -158,6 +158,7 @@ def _ingest_items(
     settings: Settings,
     job_type: str,
     criteria_id: str | None,
+    cursor: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     run = start_source_run(
         session,
@@ -192,6 +193,7 @@ def _ingest_items(
             items_created=created,
             items_updated=updated,
             items_rejected=rejected,
+            cursor=cursor,
         )
     except Exception as exc:  # noqa: BLE001
         finish_source_run(
@@ -203,6 +205,7 @@ def _ingest_items(
             items_rejected=rejected,
             error_code=getattr(exc, "code", "FAILED"),
             error_message=str(exc),
+            cursor=cursor,
         )
         raise
     return {
@@ -210,6 +213,20 @@ def _ingest_items(
         "created": created,
         "updated": updated,
         "rejected": rejected,
+    }
+
+
+def _page_cursor(
+    page_result: dict[str, Any],
+    *,
+    available_from: date,
+    available_until: date,
+) -> dict[str, Any]:
+    return {
+        "available_from": available_from.isoformat(),
+        "available_until": available_until.isoformat(),
+        "pages_fetched": int(page_result.get("pages_fetched") or 0),
+        "hit_max_pages": bool(page_result.get("hit_max_pages")),
     }
 
 
@@ -255,16 +272,30 @@ def search_oab_nationally(
             )
         )
 
-    totals = {"received": 0, "created": 0, "updated": 0, "rejected": 0}
+    totals: dict[str, Any] = {
+        "received": 0,
+        "created": 0,
+        "updated": 0,
+        "rejected": 0,
+        "hit_max_pages": False,
+        "pages_fetched": 0,
+    }
+    failures: list[str] = []
+    any_ok = False
     for criteria in variants:
         try:
-            items = client.search_all_pages(criteria, max_pages=max_pages)
+            page_result = client.search_all_pages(criteria, max_pages=max_pages)
         except SourceOutcomeError as exc:
             logger.warning(
                 "djen_oab_search_failed",
                 extra={"extra": {"criterion": crit.value, "code": exc.code, "msg": str(exc)}},
             )
+            failures.append(str(exc))
             continue
+        any_ok = True
+        items = page_result.get("items") or []
+        totals["hit_max_pages"] = totals["hit_max_pages"] or bool(page_result.get("hit_max_pages"))
+        totals["pages_fetched"] += int(page_result.get("pages_fetched") or 0)
         stats = _ingest_items(
             session,
             items,
@@ -273,9 +304,17 @@ def search_oab_nationally(
             settings=settings,
             job_type="DJEN_POLL",
             criteria_id=crit.id,
+            cursor=_page_cursor(
+                page_result, available_from=available_from, available_until=available_until
+            ),
         )
-        for k in totals:
+        for k in ("received", "created", "updated", "rejected"):
             totals[k] += stats[k]
+    if not any_ok:
+        return {
+            "error": failures[-1] if failures else "DJEN OAB search failed",
+            "failures": failures,
+        }
     return totals
 
 
@@ -296,11 +335,12 @@ def search_name_nationally(
         available_until=available_until,
     )
     try:
-        items = client.search_all_pages(criteria, max_pages=max_pages)
+        page_result = client.search_all_pages(criteria, max_pages=max_pages)
     except SourceOutcomeError as exc:
         logger.warning("djen_name_search_failed", extra={"extra": {"msg": str(exc)}})
         return {"error": str(exc)}
-    return _ingest_items(
+    items = page_result.get("items") or []
+    stats = _ingest_items(
         session,
         items,
         channel="NAME_SEARCH",
@@ -308,7 +348,15 @@ def search_name_nationally(
         settings=settings,
         job_type="DJEN_POLL",
         criteria_id=crit.id,
+        cursor=_page_cursor(
+            page_result, available_from=available_from, available_until=available_until
+        ),
     )
+    return {
+        **stats,
+        "hit_max_pages": bool(page_result.get("hit_max_pages")),
+        "pages_fetched": int(page_result.get("pages_fetched") or 0),
+    }
 
 
 def search_process_nationally(
@@ -330,10 +378,11 @@ def search_process_nationally(
         available_until=available_until,
     )
     try:
-        items = client.search_all_pages(criteria, max_pages=max_pages)
+        page_result = client.search_all_pages(criteria, max_pages=max_pages)
     except SourceOutcomeError as exc:
         return {"error": str(exc)}
-    return _ingest_items(
+    items = page_result.get("items") or []
+    stats = _ingest_items(
         session,
         items,
         channel="PROCESS_SEARCH",
@@ -341,7 +390,15 @@ def search_process_nationally(
         settings=settings,
         job_type="DJEN_POLL",
         criteria_id=crit.id,
+        cursor=_page_cursor(
+            page_result, available_from=available_from, available_until=available_until
+        ),
     )
+    return {
+        **stats,
+        "hit_max_pages": bool(page_result.get("hit_max_pages")),
+        "pages_fetched": int(page_result.get("pages_fetched") or 0),
+    }
 
 
 def search_company_nationally(
@@ -360,19 +417,35 @@ def search_company_nationally(
     aliases = []
     if isinstance(crit.meta, dict):
         aliases = list(crit.meta.get("aliases") or [])
-    totals = {"received": 0, "created": 0, "updated": 0, "rejected": 0}
+    totals: dict[str, Any] = {
+        "received": 0,
+        "created": 0,
+        "updated": 0,
+        "rejected": 0,
+        "hit_max_pages": False,
+        "pages_fetched": 0,
+    }
+    failures: list[str] = []
+    any_ok = False
+    attempts = 0
     for term in [name, *aliases]:
         if not term:
             continue
+        attempts += 1
         criteria = DjenSearchCriteria(
             text=str(term),
             available_from=available_from,
             available_until=available_until,
         )
         try:
-            items = client.search_all_pages(criteria, max_pages=max_pages)
-        except SourceOutcomeError:
+            page_result = client.search_all_pages(criteria, max_pages=max_pages)
+        except SourceOutcomeError as exc:
+            failures.append(str(exc))
             continue
+        any_ok = True
+        items = page_result.get("items") or []
+        totals["hit_max_pages"] = totals["hit_max_pages"] or bool(page_result.get("hit_max_pages"))
+        totals["pages_fetched"] += int(page_result.get("pages_fetched") or 0)
         stats = _ingest_items(
             session,
             items,
@@ -381,9 +454,17 @@ def search_company_nationally(
             settings=settings,
             job_type="DJEN_POLL",
             criteria_id=crit.id,
+            cursor=_page_cursor(
+                page_result, available_from=available_from, available_until=available_until
+            ),
         )
-        for k in totals:
+        for k in ("received", "created", "updated", "rejected"):
             totals[k] += stats[k]
+    if attempts > 0 and not any_ok:
+        return {
+            "error": failures[-1] if failures else "DJEN company search failed",
+            "failures": failures,
+        }
     return totals
 
 
@@ -448,6 +529,7 @@ def run_djen_poll(
         "total_active_criteria": len(criteria),
         "successful_criteria": 0,
         "checkpoint_advanced": False,
+        "saturated_criteria": [],
     }
 
     for idx, crit in enumerate(criteria):
@@ -458,63 +540,69 @@ def run_djen_poll(
             total=max(len(criteria), 1),
             message=f"Buscando {crit.criterion_type}:{crit.value}",
         )
+        result: dict[str, Any] | None = None
         try:
             if crit.criterion_type == "OAB":
-                summary["oabs"].append(
-                    search_oab_nationally(
-                        session,
-                        client,
-                        crit,
-                        available_from=available_from,
-                        available_until=available_until,
-                        bootstrap_mode=bootstrap_mode,
-                        settings=settings,
-                        max_pages=max_pages,
-                    )
+                result = search_oab_nationally(
+                    session,
+                    client,
+                    crit,
+                    available_from=available_from,
+                    available_until=available_until,
+                    bootstrap_mode=bootstrap_mode,
+                    settings=settings,
+                    max_pages=max_pages,
                 )
+                summary["oabs"].append(result)
             elif crit.criterion_type == "NOME":
-                summary["names"].append(
-                    search_name_nationally(
-                        session,
-                        client,
-                        crit,
-                        available_from=available_from,
-                        available_until=available_until,
-                        bootstrap_mode=bootstrap_mode,
-                        settings=settings,
-                        max_pages=max_pages,
-                    )
+                result = search_name_nationally(
+                    session,
+                    client,
+                    crit,
+                    available_from=available_from,
+                    available_until=available_until,
+                    bootstrap_mode=bootstrap_mode,
+                    settings=settings,
+                    max_pages=max_pages,
                 )
+                summary["names"].append(result)
             elif crit.criterion_type == "PROCESSO":
-                summary["processes"].append(
-                    search_process_nationally(
-                        session,
-                        client,
-                        crit,
-                        available_from=available_from,
-                        available_until=available_until,
-                        bootstrap_mode=bootstrap_mode,
-                        settings=settings,
-                        max_pages=max(5, max_pages // 4),
-                    )
+                result = search_process_nationally(
+                    session,
+                    client,
+                    crit,
+                    available_from=available_from,
+                    available_until=available_until,
+                    bootstrap_mode=bootstrap_mode,
+                    settings=settings,
+                    max_pages=max(5, max_pages // 4),
                 )
+                summary["processes"].append(result)
             elif crit.criterion_type in {"CNPJ", "EMPRESA"}:
-                summary["companies"].append(
-                    search_company_nationally(
-                        session,
-                        client,
-                        crit,
-                        available_from=available_from,
-                        available_until=available_until,
-                        bootstrap_mode=bootstrap_mode,
-                        settings=settings,
-                        max_pages=max(5, max_pages // 4),
-                    )
+                result = search_company_nationally(
+                    session,
+                    client,
+                    crit,
+                    available_from=available_from,
+                    available_until=available_until,
+                    bootstrap_mode=bootstrap_mode,
+                    settings=settings,
+                    max_pages=max(5, max_pages // 4),
                 )
+                summary["companies"].append(result)
             else:
                 summary["skipped_criteria"] += 1
                 continue
-            summary["successful_criteria"] += 1
+            if result.get("error"):
+                summary["errors"].append(
+                    {"criterion": crit.value, "error": str(result["error"])}
+                )
+            else:
+                summary["successful_criteria"] += 1
+                if result.get("hit_max_pages"):
+                    summary["saturated_criteria"].append(
+                        f"{crit.criterion_type}:{crit.value}"
+                    )
         except Exception as exc:  # noqa: BLE001
             # Falha de um critério não interrompe os demais
             logger.exception("djen_poll_criterion_failed")

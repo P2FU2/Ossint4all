@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>Critérios {{ tip("OABs, nomes e outros filtros da discovery. A coluna Processos conta vínculos CriterionLink — um CNJ pode aparecer no NOME e em uma OAB.") }}</h1>
+    <h1>Critérios {{ tip("OABs, nomes e outros filtros da discovery. A coluna Processos conta vínculos CriterionLink — um CNJ pode aparecer no NOME e em uma OAB. Último poll ok = último DJEN_POLL com SUCCESS para aquele critério.") }}</h1>
     <p>{{ active }} ativo(s) de {{ total }} · sincronizados do YAML no banco.</p>
   </div>
   <form method="post" action="/app/actions/sync-criteria">
@@ -48,6 +48,9 @@
         <th>Label / responsável</th>
         <th>Ativo</th>
         <th>Processos</th>
+        <th>Poll {{ tip("ok = sucesso DJEN nas últimas ~3h; atrasado = sem sucesso recente; falhou = último run FAILED; nunca = sem SourceRun.") }}</th>
+        <th>Último poll ok</th>
+        <th>Última falha</th>
         <th>Criado</th>
       </tr>
     </thead>
@@ -59,10 +62,19 @@
         <td class="cell-clamp">{{ c.label }}</td>
         <td>{% if c.active %}<span class="badge ok">sim</span>{% else %}<span class="badge warn">não</span>{% endif %}</td>
         <td>{{ c.process_count }}</td>
+        <td>
+          {% if c.poll_badge == 'ok' %}<span class="badge ok">ok</span>
+          {% elif c.poll_badge == 'falhou' %}<span class="badge error">falhou</span>
+          {% elif c.poll_badge == 'atrasado' %}<span class="badge warn">atrasado</span>
+          {% else %}<span class="badge warn">nunca</span>{% endif %}
+          {% if c.hit_max_pages %}<span class="badge warn" title="max_pages atingido recentemente">páginas</span>{% endif %}
+        </td>
+        <td class="muted">{{ c.last_poll_ok }}</td>
+        <td class="muted">{{ c.last_poll_fail }}</td>
         <td class="muted">{{ c.created_at }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted">Nenhum critério. Rode o bootstrap ou sincronize o YAML.</td></tr>
+      <tr><td colspan="9" class="muted">Nenhum critério. Rode o bootstrap ou sincronize o YAML.</td></tr>
       {% endfor %}
     </tbody>
   </table>
