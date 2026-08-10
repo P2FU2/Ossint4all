@@ -86,6 +86,23 @@ def _assunto_principal(source: dict[str, Any]) -> str | None:
     return first.get("nome") if isinstance(first, dict) else None
 
 
+def _movimento_complemento(mov: dict[str, Any]) -> str | None:
+    comps = mov.get("complementosTabelados") or mov.get("complementos") or []
+    parts: list[str] = []
+    if isinstance(comps, list):
+        for item in comps:
+            if isinstance(item, dict):
+                val = item.get("nome") or item.get("descricao") or item.get("valor") or item.get("texto")
+                if val:
+                    parts.append(str(val))
+            elif isinstance(item, str) and item.strip():
+                parts.append(item.strip())
+    if mov.get("complemento"):
+        parts.append(str(mov.get("complemento")))
+    text = " ".join(parts).strip()
+    return text or None
+
+
 def _infer_situacao_from_hits(sources: list[dict[str, Any]]) -> str | None:
     """Infere status de capa a partir de G1/G2 e movimentos.
 
@@ -157,7 +174,8 @@ def normalize_datajud_source(source: dict[str, Any]) -> dict[str, Any]:
 
     movimentos = source.get("movimentos") or []
     last = movimentos[-1] if movimentos else {}
-    last_movement_at = _parse_dt(last.get("dataHora") if isinstance(last, dict) else None)
+    last_dict = last if isinstance(last, dict) else {}
+    last_movement_at = _parse_dt(last_dict.get("dataHora"))
 
     return {
         "numero_cnj_digits": source.get("numeroProcesso"),
@@ -167,8 +185,14 @@ def normalize_datajud_source(source: dict[str, Any]) -> dict[str, Any]:
         "orgao_julgador": _orgao_nome(source),
         "grau": source.get("grau"),
         "data_ajuizamento": source.get("dataAjuizamento"),
-        "last_movement_name": last.get("nome") if isinstance(last, dict) else None,
-        "last_movement_date": last.get("dataHora") if isinstance(last, dict) else None,
+        "last_movement_name": last_dict.get("nome"),
+        "last_movement_date": last_dict.get("dataHora"),
+        "last_movement_code": (
+            last_dict.get("codigo")
+            or last_dict.get("codigoNacional")
+            or last_dict.get("codigoMovimento")
+        ),
+        "last_movement_complemento": _movimento_complemento(last_dict),
         "last_movement_at": last_movement_at,
         "movimentos": movimentos,
         "raw": source,

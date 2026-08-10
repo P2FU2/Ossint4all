@@ -445,6 +445,9 @@ def run_djen_poll(
         "companies": [],
         "errors": [],
         "skipped_criteria": 0,
+        "total_active_criteria": len(criteria),
+        "successful_criteria": 0,
+        "checkpoint_advanced": False,
     }
 
     for idx, crit in enumerate(criteria):
@@ -508,14 +511,33 @@ def run_djen_poll(
                         max_pages=max(5, max_pages // 4),
                     )
                 )
+            else:
+                summary["skipped_criteria"] += 1
+                continue
+            summary["successful_criteria"] += 1
         except Exception as exc:  # noqa: BLE001
             # Falha de um critério não interrompe os demais
             logger.exception("djen_poll_criterion_failed")
             summary["errors"].append({"criterion": crit.value, "error": str(exc)})
 
-    # Checkpoint só para poll incremental (histórico não “fecha” a janela curta)
+    # Checkpoint só com sucesso total — falha parcial mantém cursor (overlap refaz janela)
     if not historical:
-        _save_checkpoint(session, available_until)
+        total = int(summary["total_active_criteria"])
+        ok = int(summary["successful_criteria"])
+        if total == 0 or ok == total:
+            _save_checkpoint(session, available_until)
+            summary["checkpoint_advanced"] = True
+        else:
+            logger.warning(
+                "djen_checkpoint_kept",
+                extra={
+                    "extra": {
+                        "successful": ok,
+                        "total": total,
+                        "errors": len(summary["errors"]),
+                    }
+                },
+            )
     report_progress(
         stage="djen_poll",
         done=len(criteria),

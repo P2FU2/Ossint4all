@@ -1,4 +1,4 @@
-"""Digest diário transacional."""
+"""Digest diário — só novidades; reserva recuperável até confirmação de envio."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from monitor_jus.logging_setup import get_logger
 from monitor_jus.mail.resend_mailer import send_html_email
 from monitor_jus.metrics import incr, set_gauge
 from monitor_jus.models import DigestStatus
-from monitor_jus.pipeline.portfolio import build_portfolio
 from monitor_jus.progress import report as report_progress
 from monitor_jus.report.html_report import render_digest_html
 from monitor_jus.report.pdf_report import write_pdf
@@ -25,9 +24,7 @@ logger = get_logger(__name__)
 
 
 def _artifact_paths(settings: Settings, digest_id: str, reference_date: str | None) -> tuple[Path, Path]:
-    stem = f"relatorio-{reference_date or digest_id[:8]}"
     base = Path(settings.outbox_dir)
-    # Mantém id no nome para unicidade; stem amigável no anexo
     html_path = base / f"{digest_id}.html"
     pdf_path = base / f"{digest_id}.pdf"
     return html_path, pdf_path
@@ -35,6 +32,21 @@ def _artifact_paths(settings: Settings, digest_id: str, reference_date: str | No
 
 def _ensure_pdf(html: str, pdf_path: Path) -> Path:
     return write_pdf(html, pdf_path)
+
+
+def _format_subject_date(reference_date: str | None) -> str:
+    raw = reference_date or datetime.now().date().isoformat()
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return raw
+
+
+def _digest_subject(reference_date: str | None, total_events: int) -> str:
+    day = _format_subject_date(reference_date)
+    if total_events <= 0:
+        return f"[Monitor Judicial] Relatório {day} — nenhuma novidade"
+    return f"[Monitor Judicial] Relatório {day} — {total_events} novidades"
 
 
 def build_and_send_digest(
@@ -45,10 +57,7 @@ def build_and_send_digest(
     digest_id: str | None = None,
     recipient: str | None = None,
 ) -> dict[str, Any]:
-    """Cria digest (ou retenta o mesmo) e envia e-mail com HTML (sem PDF).
-
-    `recipient` sobrescreve EMAIL_TO (envio sob demanda pelo painel).
-    """
+    """Reserva eventos → HTML só novidades → send → NOTIFIED; falha → DELIVERY_PENDING."""
     settings = settings or get_settings()
     repo = Repository(session)
 
@@ -66,12 +75,34 @@ def build_and_send_digest(
             session, repo, digest, html, settings, run_id, recipient=recipient
         )
 
+    # Retry de digest aberto (READY / DELIVERY_PENDING) — não cria digest B
+    open_digest = repo.find_open_delivery_digest()
+    if open_digest and open_digest.html_path:
+        html_path = Path(open_digest.html_path)
+        if html_path.exists():
+            report_progress(
+                stage="digest_retry_open",
+                done=0,
+                total=2,
+                message="Reenviando digest pendente",
+                force=True,
+            )
+            html = html_path.read_text(encoding="utf-8")
+            return _deliver(
+                session,
+                repo,
+                open_digest,
+                html,
+                settings,
+                run_id,
+                recipient=recipient,
+            )
+
     report_progress(stage="digest_load", done=0, total=5, message="Carregando eventos", force=True)
     cursor = repo.get_digest_cursor()
     since = cursor.last_successful_digest_at
     events = repo.pending_notify_events(since)
     now = datetime.now(timezone.utc)
-    portfolio = build_portfolio(session)
 
     digest = repo.create_digest(
         reference_date=now.date().isoformat(),
@@ -107,7 +138,6 @@ def build_and_send_digest(
         quarantine_count=quarantine_count,
         settings=settings,
         zero=not events,
-        portfolio=portfolio,
         failures=[
             f"{f['source']}/{f['court']}: {f['error']}" for f in source_failures
         ],
@@ -117,7 +147,6 @@ def build_and_send_digest(
     html_path.write_text(html, encoding="utf-8")
     digest.html_path = str(html_path)
 
-    # PDF opcional só para arquivo local/histórico — não é anexo de e-mail
     report_progress(stage="digest_pdf", done=3.5, total=5, message="Arquivando PDF (histórico)")
     try:
         _ensure_pdf(html, pdf_path)
@@ -140,7 +169,6 @@ def build_and_send_digest(
         html,
         settings,
         run_id,
-        portfolio=portfolio,
         recipient=recipient,
     )
 
@@ -152,17 +180,12 @@ def _deliver(
     html: str,
     settings: Settings,
     run_id: str | None,
-    portfolio: dict[str, Any] | None = None,
     recipient: str | None = None,
 ) -> dict[str, Any]:
     digest.status = DigestStatus.DELIVERY_PENDING.value
     session.flush()
+    subject = _digest_subject(digest.reference_date, int(digest.total_events or 0))
     subject_date = digest.reference_date or datetime.now().date().isoformat()
-    total_proc = int((portfolio or {}).get("total_processes") or 0)
-    subject = (
-        f"[Monitor Judicial] Relatório {subject_date} — "
-        f"{total_proc} processos · {digest.total_events} novidades"
-    )
 
     html_file = Path(digest.html_path) if digest.html_path else None
     attach_name_base = f"monitor-judicial-{subject_date}"
@@ -189,7 +212,6 @@ def _deliver(
         "</p>"
     )
     if "</body>" in html.lower():
-        # inserção case-insensitive simples
         idx = html.lower().rfind("</body>")
         html_with_note = html[:idx] + note + html[idx:]
     else:
@@ -232,16 +254,18 @@ def _deliver(
             "digest_id": digest.id,
             "status": "SENT",
             "total_events": digest.total_events,
-            "total_processes": total_proc,
             "message_id": result.get("message_id"),
             "attachments": result.get("attachments", 0),
             "html_path": digest.html_path,
             "pdf_path": digest.pdf_path,
             "recipient": to_addr,
+            "subject": subject,
         }
     except Exception as exc:  # noqa: BLE001
+        # Mantém DELIVERY_PENDING + itens IN_DIGEST para retry do mesmo digest
         notification.status = "FAILED"
+        digest.status = DigestStatus.DELIVERY_PENDING.value
         session.flush()
         report_progress(stage="digest_send", message=f"Falha no envio: {exc}", force=True)
-        logger.error("digest_delivery_failed", extra={"extra": {"err": str(exc)}})
+        logger.error("digest_delivery_failed", extra={"extra": {"err": str(exc), "digest_id": digest.id}})
         raise RecoverableJobError(str(exc), code="DELIVERY_FAILED") from exc

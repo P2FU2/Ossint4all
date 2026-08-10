@@ -14,113 +14,27 @@
     .alta { background: #f3d6d0; }
     .ok { background: #dceee2; }
     .item { margin: 14px 0; padding: 12px 0; border-bottom: 1px solid #eee6da; }
-    .cov li { margin: 4px 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-    th, td { border-bottom: 1px solid #eee6da; padding: 8px 6px; text-align: left; vertical-align: top; }
-    th { color: #5a4638; font-weight: 600; }
     .disclaimer { font-size: 12px; color: #555; margin-top: 32px; line-height: 1.45; }
     a { color: #6b3e2e; }
+    .zero-box { margin: 24px 0; padding: 16px 0; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Monitor Judicial — Relatório</h1>
-    <p class="muted">Consulta consolidada em {{ generated_at }} ({{ tz }})</p>
-
-    <div class="stats">
-      <span class="badge ok">Processos no acervo: {{ portfolio.total_processes }}</span>
-      <span class="badge">Em tramitação: {{ portfolio.active_count }}</span>
-      <span class="badge">Sem status claro: {{ portfolio.undefined_count | default(0) }}</span>
-      <span class="badge">Encerrados: {{ portfolio.closed_count }}</span>
-      <span class="badge">Novidades do período: {{ total }}</span>
-      <span class="badge alta">Urgentes: {{ urgent_count }}</span>
-    </div>
-
-    <h2>Estatísticas por OAB</h2>
-    {% if portfolio.by_oab %}
-    <p>
-      {% for k, v in portfolio.by_oab.items() %}
-      <span class="badge">{{ k }}: {{ v }} processo{{ 's' if v != 1 else '' }}</span>
-      {% endfor %}
-    </p>
-    {% else %}
-    <p class="muted">Nenhum processo com OAB monitorada no registro. Sincronize os critérios ou rode a discovery.</p>
-    {% endif %}
-
-    <h2>Por tribunal (acervo)</h2>
-    {% if portfolio.by_tribunal %}
-    <p>
-      {% for k, v in portfolio.by_tribunal.items() %}
-      <span class="badge">{{ k }}: {{ v }}</span>
-      {% endfor %}
-    </p>
-    {% else %}
-    <p class="muted">Sem processos no acervo.</p>
-    {% endif %}
-
-    <h2>Distribuição por situação (estimada)</h2>
-    {% if portfolio.by_outcome %}
-    <p>
-      {% for k, v in portfolio.by_outcome.items() %}
-      <span class="badge">{{ outcome_labels.get(k, k) }}: {{ v }}</span>
-      {% endfor %}
-    </p>
-    <p class="muted">Classificação heurística com base no texto da capa/fase. Não substitui análise jurídica.</p>
-    {% else %}
-    <p class="muted">Sem dados de status.</p>
-    {% endif %}
-
-    <h2>Processos monitorados (acervo completo)</h2>
-    {% if portfolio.processes %}
-    <table>
-      <thead>
-        <tr>
-          <th>CNJ</th>
-          <th>Tribunal / Grau</th>
-          <th>Status</th>
-          <th>Classe / Assunto</th>
-          <th>Órgão julgador</th>
-          <th>Critério</th>
-          <th>Última mov.</th>
-          <th>Portal</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in portfolio.processes %}
-        <tr>
-          <td><strong>{{ p.numero_cnj }}</strong></td>
-          <td>{{ p.tribunal }}<br><span class="muted">{{ p.instance_label or p.grau or '—' }}</span></td>
-          <td>{{ p.situacao }}<br><span class="muted">{{ outcome_labels.get(p.outcome, p.outcome) }}</span></td>
-          <td>{{ p.classe }}<br><span class="muted">{{ p.assunto }}</span></td>
-          <td>{{ p.orgao_julgador or '—' }}</td>
-          <td>{{ p.criteria }}</td>
-          <td>{{ p.last_movement_at }}</td>
-          <td>
-            {% if p.official_link %}
-            <a href="{{ p.official_link }}">Consulta oficial</a>
-            {% else %}
-            <span class="muted">—</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="muted">Ainda não há processos cadastrados no banco. Execute BOOTSTRAP para popular o acervo.</p>
-    {% endif %}
-
-    <h2>Cobertura ativa nesta instalação</h2>
-    <ul class="cov">
-      {% for row in coverage %}
-      <li>{{ '✓' if row.enabled else '✗' }} {{ row.label }}{% if not row.enabled %} — {{ row.reason }}{% endif %}</li>
-      {% endfor %}
-    </ul>
+    <h1>Monitor Judicial</h1>
+    <p class="muted">{{ generated_at }} · {{ tz }}</p>
 
     {% if zero %}
-    <h2>Novidades do período</h2>
-    <p><strong>Nenhuma nova movimentação foi identificada nesta janela.</strong> O acervo acima continua sendo monitorado.</p>
+    <div class="zero-box">
+      <p><strong>Nenhuma novidade processual foi identificada desde o último relatório.</strong></p>
+      <p class="muted">As fontes habilitadas continuam sendo monitoradas.</p>
+    </div>
     {% else %}
+
+    <div class="stats">
+      <span class="badge ok">{{ total }} novidade{{ 's' if total != 1 else '' }}</span>
+      <span class="badge alta">{{ urgent_count }} urgente{{ 's' if urgent_count != 1 else '' }}</span>
+    </div>
 
     {% if totals_by_tribunal %}
     <h2>Novidades por tribunal</h2>
@@ -128,7 +42,7 @@
     {% endif %}
 
     {% if urgent %}
-    <h2>Itens urgentes</h2>
+    <h2>Urgentes</h2>
     {% for e in urgent %}
     <div class="item">
       <strong>{% if e.official_link %}<a href="{{ e.official_link }}">{{ e.numero_cnj or 'Sem CNJ' }}</a>{% else %}{{ e.numero_cnj or 'Sem CNJ' }}{% endif %}</strong> — {{ e.tribunal or '—' }}
@@ -142,10 +56,8 @@
     {% endif %}
 
     {% for section_name, items in sections %}
+    {% if items %}
     <h2>{{ section_name }}</h2>
-    {% if not items %}
-    <p class="muted">Nenhum item.</p>
-    {% else %}
     {% for e in items %}
     <div class="item">
       <strong>{% if e.official_link %}<a href="{{ e.official_link }}">{{ e.numero_cnj or 'Sem CNJ' }}</a>{% else %}{{ e.numero_cnj or 'Sem CNJ' }}{% endif %}</strong> — {{ e.tribunal or '—' }} · {{ e.priority }}
@@ -159,21 +71,17 @@
     {% endfor %}
     {% endif %}
 
-    {% if skipped %}
-    <h2>Cobertura não habilitada</h2>
-    <ul>{% for s in skipped %}<li>{{ s }}</li>{% endfor %}</ul>
-    {% endif %}
-
     {% if failures %}
     <h2>Fontes temporariamente indisponíveis</h2>
     <ul>{% for f in failures %}<li>{{ f }}</li>{% endfor %}</ul>
     {% endif %}
 
     <p class="disclaimer">
-      O sistema consolida os eventos e o acervo encontrados nas fontes habilitadas. A situação/status pode
-      ser estimativa textual quando a fonte não informa fase/resultado. A disponibilidade dos dados depende
-      da publicação e do processamento de cada tribunal e fornecedor. Não há garantia de cobertura
-      instantânea ou absoluta.
+      Este relatório lista apenas novidades detectadas desde o envio anterior.
+      A situação/status pode ser estimativa textual quando a fonte não informa fase/resultado.
+      A disponibilidade dos dados depende da publicação e do processamento de cada tribunal.
+      Não há garantia de cobertura instantânea ou absoluta. Validação jurídica deve ser feita
+      no portal oficial do tribunal.
     </p>
   </div>
 </body>

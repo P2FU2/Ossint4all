@@ -57,6 +57,59 @@ def movement_key(
     )
 
 
+def material_movement_tuple(
+    *,
+    movement_code: str | None,
+    data_hora: datetime | str | None,
+    description: str | None,
+    orgao: str | None,
+    complemento: str | None,
+) -> tuple[str, str, str, str, str]:
+    """Representação material da última movimentação (não fingerprint bruto)."""
+    return (
+        str(movement_code or "").strip(),
+        _dt(data_hora),
+        _norm(description),
+        _norm(orgao),
+        _norm(complemento),
+    )
+
+
+def material_movement_from_mapping(data: dict[str, Any] | None) -> tuple[str, str, str, str, str]:
+    data = data or {}
+    return material_movement_tuple(
+        movement_code=str(data.get("movement_code") or data.get("codigo") or "") or None,
+        data_hora=data.get("datetime") or data.get("data_hora") or data.get("last_movement_date"),
+        description=str(data.get("description") or data.get("nome") or data.get("last_movement_name") or "")
+        or None,
+        orgao=str(data.get("orgao") or data.get("orgao_julgador") or "") or None,
+        complemento=str(data.get("complemento") or "") or None,
+    )
+
+
+def movement_identity_hash(
+    *,
+    numero_cnj: str,
+    movement_code: str | None,
+    data_hora: datetime | str | None,
+    description: str | None,
+    orgao: str | None,
+    complemento: str | None,
+) -> str:
+    return sha256_hex(
+        "MOVIMENTACAO_PROCESSUAL",
+        "datajud",
+        numero_cnj,
+        *material_movement_tuple(
+            movement_code=movement_code,
+            data_hora=data_hora,
+            description=description,
+            orgao=orgao,
+            complemento=complemento,
+        ),
+    )
+
+
 def communication_key(
     *,
     source_name: str,

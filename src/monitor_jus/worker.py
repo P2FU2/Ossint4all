@@ -42,7 +42,9 @@ def process_job(job_id: str) -> None:
             return
         bind_job(job.id, job.run_id)
         try:
-            result = _dispatch(session, job.job_type, job.payload or {}, job.run_id)
+            result = _dispatch(
+                session, job.job_type, job.payload or {}, job.run_id, job_id=job.id
+            )
             session.refresh(job)
             if job.status == JobStatus.CANCELLED.value:
                 logger.info("job_cancelled_after_work", extra={"job_id": job.id})
@@ -115,7 +117,14 @@ def process_job(job_id: str) -> None:
             clear_job()
 
 
-def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | None) -> dict[str, Any]:
+def _dispatch(
+    session,
+    job_type: str,
+    payload: dict[str, Any],
+    run_id: str | None,
+    *,
+    job_id: str | None = None,
+) -> dict[str, Any]:
     settings = get_settings()
     if job_type == JobType.HISTORICAL_DISCOVERY.value:
         sync_criteria_from_config(session, settings)
@@ -151,7 +160,9 @@ def _dispatch(session, job_type: str, payload: dict[str, Any], run_id: str | Non
             recipient=payload.get("email_to") or payload.get("recipient"),
         )
     if job_type == JobType.PROCESS_REFRESH.value:
-        return run_tracking(session, settings=settings)
+        return run_tracking(
+            session, settings=settings, parent_job_id=job_id
+        )
     if job_type == JobType.RECONCILIATION.value:
         return run_national_reconciliation(session, settings=settings)
     if job_type == "BOOTSTRAP":

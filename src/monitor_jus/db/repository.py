@@ -86,6 +86,24 @@ class Repository:
         self.session.flush()
         return run
 
+    def has_active_job(
+        self,
+        job_type: str,
+        *,
+        statuses: tuple[str, ...] = (
+            JobStatus.PENDING.value,
+            JobStatus.RUNNING.value,
+            JobStatus.RETRY.value,
+        ),
+    ) -> bool:
+        """True se já existe job do tipo em andamento (evita empilhar trabalhos lentos)."""
+        row = self.session.scalar(
+            select(Job.id)
+            .where(Job.job_type == job_type, Job.status.in_(list(statuses)))
+            .limit(1)
+        )
+        return row is not None
+
     def enqueue_job(
         self,
         run_id: str | None,
@@ -95,22 +113,17 @@ class Repository:
         max_attempts: int = 3,
         idempotency_key: str | None = None,
         available_at: datetime | None = None,
-    ) -> Job:
+        skip_if_active: bool = False,
+    ) -> Job | None:
         if idempotency_key:
+            # Mesma janela nunca gera segundo job (mesmo após SUCCESS)
             existing = self.session.scalar(
-                select(Job).where(
-                    Job.idempotency_key == idempotency_key,
-                    Job.status.in_(
-                        [
-                            JobStatus.PENDING.value,
-                            JobStatus.RUNNING.value,
-                            JobStatus.RETRY.value,
-                        ]
-                    ),
-                )
+                select(Job).where(Job.idempotency_key == idempotency_key)
             )
             if existing:
                 return existing
+        if skip_if_active and self.has_active_job(job_type):
+            return None
         job = Job(
             id=str(uuid4()),
             run_id=run_id,
@@ -300,6 +313,29 @@ class Repository:
         self.session.flush()
         return event
 
+    def create_event_if_absent(
+        self,
+        *,
+        event_identity_key: str,
+        payload_hash: str,
+        **kwargs: Any,
+    ) -> tuple[Event, bool]:
+        """Cria evento ou devolve o existente (dedupe por identity+hash)."""
+        existing = self.session.scalar(
+            select(Event).where(
+                Event.event_identity_key == event_identity_key,
+                Event.payload_hash == payload_hash,
+            )
+        )
+        if existing:
+            return existing, False
+        event = self.create_event(
+            event_identity_key=event_identity_key,
+            payload_hash=payload_hash,
+            **kwargs,
+        )
+        return event, True
+
     def add_event_version(
         self,
         event_id: str,
@@ -401,6 +437,29 @@ class Repository:
     def get_digest(self, digest_id: str) -> Digest | None:
         return self.session.get(Digest, digest_id)
 
+    def find_open_delivery_digest(self) -> Digest | None:
+        """Digest aguardando envio/retry — não deve ser substituído por um novo."""
+        return self.session.scalar(
+            select(Digest)
+            .where(
+                Digest.status.in_(
+                    [
+                        DigestStatus.READY.value,
+                        DigestStatus.DELIVERY_PENDING.value,
+                    ]
+                )
+            )
+            .order_by(Digest.created_at.desc())
+            .limit(1)
+        )
+
+    def digest_event_ids(self, digest_id: str) -> list[str]:
+        return list(
+            self.session.scalars(
+                select(DigestItem.event_id).where(DigestItem.digest_id == digest_id)
+            ).all()
+        )
+
     # --- processes ---
     def upsert_process(self, numero_cnj: str, numero_digits: str, **kwargs: Any) -> Process:
         proc = self.session.scalar(select(Process).where(Process.numero_cnj == numero_cnj))
@@ -438,14 +497,33 @@ class Repository:
     def list_processes(self) -> list[Process]:
         return list(self.session.scalars(select(Process).order_by(Process.numero_cnj.asc())).all())
 
-    def processes_due(self, now: datetime | None = None) -> list[Process]:
+    def processes_due(
+        self,
+        now: datetime | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[Process]:
         now = now or utcnow()
-        return list(
-            self.session.scalars(
-                select(Process).where(
-                    or_(Process.next_check_at.is_(None), Process.next_check_at <= now)
-                )
-            ).all()
+        stmt = (
+            select(Process)
+            .where(or_(Process.next_check_at.is_(None), Process.next_check_at <= now))
+            .order_by(Process.next_check_at.asc().nullsfirst(), Process.created_at.asc())
+        )
+        if limit is not None:
+            stmt = stmt.limit(int(limit))
+        return list(self.session.scalars(stmt).all())
+
+    def count_due_processes(self, now: datetime | None = None) -> int:
+        from sqlalchemy import func
+
+        now = now or utcnow()
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(Process)
+                .where(or_(Process.next_check_at.is_(None), Process.next_check_at <= now))
+            )
+            or 0
         )
 
     def processes_incomplete_capa(self, *, limit: int = 500) -> list[Process]:

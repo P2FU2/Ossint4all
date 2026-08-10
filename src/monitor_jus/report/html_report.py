@@ -108,32 +108,23 @@ def render_digest_html(
     zero: bool = False,
     portfolio: dict[str, Any] | None = None,
 ) -> str:
+    """HTML do digest — somente novidades (portfolio ignorado)."""
     settings = settings or get_settings()
     templates_dir = Path("templates")
     env = Environment(
         loader=FileSystemLoader(str(templates_dir)),
         autoescape=select_autoescape(["html"]),
     )
-    coverage = build_coverage(settings)
-    generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
-    portfolio = portfolio or {
-        "total_processes": 0,
-        "active_count": 0,
-        "undefined_count": 0,
-        "closed_count": 0,
-        "by_oab": {},
-        "by_tribunal": {},
-        "by_outcome": {},
-        "processes": [],
-        "oab_criteria_count": 0,
-    }
+    _ = portfolio  # legado: e-mail não inclui mais acervo
+    generated_at = datetime.now().strftime("%d/%m/%Y · atualizado às %H:%M")
 
     for e in events:
         if not e.official_link:
+            payload = getattr(e, "payload", None)
             e.official_link = resolve_official_link(
                 e.numero_cnj,
                 tribunal=e.tribunal,
-                payload=e.payload if isinstance(e.payload, dict) else None,
+                payload=payload if isinstance(payload, dict) else None,
             )
 
     urgent = [e for e in events if e.priority == Priority.ALTA.value]
@@ -147,10 +138,6 @@ def render_digest_html(
         key = e.tribunal or "N/D"
         totals_by_tribunal[key] = totals_by_tribunal.get(key, 0) + 1
 
-    outcome_labels = {
-        k: OUTCOME_LABELS.get(k, k) for k in (portfolio.get("by_outcome") or {})
-    }
-
     tmpl = env.get_template("email_report.html")
     return tmpl.render(
         generated_at=generated_at,
@@ -159,12 +146,9 @@ def render_digest_html(
         urgent_count=len(urgent),
         urgent=urgent,
         sections=sections,
-        coverage=coverage,
         quarantine_count=quarantine_count,
         totals_by_tribunal=totals_by_tribunal,
         skipped=skipped or [],
         failures=failures or [],
         zero=zero or not events,
-        portfolio=portfolio,
-        outcome_labels=outcome_labels,
     )
