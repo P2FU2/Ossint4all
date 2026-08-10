@@ -1,6 +1,7 @@
 {# csrf_token deve ser passado explicitamente (macros Jinja não herdam contexto) #}
 {% macro progress_row(j, csrf_token='') %}
-<div class="progress-card {% if j.stale %}progress-stale{% endif %}">
+<div class="progress-card {% if j.stale %}progress-stale{% endif %}"
+     {% if j.live_clock and j.started_at_iso %}data-live-progress="1" data-started-at="{{ j.started_at_iso }}" data-server-now="{{ j.server_now_iso }}"{% if j.eta_seconds is not none %} data-eta-seconds="{{ j.eta_seconds }}"{% endif %}{% endif %}>
   <div class="progress-head">
     <div style="min-width:0">
       <strong class="mono">{{ j.job_type }}</strong>
@@ -12,7 +13,7 @@
     </div>
     <div class="progress-meta">
       <span class="mono">{{ j.progress_pct }}%</span>
-      <span class="muted">ETA {{ j.eta_label }}</span>
+      <span class="muted">ETA <span class="js-live-eta">{{ j.eta_label }}</span></span>
     </div>
   </div>
   <div class="progress-track" role="progressbar" aria-valuenow="{{ j.progress_pct }}" aria-valuemin="0" aria-valuemax="100">
@@ -28,7 +29,7 @@
     </span>
   </div>
   <div class="muted" style="font-size:0.8rem;margin-top:6px">
-    Início {{ j.started_at }} · duração {{ j.duration }}
+    Início {{ j.started_at }} · duração <span class="js-live-duration">{{ j.duration }}</span>
     {% if j.heartbeat_at and j.heartbeat_at != '—' %} · heartbeat {{ j.heartbeat_at }}{% endif %}
   </div>
   {% if j.stale %}

@@ -257,19 +257,34 @@ def format_progress_summary(
     done: float | None,
     total: float | None,
     message: str | None,
+    stage: str | None = None,
 ) -> str:
-    """Rótulo legível (critério X/Y · CNJ A/B) em vez de frações cruas."""
+    """Rótulo legível (critério/processo X/Y · CNJ A/B) em vez de frações cruas."""
     msg = (message or "").strip()
+    stage_l = (stage or "").strip().lower()
     parts: list[str] = []
     m_crit = _RE_CRIT.search(msg)
     m_cnj = _RE_CNJ.search(msg)
     if m_crit:
         parts.append(f"Critério {m_crit.group(1)}/{m_crit.group(2)}")
     elif done is not None and total is not None and total > 0:
-        # progresso fracionário por critério (ex.: 0.34 / 4)
-        if total == int(total) and (done != int(done) or total > 1):
+        unit = "Processo"
+        if stage_l in {"tracking", "refresh", "process_refresh"} or msg.lower().startswith(
+            "atualizando"
+        ):
+            unit = "Processo"
+        elif stage_l in {"djen_poll", "discovery", "bootstrap"} or "crit" in stage_l:
+            unit = "Critério"
+        elif total == int(total) and done != int(done):
+            # progresso fracionário dentro de um critério (discovery)
+            unit = "Critério"
+        if unit == "Critério" and total == int(total) and (done != int(done) or total > 1):
             crit_idx = min(int(done) + 1, int(total))
             parts.append(f"Critério {crit_idx}/{int(total)}")
+        elif unit == "Processo" and total == int(total) and total > 1:
+            # done = concluídos; mostra o item atual (1-based) enquanto roda
+            current = min(int(done) + 1, int(total)) if done < total else int(total)
+            parts.append(f"Processo {current}/{int(total)}")
         else:
             parts.append(f"{int(round(done))}/{int(round(total))}")
     if m_cnj:
@@ -277,25 +292,81 @@ def format_progress_summary(
     return " · ".join(parts) if parts else ""
 
 
-def job_progress_dict(job: Any) -> dict[str, Any]:
+def eta_from_wall_clock(
+    *,
+    done: float | None,
+    total: float | None,
+    started_at: datetime | None,
+    now: datetime | None = None,
+    heartbeat_at: datetime | None = None,
+    stale_after_seconds: float = 120.0,
+) -> float | None:
+    """ETA a partir do ritmo real (wall clock), não do snapshot congelado no DB."""
+    if done is None or total is None or not started_at:
+        return None
+    if total <= 0:
+        return None
+    if done >= total:
+        return 0.0
+    if done <= 0:
+        return None
+    now = now or datetime.now(timezone.utc)
+    start = started_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    hb = heartbeat_at
+    if hb is not None and hb.tzinfo is None:
+        hb = hb.replace(tzinfo=timezone.utc)
+    # Sem heartbeat recente o ritmo antigo é enganoso
+    if hb is not None and (now - hb).total_seconds() > stale_after_seconds:
+        return None
+    elapsed = (now - start).total_seconds()
+    if elapsed <= 0:
+        return None
+    rate = float(done) / elapsed
+    if rate <= 0:
+        return None
+    return max(0.0, (float(total) - float(done)) / rate)
+
+
+def job_progress_dict(job: Any, *, now: datetime | None = None) -> dict[str, Any]:
     """Serializa campos de progresso de um Job ORM."""
     pct = int(job.progress_pct or 0) if getattr(job, "progress_pct", None) is not None else 0
     eta = getattr(job, "eta_seconds", None)
     status = getattr(job, "status", "") or ""
+    done = getattr(job, "progress_done", None)
+    total = getattr(job, "progress_total", None)
+    stage = getattr(job, "progress_stage", None) or "—"
+    message = getattr(job, "progress_message", None) or ""
+    started_at = getattr(job, "started_at", None)
+    heartbeat_at = getattr(job, "heartbeat_at", None)
+
     if status == "SUCCESS":
         pct = 100
         eta = 0.0
-    elif status in ("PENDING", "RETRY") and not getattr(job, "started_at", None):
+    elif status in ("PENDING", "RETRY") and not started_at:
         pct = 0
-    done = getattr(job, "progress_done", None)
-    total = getattr(job, "progress_total", None)
-    message = getattr(job, "progress_message", None) or ""
-    summary = format_progress_summary(done=done, total=total, message=message)
+    elif status == "RUNNING" and done is not None and total and float(total) > 0:
+        # % alinhado a done/total (não snapshot atrasado)
+        pct = max(0, min(100, int(round(100.0 * float(done) / float(total)))))
+        live = eta_from_wall_clock(
+            done=float(done),
+            total=float(total),
+            started_at=started_at,
+            now=now,
+            heartbeat_at=heartbeat_at,
+        )
+        if live is not None:
+            eta = live
+
+    summary = format_progress_summary(
+        done=done, total=total, message=message, stage=stage
+    )
     return {
         "progress_pct": pct,
         "progress_done": done,
         "progress_total": total,
-        "progress_stage": getattr(job, "progress_stage", None) or "—",
+        "progress_stage": stage,
         "progress_message": message,
         "progress_summary": summary,
         "eta_seconds": eta,

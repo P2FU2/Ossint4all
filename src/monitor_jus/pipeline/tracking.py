@@ -253,6 +253,7 @@ def run_tracking(
             done=idx,
             total=n_due,
             message=f"Atualizando {proc.numero_cnj}",
+            force=True,
         )
         route = resolve_process_source(proc.numero_cnj, proc.tribunal, settings=settings)
         now = datetime.now(timezone.utc)
@@ -266,12 +267,24 @@ def run_tracking(
             proc.official_link_type = link.link_type
             proc.next_check_at = _next_check(proc.situacao, proc.last_movement_at, freq_cfg)
             outcomes.append({"cnj": proc.numero_cnj, "route": route.source, "skipped": True})
+            report_progress(
+                stage="tracking",
+                done=idx + 1,
+                total=n_due,
+                message=f"Atualizando {proc.numero_cnj}",
+            )
             continue
 
         if route.source != "DATAJUD" or not route.datajud_alias:
             proc.requires_reconciliation = True
             proc.next_check_at = _next_check(proc.situacao, proc.last_movement_at, freq_cfg)
             outcomes.append({"cnj": proc.numero_cnj, "route": route.source, "skipped": True})
+            report_progress(
+                stage="tracking",
+                done=idx + 1,
+                total=n_due,
+                message=f"Atualizando {proc.numero_cnj}",
+            )
             continue
 
         try:
@@ -323,7 +336,6 @@ def run_tracking(
                 rate_limited=True,
             )
             outcomes.append({"cnj": proc.numero_cnj, "code": exc.code, "error": str(exc)})
-            continue
         except SourceOutcomeError as exc:
             errors += 1
             proc.next_check_at = _next_check(
@@ -333,7 +345,13 @@ def run_tracking(
                 failure_streak=1,
             )
             outcomes.append({"cnj": proc.numero_cnj, "code": exc.code, "error": str(exc)})
-            continue
+        # Heartbeat + % após cada CNJ (evita ETA/heartbeat congelados em chamada lenta)
+        report_progress(
+            stage="tracking",
+            done=idx + 1,
+            total=n_due,
+            message=f"Atualizando {proc.numero_cnj}",
+        )
 
     session.flush()
     remaining = 0 if only_incomplete else repo.count_due_processes()

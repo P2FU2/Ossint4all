@@ -37,6 +37,15 @@ def _fmt(dt: Any) -> str:
         return str(dt)[:19]
 
 
+def _iso(dt: Any) -> str:
+    if not dt:
+        return ""
+    try:
+        return dt.astimezone().isoformat()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _duration(start: Any, end: Any) -> str:
     if not start:
         return "—"
@@ -64,17 +73,22 @@ def _is_stale_running(job: Job) -> bool:
 
 
 def _serialize_job(job: Job, run: Run | None = None) -> dict[str, Any]:
-    prog = job_progress_dict(job)
+    now = utcnow()
+    prog = job_progress_dict(job, now=now)
     stale = _is_stale_running(job)
     status = job.status
     status_label = _STATUS_LABELS.get(status, status)
     if stale:
         status_label = "Travado"
+        # ETA congelado/otimista engana quando o worker parou de reportar
+        prog["eta_seconds"] = None
+        prog["eta_label"] = "—"
     can_cancel = status in (
         JobStatus.PENDING.value,
         JobStatus.RUNNING.value,
         JobStatus.RETRY.value,
     )
+    live_clock = status == JobStatus.RUNNING.value and not stale and bool(job.started_at)
     return {
         "id": job.id,
         "job_type": job.job_type,
@@ -89,9 +103,12 @@ def _serialize_job(job: Job, run: Run | None = None) -> dict[str, Any]:
         "max_attempts": job.max_attempts,
         "created_at": _fmt(job.created_at),
         "started_at": _fmt(job.started_at),
+        "started_at_iso": _iso(job.started_at),
+        "server_now_iso": _iso(now),
         "finished_at": _fmt(job.finished_at),
         "heartbeat_at": _fmt(job.heartbeat_at),
-        "duration": _duration(job.started_at, job.finished_at),
+        "duration": _duration(job.started_at, job.finished_at if job.finished_at else now),
+        "live_clock": live_clock,
         "last_error": (job.last_error_message or "")[:280],
         **prog,
     }

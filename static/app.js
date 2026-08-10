@@ -174,3 +174,50 @@ document.body.addEventListener("htmx:afterSwap", (ev) => {
     else hide();
   });
 })();
+
+/* Duração/ETA ao vivo entre refreshes HTMX (a cada 1s) */
+(function () {
+  function formatDuration(secs) {
+    secs = Math.max(0, Math.floor(secs));
+    if (secs < 60) return secs + "s";
+    const mins = Math.floor(secs / 60);
+    const s = secs % 60;
+    if (mins < 60) return mins + "m " + s + "s";
+    const hours = Math.floor(mins / 60);
+    const m = mins % 60;
+    return hours + "h " + m + "m";
+  }
+
+  function tickLiveProgress() {
+    const cards = document.querySelectorAll("[data-live-progress='1'][data-started-at]");
+    const wallNow = Date.now();
+    cards.forEach((card) => {
+      const started = Date.parse(card.getAttribute("data-started-at") || "");
+      if (!Number.isFinite(started)) return;
+      const durEl = card.querySelector(".js-live-duration");
+      if (durEl) durEl.textContent = formatDuration((wallNow - started) / 1000);
+
+      const etaRaw = card.getAttribute("data-eta-seconds");
+      const etaEl = card.querySelector(".js-live-eta");
+      if (!etaEl || etaRaw === null || etaRaw === "") return;
+      const etaBase = parseFloat(etaRaw);
+      if (!Number.isFinite(etaBase)) {
+        etaEl.textContent = "—";
+        return;
+      }
+      // Compensa skew: usa instante do HTML do servidor como âncora
+      const serverNow = Date.parse(card.getAttribute("data-server-now") || "");
+      const anchor = Number.isFinite(serverNow) ? serverNow : wallNow;
+      const remaining = etaBase - (wallNow - anchor) / 1000;
+      etaEl.textContent = remaining <= 0 ? "0s" : formatDuration(remaining);
+    });
+  }
+
+  setInterval(tickLiveProgress, 1000);
+  document.body.addEventListener("htmx:afterSwap", tickLiveProgress);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", tickLiveProgress);
+  } else {
+    tickLiveProgress();
+  }
+})();
