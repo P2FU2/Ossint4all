@@ -15,7 +15,7 @@ from monitor_jus.config import Settings
 from monitor_jus.db.models import Job, Run
 from monitor_jus.db.repository import Repository, utcnow
 from monitor_jus.mail.resend_mailer import parse_recipients
-from monitor_jus.models import JobStatus, RunMode, RunStatus, RunType
+from monitor_jus.models import JobStatus, JobType, RunMode, RunStatus, RunType
 from monitor_jus.web.auth import write_audit
 
 ALLOWED_RUN_TYPES = {
@@ -30,14 +30,22 @@ ALLOWED_RUN_TYPES = {
     RunType.PROCESS_REFRESH.value,
 }
 
-# Jobs pesados que não devem sobrepor discovery/bootstrap
-_HEAVY_JOB_TYPES = {"BOOTSTRAP", "HISTORICAL_DISCOVERY", "DJEN_POLL", "DIARY_SWEEP"}
-_HEAVY_RUN_TYPES = {
+# Exclusão mútua só entre Bootstrap ↔ Discovery (não bloquear pelo poll horário)
+_MUTUAL_EXCLUSION_JOB_TYPES = {"BOOTSTRAP", "HISTORICAL_DISCOVERY"}
+_MUTUAL_EXCLUSION_RUN_TYPES = {
     RunType.BOOTSTRAP.value,
     RunType.HISTORICAL_DISCOVERY.value,
-    RunType.DJEN_POLL.value,
-    RunType.DIARY_SWEEP.value,
 }
+# Limpeza de fila suja ainda inclui poll/sweep (PENDING antigos)
+_STALE_CLEANUP_JOB_TYPES = {
+    "BOOTSTRAP",
+    "HISTORICAL_DISCOVERY",
+    "DJEN_POLL",
+    "DIARY_SWEEP",
+}
+# Alias legado (testes / imports externos)
+_HEAVY_JOB_TYPES = _MUTUAL_EXCLUSION_JOB_TYPES
+_HEAVY_RUN_TYPES = _MUTUAL_EXCLUSION_RUN_TYPES
 _ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value, JobStatus.RETRY.value)
 
 
@@ -71,7 +79,7 @@ def cancel_stale_pending_jobs(
     job_types: set[str] | None = None,
 ) -> int:
     """Cancela jobs PENDING antigos (fila suja) sem heartbeat/início."""
-    types = job_types or _HEAVY_JOB_TYPES
+    types = job_types or _STALE_CLEANUP_JOB_TYPES
     cutoff = utcnow() - timedelta(hours=hours)
     stale = list(
         session.scalars(
@@ -151,12 +159,12 @@ def cleanup_stale_jobs(session: Session) -> dict[str, int]:
     return {"pending_cancelled": pending, "running_reaped": running}
 
 
-def _active_heavy_jobs(session: Session) -> list[Job]:
+def _active_mutual_exclusion_jobs(session: Session) -> list[Job]:
     return list(
         session.scalars(
             select(Job)
             .where(
-                Job.job_type.in_(_HEAVY_JOB_TYPES),
+                Job.job_type.in_(_MUTUAL_EXCLUSION_JOB_TYPES),
                 Job.status.in_(_ACTIVE),
             )
             .order_by(Job.created_at.desc())
@@ -166,15 +174,15 @@ def _active_heavy_jobs(session: Session) -> list[Job]:
 
 
 def assert_heavy_job_allowed(session: Session, run_type: str) -> None:
-    """Bloqueia bootstrap/discovery sobrepostos."""
-    if run_type not in _HEAVY_RUN_TYPES:
+    """Bloqueia Bootstrap e Discovery sobrepostos (poll horário não bloqueia)."""
+    if run_type not in _MUTUAL_EXCLUSION_RUN_TYPES:
         return
-    active = _active_heavy_jobs(session)
+    active = _active_mutual_exclusion_jobs(session)
     if active:
         sample = ", ".join(f"{j.job_type}({j.status})" for j in active[:3])
         raise ValueError(
-            "Já existe discovery/bootstrap em andamento ou na fila "
-            f"({sample}). Aguarde a conclusão antes de disparar outro."
+            "Já existe Bootstrap ou Discovery em andamento ou na fila "
+            f"({sample}). Aguarde a conclusão (ou cancele) antes de disparar outro."
         )
 
 
@@ -209,16 +217,35 @@ def enqueue_from_ui(
     assert_heavy_job_allowed(session, run_type)
 
     repo = Repository(session)
-    idem = f"ui:{run_type}:{uuid4().hex[:12]}"
+    # UI "Reconciliação" → mesmo job do schedule semanal
+    effective_run = run_type
+    job_type = run_type
+    if run_type == RunType.BOOTSTRAP.value:
+        job_type = "BOOTSTRAP"
+    elif run_type in (
+        RunType.RECONCILIATION.value,
+        RunType.NATIONAL_RECONCILIATION.value,
+    ):
+        effective_run = RunType.NATIONAL_RECONCILIATION.value
+        job_type = JobType.NATIONAL_RECONCILIATION.value
+
+    if job_type in {
+        JobType.PROCESS_REFRESH.value,
+        JobType.DAILY_DIGEST.value,
+        JobType.NATIONAL_RECONCILIATION.value,
+    } and repo.has_active_job(job_type):
+        raise ValueError(
+            f"Já existe {job_type} ativo (PENDING/RUNNING). "
+            "Aguarde concluir ou cancele antes de disparar de novo."
+        )
+
+    idem = f"ui:{effective_run}:{uuid4().hex[:12]}"
     run = repo.create_run(
-        run_type,
+        effective_run,
         trigger_type="ui",
         run_mode=RunMode.LIVE.value,
         idempotency_key=idem,
     )
-    job_type = run_type
-    if run_type == RunType.BOOTSTRAP.value:
-        job_type = "BOOTSTRAP"
     repo.enqueue_job(
         run.id,
         job_type,
@@ -230,9 +257,14 @@ def enqueue_from_ui(
         session,
         "run.enqueue",
         username=username,
-        details={"run_type": run_type, "run_id": run.id, "payload": payload or {}},
+        details={
+            "run_type": effective_run,
+            "job_type": job_type,
+            "run_id": run.id,
+            "payload": payload or {},
+        },
     )
-    return {"run_id": run.id, "status": "accepted"}
+    return {"run_id": run.id, "status": "accepted", "job_type": job_type}
 
 
 _CANCELABLE = (JobStatus.PENDING.value, JobStatus.RUNNING.value, JobStatus.RETRY.value)

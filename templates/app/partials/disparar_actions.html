@@ -130,7 +130,8 @@
     <div>
       <h2>Disparar</h2>
       <p class="muted ops-path">
-        Bootstrap e Discovery são bloqueados se já houver um em andamento.
+        Bootstrap e Discovery não rodam ao mesmo tempo (um bloqueia o outro).
+        O poll horário DJEN <strong>não</strong> bloqueia Discovery.
         Salve a configuração acima antes de disparar.
       </p>
     </div>
@@ -143,34 +144,34 @@
         <input type="hidden" name="run_type" value="DAILY_DIGEST" />
         <button class="btn" type="submit" data-confirm="Enfileirar digest?">Digest</button>
       </form>
-      {{ tip("Gera e envia por e-mail só as novidades acumuladas (PENDING_NOTIFY). Não inclui o acervo completo.") }}
+      {{ tip("Envia por e-mail só as novidades (PENDING_NOTIFY). Automático: dias úteis ~07:00. Manual: quando quiser forçar o relatório — não precisa todo dia se o schedule já roda.") }}
     </div>
 
     <div class="run-action">
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="run_type" value="HISTORICAL_DISCOVERY" />
-        <button class="btn secondary" type="submit" data-confirm="Enfileirar Discovery histórico com a janela configurada?">Discovery</button>
+        <button class="btn secondary" type="submit" data-confirm="Enfileirar Discovery (janela curta do ops.yaml)?">Discovery</button>
       </form>
-      {{ tip("Busca no DJEN (comunicações) pelas OABs/nomes ativos, na janela de dias configurada. Achados podem virar novidade no próximo digest.") }}
+      {{ tip("Busca no DJEN pelas OABs/nomes na janela curta (padrão 90 dias). Automático: o DJEN_POLL horário cobre novidades. Manual: sob demanda ou ~1×/semana se suspeitar de CNJ perdido — não substitui o poll.") }}
     </div>
 
     <div class="run-action">
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="run_type" value="BOOTSTRAP" />
-        <button class="btn secondary" type="submit" data-confirm="Rodar Bootstrap (discovery histórica + completar capas faltantes)? Continuar?">Bootstrap</button>
+        <button class="btn secondary" type="submit" data-confirm="Rodar Bootstrap (janela longa + capas faltantes)? Continuar?">Bootstrap</button>
       </form>
-      {{ tip("Varredura longa no DJEN para popular/completar o acervo; opcionalmente enriquece processos sem situação no DataJud. Não flooda o e-mail (baseline).") }}
+      {{ tip("Varredura longa no DJEN + capas DataJud; eventos vão para baseline (não floodam e-mail). Frequência: 1× na 1ª carga ou ao mudar OABs/nomes monitorados — não use no dia a dia.") }}
     </div>
 
     <div class="run-action">
       <form method="post" action="/app/actions/enqueue">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="hidden" name="run_type" value="RECONCILIATION" />
-        <button class="btn secondary" type="submit" data-confirm="Enfileirar reconciliação?">Reconciliação</button>
+        <input type="hidden" name="run_type" value="NATIONAL_RECONCILIATION" />
+        <button class="btn secondary" type="submit" data-confirm="Enfileirar reconciliação nacional?">Reconciliação</button>
       </form>
-      {{ tip("Varre o acervo no DataJud (relações, capas, tribunais). Não é novidade em tempo real — reconcilia o que já está no banco.") }}
+      {{ tip("Marca lacunas/cobertura no acervo (tribunais, rotas DataJud). Automático: semanal. Manual: se houver buraco de cobertura — não traz novidade em tempo real.") }}
     </div>
 
     <div class="run-action">
@@ -179,7 +180,7 @@
         <input type="hidden" name="run_type" value="PROCESS_REFRESH" />
         <button class="btn ghost" type="submit" data-confirm="Enfileirar refresh dos processos devidos?">Refresh</button>
       </form>
-      {{ tip("Atualiza capa/movimentos no DataJud só dos processos com next_check vencido (fila de acompanhamento contínuo).") }}
+      {{ tip("Atualiza capa/movimentos DataJud dos processos com next_check vencido. Automático: a cada 30 min. Manual: para forçar um lote agora — evita disparar se já houver Refresh ativo.") }}
     </div>
   </div>
 </div>
