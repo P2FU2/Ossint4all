@@ -25,6 +25,7 @@ class RateLimitedClient:
         max_concurrency: int = 3,
         timeout: float = 30.0,
         default_headers: dict[str, str] | None = None,
+        proxy: str | None = None,
     ) -> None:
         self.source = source
         self._sem = asyncio.Semaphore(max_concurrency)
@@ -37,6 +38,7 @@ class RateLimitedClient:
         self._thread_sem = threading.Semaphore(max_concurrency)
         self.timeout = timeout
         self.default_headers = default_headers or {}
+        self.proxy = (proxy or "").strip() or None
 
     def request(
         self,
@@ -55,7 +57,10 @@ class RateLimitedClient:
             self._thread_sem.acquire()
             started = time.perf_counter()
             try:
-                with httpx.Client(timeout=self.timeout) as client:
+                client_kwargs: dict[str, Any] = {"timeout": self.timeout}
+                if self.proxy:
+                    client_kwargs["proxy"] = self.proxy
+                with httpx.Client(**client_kwargs) as client:
                     resp = client.request(method, url, headers=hdrs, json=json, params=params)
                 latency = (time.perf_counter() - started) * 1000
                 observe_latency(self.source, latency, operation)

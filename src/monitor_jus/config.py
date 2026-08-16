@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     djen_overlap_hours: int = 48
     # Bootstrap / HISTORICAL_DISCOVERY: janela longa de republicações
     djen_historical_lookback_days: int = 1095
+    # Egress BR via Tailscale/PC: http://100.x.y.z:8899
+    djen_http_proxy: str = ""
 
     datajud_enable: bool = True
     datajud_mode: Literal["selective", "confirm_and_fallback", "fallback_only", "off"] = (

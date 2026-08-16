@@ -284,6 +284,19 @@ docker compose up --build
 
 Ver também `docker-compose.prod.yml`.
 
+### DJEN 403 no Railway (egress Brasil via Tailscale)
+
+A Comunica API bloqueia IP fora do BR. Solução: proxy no PC + Tailscale.
+
+1. **PC** (Tailscale conectado): `scripts/start_djen_egress_proxy.ps1` ou  
+   `python -m monitor_jus.sources.djen.egress_proxy` → porta `8899`
+2. Anote o IP: `tailscale ip -4` (ex.: `100.64.1.2`)
+3. **Worker Railway** na mesma tailnet (`TS_AUTHKEY`) e start  
+   `scripts/start_worker_with_tailscale.sh`
+4. Env do worker: `DJEN_HTTP_PROXY=http://100.64.1.2:8899`
+5. Teste: `python -m monitor_jus.sources.djen.probe` → deve ser **200**
+
+
 ## Agendamento
 
 ```

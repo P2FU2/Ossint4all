@@ -19,11 +19,32 @@ from monitor_jus.sources.djen.params import build_query_params, djen_base_url
 logger = get_logger(__name__)
 
 
+def _proxy_hint(proxy: str) -> str | None:
+    """Mostra host:porta sem credenciais (para health/probe)."""
+    raw = (proxy or "").strip()
+    if not raw:
+        return None
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(raw)
+        host = parsed.hostname or ""
+        port = parsed.port
+        if host and port:
+            return f"{host}:{port}"
+        if host:
+            return host
+    except Exception:  # noqa: BLE001
+        pass
+    return "(configurado)"
+
+
 class DjenClient:
     name = "djen"
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        proxy = (self.settings.djen_http_proxy or "").strip() or None
         self.http = RateLimitedClient(
             source="djen",
             max_concurrency=self.settings.djen_max_concurrency,
@@ -32,6 +53,7 @@ class DjenClient:
                 "Accept": "application/json",
                 "User-Agent": "monitor-jus/1.0",
             },
+            proxy=proxy,
         )
 
     def health(self) -> dict[str, Any]:
@@ -39,6 +61,7 @@ class DjenClient:
             "source": self.name,
             "enabled": self.settings.djen_enable,
             "base_url": djen_base_url(),
+            "http_proxy": _proxy_hint(self.settings.djen_http_proxy),
         }
 
     def search(self, criteria: DjenSearchCriteria) -> dict[str, Any]:
