@@ -55,6 +55,18 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"ok": True, "service": "osint4all"}
 
+    @app.get("/ready")
+    def ready() -> dict:
+        from sqlalchemy import text
+
+        with session_scope() as session:
+            session.execute(text("SELECT 1"))
+        return {"ok": True, "service": "osint4all"}
+
+    @app.get("/metrics")
+    def metrics() -> dict:
+        return {"ok": True, "service": "osint4all"}
+
     @app.on_event("startup")
     def _startup() -> None:
         _assert_production_secrets()

@@ -98,13 +98,19 @@ def write_audit(
 
 def seed_admin_user(session: Session, settings: Settings | None = None) -> None:
     settings = settings or get_settings()
-    count = int(session.scalar(select(func.count()).select_from(User)) or 0)
-    if count > 0:
-        return
     username = (settings.ui_admin_user or "").strip()
     password = settings.ui_admin_password or ""
+    existing = session.scalar(select(User).where(User.username == username)) if username else None
+    if existing:
+        if password and not verify_password(password, existing.password_hash):
+            existing.password_hash = hash_password(password)
+            logger.info("ui_admin_password_synced username=%s", username)
+        existing.active = True
+        existing.role = "admin"
+        return
     if not username or not password:
-        if settings.is_production:
+        count = int(session.scalar(select(func.count()).select_from(User)) or 0)
+        if settings.is_production and count == 0:
             raise ConfigurationError("UI_ADMIN_USER e UI_ADMIN_PASSWORD são obrigatórios em produção")
         logger.warning("ui_admin_not_seeded")
         return

@@ -78,8 +78,34 @@ def session_scope(database_url: str | None = None) -> Iterator[Session]:
         session.close()
 
 
+def _ensure_legacy_columns(engine: Engine) -> None:
+    """O Postgres do Railway ainda tem o schema do Script_Jus — só completa o que falta."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "audit_log" not in tables:
+        return
+    cols = {c["name"] for c in inspector.get_columns("audit_log")}
+    dialect = engine.dialect.name
+    statements: list[str] = []
+    if "username" not in cols:
+        statements.append("ALTER TABLE audit_log ADD COLUMN username VARCHAR(80)")
+    if "investigation_id" not in cols:
+        statements.append("ALTER TABLE audit_log ADD COLUMN investigation_id VARCHAR(36)")
+    if not statements:
+        return
+    with engine.begin() as conn:
+        for sql in statements:
+            if dialect == "postgresql":
+                conn.execute(text(sql.replace("ADD COLUMN", "ADD COLUMN IF NOT EXISTS")))
+            else:
+                conn.execute(text(sql))
+
+
 def init_db(database_url: str | None = None) -> None:
     from osint4all.db.models import Base
 
     engine = get_engine(database_url)
     Base.metadata.create_all(bind=engine)
+    _ensure_legacy_columns(engine)

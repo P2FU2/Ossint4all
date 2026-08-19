@@ -90,6 +90,17 @@ def root() -> RedirectResponse:
     return RedirectResponse("/app", status_code=303)
 
 
+@router.get("/app/dashboard")
+@router.get("/app/status")
+@router.get("/app/processes")
+@router.get("/app/events")
+@router.get("/app/criteria")
+@router.get("/app/acompanhamento")
+@router.get("/app/system")
+def legacy_script_jus_pages() -> RedirectResponse:
+    return RedirectResponse("/app", status_code=303)
+
+
 @router.get("/app", response_class=HTMLResponse)
 def investigations(
     request: Request,

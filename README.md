@@ -91,28 +91,27 @@ docker compose up --build
 
 ## Railway
 
-O app sobe com o `Dockerfile`. Use **Postgres** (o disco do container é efêmero; SQLite some no redeploy).
+Mantenha o projeto que já tem Postgres e o domínio. Não crie outro.
 
-1. Em [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub** → `P2FU2/Script_Jus` (ou `OSINT4ALL` se já renomeou).
-2. No projeto: **New** → **Database** → **PostgreSQL**. O Railway injeta `DATABASE_URL` no serviço web.
-3. No serviço web → **Variables**:
+1. **Source Repo** = `P2FU2/Script_Jus` (não `P2FU2/Ossint4all`). Branch `main`.
+2. Não mexa no `DATABASE_URL` do plugin Postgres.
+3. Variáveis antigas (`RESEND_*`, `EMAIL_*`, `API_TRIGGER_TOKEN`, `CNA_*`, `DJEN_HISTORICAL_*`) podem ficar — o app ignora.
+4. Confirme estas (já usadas no Script_Jus; complete se faltar):
 
 | Variável | Valor |
 |---|---|
 | `ENV` | `production` |
 | `UI_ADMIN_USER` | seu usuário |
-| `UI_ADMIN_PASSWORD` | senha forte |
-| `UI_SESSION_SECRET` | string longa aleatória (ex.: 48 caracteres) |
+| `UI_ADMIN_PASSWORD` | senha do painel (atualiza o admin no boot) |
+| `UI_SESSION_SECRET` | string longa (não deixe `change-me-ui-session-secret`) |
 | `EXPAND_SYNC` | `true` |
 
-Opcionais (só se tiver chave): `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `OPENCORPORATES_API_TOKEN`, `OPENROUTER_API_KEY`.
+Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`.
 
-4. **Settings** → **Networking** → **Generate Domain**. O painel fica em `https://SEU-DOMINIO.up.railway.app/login`.
-5. Health check: `GET /health` (já está no `railway.toml`).
+5. Custom Start Command: pode continuar `python -m monitor_jus.main serve` (há um shim). O ideal é `python -m osint4all.main serve --host 0.0.0.0 --port $PORT`.
+6. Health check: `/health`. Login: `https://authenticadm.org/login`.
 
-DJEN/Comunica costuma exigir IP no Brasil. No Railway (EU/US) esse conector pode falhar; CNPJ, TSE, Wikidata e username público seguem ok.
-
-Não commite `.env`. Gere o segredo localmente, por exemplo:
+DJEN/Comunica costuma falhar fora do Brasil. CNPJ, TSE, Wikidata e username público seguem ok.
 
 ```powershell
 python -c "import secrets; print(secrets.token_urlsafe(48))"

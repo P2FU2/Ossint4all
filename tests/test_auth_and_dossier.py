@@ -22,6 +22,9 @@ def test_seed_admin(settings) -> None:
         users = session.scalars(select(User)).all()
         assert len(users) == 1
         assert users[0].role == "admin"
+        settings.ui_admin_password = "outra-senha"
+        seed_admin_user(session, settings)
+        assert verify_password("outra-senha", users[0].password_hash)
 
 
 def test_dossier_contains_citations(settings) -> None:

@@ -25,3 +25,17 @@ def test_railway_postgres_url() -> None:
     assert normalize_database_url("postgres://u:p@host:5432/db") == "postgresql+psycopg://u:p@host:5432/db"
     assert normalize_database_url("postgresql://u:p@host/db") == "postgresql+psycopg://u:p@host/db"
     assert normalize_database_url("sqlite:///data/osint4all.db") == "sqlite:///data/osint4all.db"
+
+
+def test_legacy_audit_log_columns(tmp_path) -> None:
+    from sqlalchemy import create_engine, inspect, text
+
+    from osint4all.db.session import _ensure_legacy_columns
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}", future=True)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE audit_log (id VARCHAR(36) PRIMARY KEY, action VARCHAR(64), details TEXT)"))
+    _ensure_legacy_columns(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("audit_log")}
+    assert "username" in cols
+    assert "investigation_id" in cols
