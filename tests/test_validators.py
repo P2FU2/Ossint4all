@@ -27,6 +27,19 @@ def test_railway_postgres_url() -> None:
     assert normalize_database_url("sqlite:///data/osint4all.db") == "sqlite:///data/osint4all.db"
 
 
+def test_railway_serve_bind_keeps_legacy_8000() -> None:
+    from osint4all.main import resolve_serve_bind
+
+    host, port, extra = resolve_serve_bind({"PORT": "8080"}, "127.0.0.1", 8000)
+    assert host == "0.0.0.0"
+    assert port == 8080
+    assert extra == [8000]
+
+    host, port, extra = resolve_serve_bind({"PORT": "8000"}, "127.0.0.1", 8000)
+    assert port == 8000
+    assert extra == []
+
+
 def test_legacy_audit_log_columns(tmp_path) -> None:
     from sqlalchemy import create_engine, inspect, text
 

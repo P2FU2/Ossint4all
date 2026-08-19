@@ -108,8 +108,9 @@ Mantenha o projeto que já tem Postgres e o domínio. Não crie outro.
 
 Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`.
 
-5. Custom Start Command: pode continuar `python -m monitor_jus.main serve` (há um shim). O ideal é `python -m osint4all.main serve --host 0.0.0.0 --port $PORT`.
-6. Health check: `/health`. Login: `https://authenticadm.org/login`.
+5. Custom Start Command: `python -m osint4all.main serve --host 0.0.0.0` (sem `--port 8000`; o app usa `$PORT` e também escuta 8000 para o domínio antigo).
+6. Em **Settings → Networking**, no domínio `authenticadm.org`, a porta-alvo deve ser **8000** ou **8080** (as duas funcionam). Se o site mostrar "Application failed to respond" com healthcheck verde, mude essa porta para a mesma do log `serve host=0.0.0.0 port=...`.
+7. Health check: `/health`. Login: `https://authenticadm.org/login`.
 
 DJEN/Comunica costuma falhar fora do Brasil. CNPJ, TSE, Wikidata e username público seguem ok.
 
