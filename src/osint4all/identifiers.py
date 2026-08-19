@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from osint4all.security import only_digits
 from osint4all.validators import (
+    format_plate,
     looks_like_email,
     looks_like_phone,
     looks_like_plate,
@@ -14,6 +15,7 @@ from osint4all.validators import (
     looks_like_username,
     normalize_cnj,
     normalize_oab_numero,
+    normalize_plate,
     validate_cnpj,
     validate_cpf,
 )
@@ -61,8 +63,7 @@ def canonical_key(kind: str, value: str) -> str:
     if kind == "URL":
         return f"url:{(value or '').strip().rstrip('/').lower()}"
     if kind == "PLATE":
-        plate = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
-        return f"plate:{plate}"
+        return f"plate:{normalize_plate(value)}"
     if kind == "NAME":
         return f"name:{_collapse_name(value).casefold()}"
     return f"{kind.lower()}:{(value or '').strip().casefold()}"
@@ -79,7 +80,7 @@ def entity_type_for_kind(kind: str) -> str:
         "CNJ": "CASE",
         "USERNAME": "PROFILE",
         "URL": "PROFILE",
-        "PLATE": "ASSET",
+        "PLATE": "VEHICLE",
     }.get(kind.upper(), "PERSON")
 
 
@@ -101,6 +102,8 @@ def parse_seed(raw: str, *, forced_kind: str | None = None) -> ParsedSeed | None
         display = _collapse_name(text)
     elif kind == "USERNAME":
         display = text.lstrip("@")
+    elif kind == "PLATE":
+        display = format_plate(text)
     return ParsedSeed(
         kind=kind,
         value=text,

@@ -59,7 +59,7 @@ KIND_TO_BRANCHES = {
     "CNJ": {"Brasil · oficiais", "Tribunais e consultas (Brazuca)"},
     "URL": {"Domain Name", "IP Address", "Suíte local (T)"},
     "OAB": {"Brasil · oficiais", "Cadastros profissionais e empresa"},
-    "PLATE": {"Transportation"},
+    "PLATE": {"Transportation", "Brasil · oficiais"},
 }
 
 

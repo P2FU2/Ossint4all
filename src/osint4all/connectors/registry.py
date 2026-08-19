@@ -11,6 +11,8 @@ from osint4all.connectors.opencorporates import OpenCorporatesConnector
 from osint4all.connectors.tse import TseConnector
 from osint4all.connectors.transparencia import TransparenciaConnector
 from osint4all.connectors.crtsh import CrtshConnector
+from osint4all.connectors.plate_public import PlatePublicConnector
+from osint4all.connectors.socio_search import SocioSearchConnector
 from osint4all.connectors.username_public import UsernamePublicConnector
 from osint4all.connectors.web_search import WebSearchConnector
 from osint4all.connectors.wikidata import WikidataConnector
@@ -26,6 +28,8 @@ _BUILDERS = {
     "web_search": WebSearchConnector,
     "username_public": UsernamePublicConnector,
     "crtsh": CrtshConnector,
+    "plate_public": PlatePublicConnector,
+    "socio_search": SocioSearchConnector,
 }
 
 
@@ -47,6 +51,8 @@ def enabled_connector_names(settings: Settings | None = None) -> list[str]:
         "web_search": settings.web_search_enable,
         "username_public": settings.username_public_enable,
         "crtsh": settings.crtsh_enable,
+        "plate_public": settings.plate_public_enable,
+        "socio_search": settings.socio_search_enable,
     }
     return [name for name in ALL_CONNECTORS if flags.get(name)]
 

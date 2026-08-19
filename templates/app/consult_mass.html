@@ -1,0 +1,65 @@
+{% if mass.error %}
+<div class="result-banner error" role="alert">{{ mass.error }}</div>
+{% else %}
+<article class="result-card kind-massa">
+  <header class="result-head">
+    <p class="type-tag">Busca em massa</p>
+    <h2>{{ mass.title }}</h2>
+    <p class="lede">{{ mass.summary }}</p>
+  </header>
+
+  {% if mass.derived %}
+  <p class="muted">Correlatos derivados: {% for k, v in mass.derived %}{{ k }}={{ v }}{% if not loop.last %}; {% endif %}{% endfor %}</p>
+  {% endif %}
+
+  {% for part in mass.parts %}
+  <section class="mass-part">
+    <p class="type-tag">{{ part.kind_label }}</p>
+    <h3>{{ part.title }}</h3>
+    <p class="lede">{{ part.summary }}</p>
+    {% if part.facts %}
+    <dl class="fact-grid">
+      {% for label, value in part.facts %}
+      <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
+      {% endfor %}
+    </dl>
+    {% endif %}
+    {% if part.hits %}
+    <ul class="hit-list">
+      {% for hit in part.hits %}
+      <li>
+        {% if hit.url %}<a href="{{ hit.url }}" target="_blank" rel="noopener">{{ hit.title }}</a>
+        {% else %}<strong>{{ hit.title }}</strong>{% endif %}
+        <span class="muted">{{ hit.meta }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <footer class="result-actions">
+    <form class="save-form" method="post" action="/app/consultar/atribuir">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {% for part in mass.parts if part.ok %}
+      <input type="hidden" name="kinds" value="{{ part.kind }}" />
+      <input type="hidden" name="values" value="{{ part.query }}" />
+      {% endfor %}
+      {% if cases %}
+      <label class="save-extra" data-tip="O caso que recebe estes identificadores">Caso
+        <select name="investigation_id">
+          {% for c in cases %}
+          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn primary" type="submit" data-tip="Adiciona todos os identificadores ao caso e expande o grafo">Adicionar ao caso</button>
+      {% else %}
+      <button class="btn primary" type="submit" formaction="/app/consultar/grafo" formmethod="post" name="kind" value="{{ mass.kind }}" data-tip="Ainda não há caso. Isto cria um e guarda a semente principal.">Guardar no grafo</button>
+      <input type="hidden" name="value" value="{{ mass.query }}" />
+      {% endif %}
+    </form>
+    <a class="btn ghost" href="/app?modo=massa" data-tip="Nova busca em massa">Outra massa</a>
+  </footer>
+</article>
+{% endif %}

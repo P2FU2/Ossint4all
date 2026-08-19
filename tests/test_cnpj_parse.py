@@ -49,3 +49,5 @@ def test_parse_qsa_creates_partners_and_admin() -> None:
     assert result.evidence
     org_key = canonical_key("CNPJ", "33000167000101")
     assert any(e.to_ref == org_key for e in result.edges)
+    org = next(e for e in result.entities if e.kind == "CNPJ" and e.value == "33000167000101")
+    assert "razao_social" in org.attrs

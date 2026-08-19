@@ -6,14 +6,18 @@ from typing import Any
 
 from osint4all.config import Settings
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
+from osint4all.connectors.plate_public import extract_owner_mentions, extract_vehicle_mentions, parse_declared_owner
 from osint4all.db.models import Entity
 from osint4all.exceptions import FailedAuthentication, SkippedDisabled
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
+from osint4all.validators import format_plate
 
 
 def parse_web_hits(hits: list[dict[str, Any]], *, origin_key: str) -> ConnectorResult:
     out = ConnectorResult()
+    seen_owners: set[str] = set()
+    vehicle_hints: list[str] = []
     for hit in hits[:10]:
         url = str(hit.get("url") or hit.get("link") or "")
         title = str(hit.get("title") or url)
@@ -40,6 +44,29 @@ def parse_web_hits(hits: list[dict[str, Any]], *, origin_key: str) -> ConnectorR
                 entity_ref=ref,
             )
         )
+        blob = f"{title} {snippet}"
+        if origin_key.startswith("plate:"):
+            for name in extract_owner_mentions(blob):
+                key = name.casefold()
+                if key in seen_owners:
+                    continue
+                seen_owners.add(key)
+                out.merge(parse_declared_owner(origin_key, owner_name=name, source="mencao_publica", confidence=0.32))
+            for model in extract_vehicle_mentions(blob):
+                if model not in vehicle_hints:
+                    vehicle_hints.append(model)
+    if origin_key.startswith("plate:") and vehicle_hints:
+        plate = origin_key.split(":", 1)[1]
+        out.entities.append(
+            FoundEntity(
+                entity_type="VEHICLE",
+                kind="PLATE",
+                value=format_plate(plate),
+                display_name=format_plate(plate),
+                attrs={"mencoes_modelo": vehicle_hints},
+                confidence=0.35,
+            )
+        )
     return out
 
 
@@ -64,12 +91,16 @@ class WebSearchConnector:
         }
 
     def accepts(self, entity: Entity) -> bool:
-        return entity.entity_type in {"PERSON", "ORG"} and bool(entity.display_name)
+        return entity.entity_type in {"PERSON", "ORG", "VEHICLE", "ASSET"} and bool(entity.display_name)
 
     def collect(self, entity: Entity, ctx: ExpandContext) -> ConnectorResult:
         if not self.settings.web_search_enable:
             raise SkippedDisabled("busca web desabilitada")
         query = entity.display_name
+        if entity.canonical_key.startswith("plate:"):
+            plate = entity.canonical_key.split(":", 1)[1]
+            pretty = format_plate(plate)
+            query = f'"{plate}" OR "{pretty}" (placa OR veículo OR proprietário)'
         if self.settings.brave_search_api_key:
             return self._brave(query, entity.canonical_key)
         if self.settings.google_cse_api_key and self.settings.google_cse_cx:

@@ -1,3 +1,9 @@
+from osint4all.connectors.socio_search import extract_cnpjs, parse_socio_hits
+from osint4all.connectors.plate_public import (
+    extract_owner_mentions,
+    parse_plate_enrichment,
+    uf_from_plate_series,
+)
 from osint4all.connectors.crtsh import parse_crtsh_rows
 from osint4all.connectors.opencorporates import parse_opencorporates
 from osint4all.connectors.transparencia import parse_transparencia_rows
@@ -60,3 +66,53 @@ def test_crtsh_names() -> None:
     names = {e.display_name for e in result.entities}
     assert "exemplo.gov.br" in names
     assert result.evidence
+
+
+def test_plate_enrichment_and_owner() -> None:
+    assert uf_from_plate_series("BFA1A23") == "SP"
+    assert uf_from_plate_series("AAA1A11") == "PR"
+    assert extract_owner_mentions("Veículo em nome de Maria Silva Souza, placa ABC-1D23") == ["Maria Silva Souza"]
+    result = parse_plate_enrichment(
+        "ABC1D23",
+        origin_key="plate:ABC1D23",
+        owner_name="Joao da Silva",
+        owner_cpf="529.982.247-25",
+    )
+    assert any(e.entity_type == "VEHICLE" for e in result.entities)
+    assert any(e.entity_type == "PERSON" for e in result.entities)
+    assert any(e.rel_type == "PROPRIETARIO" for e in result.edges)
+    assert result.evidence
+
+
+def test_socio_search_hits() -> None:
+    assert extract_cnpjs("empresa 07.810.004/0001-84 e outra") == ["07810004000184"]
+    result = parse_socio_hits(
+        [
+            {
+                "cnpj": "07.810.004/0001-84",
+                "razao_social": "MMONOECO AGB",
+                "municipio": "GARUVA",
+                "uf": "SC",
+                "situacao_cadastral": "ATIVA",
+            }
+        ],
+        origin_key="name:theofilos rifiotis",
+        source_label="teste",
+    )
+    assert any(e.entity_type == "ORG" for e in result.entities)
+    assert any(e.rel_type == "SOCIO" for e in result.edges)
+
+
+def test_web_hits_extract_plate_owner() -> None:
+    web = parse_web_hits(
+        [
+            {
+                "url": "https://exemplo.com/noticia",
+                "title": "Acidente",
+                "snippet": "O Honda Civic 2018 em nome de Ana Paula Costa foi apreendido.",
+            }
+        ],
+        origin_key="plate:ABC1D23",
+    )
+    assert any(e.rel_type == "PROPRIETARIO" for e in web.edges)
+    assert any(e.entity_type == "PERSON" for e in web.entities)

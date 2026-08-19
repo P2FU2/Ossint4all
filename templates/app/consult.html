@@ -1,0 +1,59 @@
+{% extends "app/base.html" %}
+{% block title %}Consultar{% endblock %}
+{% block content %}
+<div class="consult-wrap">
+  <ol class="flow-rail" aria-label="Como consultar">
+    <li class="is-done">Tipo</li>
+    <li class="{% if result %}is-done{% else %}is-now{% endif %}">Valor</li>
+    <li class="{% if result %}is-now{% else %}is-next{% endif %}">Resultado</li>
+    <li class="is-next">Grafo, se quiser</li>
+  </ol>
+
+  <section class="consult-hero">
+    <p class="eyebrow" data-tip="Consulta pontual. Não cria caso até você clicar em Guardar.">Consulta avulsa</p>
+    <h1>O que você quer saber agora?</h1>
+    <p class="lede">Placa, rede social, telefone, sócio, CNPJ, processo. Resultado na hora. O grafo só nasce se você guardar.</p>
+  </section>
+
+  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="button[type=submit]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div class="mode-rail" role="radiogroup" aria-label="Tipo de consulta">
+      {% for key, label, tip, ph in modes %}
+      <label class="mode-chip" data-tip="{{ tip }}" data-ph="{{ ph }}">
+        <input type="radio" name="modo" value="{{ key }}" {% if mode == key %}checked{% endif %} />
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="consult-bar">
+      <label class="sr-only" for="q">Identificador</label>
+      <input id="q" name="q" autofocus autocomplete="off" value="{{ q or '' }}" placeholder="ABC1D23, @jornalista, nome do sócio…" data-tip="Cole o valor e Enter. Em Detectar, o tipo é reconhecido sozinho. Atalho: /" />
+      <button class="btn primary" type="submit" data-tip="Consulta só a fonte pública deste tipo. Sem criar caso.">Consultar</button>
+    </div>
+    <p id="consult-hint" class="consult-hint">Enter consulta · / foca o campo · Guardar é opcional</p>
+  </form>
+
+  <div id="consult-wait" class="htmx-indicator consult-wait" role="status">
+    <span class="spinner" aria-hidden="true"></span>
+    Consultando fontes públicas…
+  </div>
+  <div id="consult-result" class="consult-result" aria-live="polite">
+    {% if mass %}
+    {% include "app/consult_mass.html" %}
+    {% elif result %}
+    {% include "app/consult_result.html" %}
+    {% else %}
+    <div class="consult-empty">
+      <p class="consult-empty-kicker">Fluxo</p>
+      <ol class="empty-steps">
+        <li><strong>Escolha o tipo</strong> — ou deixe em Detectar.</li>
+        <li><strong>Digite o valor</strong> — placa, @user, telefone, nome…</li>
+        <li><strong>Leia o resultado</strong> — fatos, fontes e o que não dá para saber.</li>
+        <li><strong>Guarde só se precisar</strong> — aí sim nasce o grafo do caso.</li>
+      </ol>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

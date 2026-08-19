@@ -1,0 +1,82 @@
+{% if result.error %}
+<div class="result-banner error" role="alert">{{ result.error }}</div>
+{% else %}
+<article class="result-card kind-{{ result.kind|lower }}">
+  <header class="result-head">
+    <p class="type-tag">{{ result.kind_label }}</p>
+    <h2>{{ result.title }}</h2>
+    <p class="lede">{{ result.summary }}</p>
+  </header>
+
+  {% if result.facts %}
+  <dl class="fact-grid">
+    {% for label, value in result.facts %}
+    <div>
+      <dt>{{ label }}</dt>
+      <dd>{{ value }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  {% endif %}
+
+  {% if result.hits %}
+  <ul class="hit-list">
+    {% for hit in result.hits %}
+    <li>
+      {% if hit.url %}
+      <a href="{{ hit.url }}" target="_blank" rel="noopener">{{ hit.title }}</a>
+      {% else %}
+      <strong>{{ hit.title }}</strong>
+      {% endif %}
+      <span class="muted">{{ hit.meta }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if result.notes %}
+  <ul class="note-list">
+    {% for note in result.notes %}
+    <li>{{ note }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <footer class="result-actions">
+    {% if cases %}
+    <form class="save-form" method="post" action="/app/consultar/atribuir">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="kind" value="{{ result.kind }}" />
+      <input type="hidden" name="value" value="{{ result.query }}" />
+      {% if result.kind == "PLATE" %}
+      <label class="save-extra" data-tip="Opcional. Só se você já tem o nome de fonte lícita.">
+        Dono conhecido
+        <input name="owner" placeholder="Nome (opcional)" autocomplete="off" />
+      </label>
+      {% endif %}
+      <label class="save-extra" data-tip="Caso que recebe este identificador">Caso
+        <select name="investigation_id">
+          {% for c in cases %}
+          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn primary" type="submit" data-tip="Adiciona ao caso escolhido e expande o grafo">Adicionar ao caso</button>
+    </form>
+    {% endif %}
+    <form class="save-form" method="post" action="/app/consultar/grafo">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="kind" value="{{ result.kind }}" />
+      <input type="hidden" name="value" value="{{ result.query }}" />
+      {% if result.kind == "PLATE" and not cases %}
+      <label class="save-extra">Dono conhecido
+        <input name="owner" placeholder="Nome (opcional)" autocomplete="off" />
+      </label>
+      {% endif %}
+      <button class="btn" type="submit" data-tip="Cria um caso novo só com este resultado">Novo caso</button>
+    </form>
+    <a class="btn" href="/app/ferramentas?tool={% if result.kind == 'USERNAME' %}username{% elif result.kind == 'PLATE' %}plate{% elif result.kind == 'PHONE' %}phone{% elif result.kind == 'CNPJ' %}cnpj{% else %}massa{% endif %}&amp;q={{ result.query|urlencode }}" data-tip="Abre a suíte embutida neste tipo">Ferramentas</a>
+    <a class="btn ghost" href="/app?modo={{ result.kind }}" data-tip="Nova consulta do mesmo tipo">Outra consulta</a>
+  </footer>
+</article>
+{% endif %}

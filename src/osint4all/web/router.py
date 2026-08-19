@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from osint4all.catalog.framework import load_framework_tree, matching_branches, tree_stats
+from osint4all.catalog.framework import load_framework_tree
 from osint4all.documents.metadata import ingest_local_pdf
 from osint4all.config import ALL_CONNECTORS, get_settings
 from osint4all.paths import project_root
@@ -16,8 +16,11 @@ from osint4all.connectors.registry import connector_health, enabled_connector_na
 from osint4all.db.models import AuditLog, Edge, Entity, Evidence, ExpansionJob, Investigation, User
 from osint4all.db.repository import enqueue_expand, graph_payload, job_counts
 from osint4all.graph.expand import process_pending_jobs
-from osint4all.graph.seed import create_investigation
+from osint4all.consult import MODES, ConsultResult, run_consult
+from osint4all.graph.seed import add_seed_entities, attach_plate_owner, create_investigation
+from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results
 from osint4all.identifiers import parse_seed, parse_seed_lines
+from osint4all.validators import looks_like_plate
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
 from osint4all.security import mask_identifier
 from osint4all.web.auth import (
@@ -37,6 +40,44 @@ router = APIRouter()
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def _cases(session: Session) -> list[Investigation]:
+    return list(session.scalars(select(Investigation).order_by(desc(Investigation.created_at))).all())
+
+
+def _with_cases(ctx: dict, request: Request, session: Session) -> dict:
+    rows = _cases(session)
+    cid = request.session.get("current_case_id")
+    ctx["cases"] = rows
+    ctx["current_case_id"] = cid
+    ctx["current_case"] = next((row for row in rows if row.id == cid), None)
+    return ctx
+
+
+def _assign_seeds(
+    session: Session,
+    inv: Investigation,
+    parts: list[ConsultResult],
+    *,
+    owner: str = "",
+) -> int:
+    seeds = seeds_from_results(parts)
+    if not seeds:
+        return 0
+    add_seed_entities(session, inv, seeds, max_attempts=get_settings().job_max_attempts)
+    plate = next((s for s in seeds if s.kind == "PLATE"), None)
+    if plate and owner.strip():
+        attach_plate_owner(
+            session,
+            inv,
+            plate=plate.value,
+            owner_name=owner.strip(),
+            max_attempts=get_settings().job_max_attempts,
+        )
+    if get_settings().expand_sync:
+        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    return len(seeds)
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -102,6 +143,118 @@ def legacy_script_jus_pages() -> RedirectResponse:
 
 
 @router.get("/app", response_class=HTMLResponse)
+def consult_home(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    ctx = template_context(request, user)
+    ctx.update({"nav": "consultar", "modes": MODES, "mode": request.query_params.get("modo") or "auto"})
+    _with_cases(ctx, request, session)
+    return templates.TemplateResponse(request, "app/consult.html", ctx)
+
+
+@router.post("/app/consultar", response_class=HTMLResponse)
+def consult_run(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    q: str = Form(""),
+    modo: str = Form("auto"),
+) -> HTMLResponse:
+    require_csrf(request, csrf_token)
+    ctx = template_context(request, user)
+    ctx.update({"q": q, "modo": modo, "nav": "consultar", "modes": MODES, "mode": modo})
+    _with_cases(ctx, request, session)
+    if (modo or "").lower() == "massa":
+        mass = run_mass(q)
+        write_audit(session, "consult.mass", username=user.username, details={"ok": mass.ok, "parts": len(mass.parts)})
+        ctx["mass"] = mass
+        template = "app/consult_mass.html" if request.headers.get("HX-Request") else "app/consult.html"
+        return templates.TemplateResponse(request, template, ctx)
+    result = run_consult(q, mode=modo)
+    write_audit(session, "consult.run", username=user.username, details={"kind": result.kind, "ok": result.ok})
+    ctx["result"] = result
+    template = "app/consult_result.html" if request.headers.get("HX-Request") else "app/consult.html"
+    return templates.TemplateResponse(request, template, ctx)
+
+
+@router.post("/app/consultar/grafo")
+def consult_to_graph(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    kind: str = Form(""),
+    value: str = Form(""),
+    owner: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    seed = parse_seed(value, forced_kind=kind or None)
+    if not seed:
+        request.session["flash"] = {"level": "error", "message": "Não deu para abrir o grafo com esse valor."}
+        return RedirectResponse("/app", status_code=303)
+    inv = create_investigation(
+        session,
+        title=f"Consulta · {seed.display_name}",
+        hypothesis="Gerada a partir de uma consulta rápida.",
+        seeds=[seed],
+        connectors=list(enabled_connector_names()),
+        max_depth=get_settings().default_max_depth,
+        monitor=False,
+        created_by=user.username,
+        max_attempts=get_settings().job_max_attempts,
+    )
+    if seed.kind == "PLATE":
+        attach_plate_owner(
+            session,
+            inv,
+            plate=value,
+            owner_name=owner.strip(),
+            max_attempts=get_settings().job_max_attempts,
+        )
+    write_audit(session, "investigation.from_consult", username=user.username, investigation_id=inv.id, details={"kind": seed.kind})
+    session.commit()
+    if get_settings().expand_sync:
+        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.post("/app/consultar/atribuir")
+def consult_assign(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    kind: str = Form(""),
+    value: str = Form(""),
+    owner: str = Form(""),
+    investigation_id: str = Form(""),
+    values: list[str] = Form(default=[]),
+    kinds: list[str] = Form(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    target_id = investigation_id or request.session.get("current_case_id") or ""
+    inv = session.get(Investigation, target_id) if target_id else None
+    if not inv:
+        request.session["flash"] = {"level": "error", "message": "Escolha um caso corrente ou crie um em Montar caso."}
+        return RedirectResponse("/app/casos", status_code=303)
+    parts: list[ConsultResult] = []
+    if value:
+        parts.append(ConsultResult(kind=kind, query=value, title=value, summary="", ok=True))
+    for item_kind, item_value in zip(kinds, values, strict=False):
+        if item_value:
+            parts.append(ConsultResult(kind=item_kind, query=item_value, title=item_value, summary="", ok=True))
+    added = _assign_seeds(session, inv, parts, owner=owner)
+    request.session["current_case_id"] = inv.id
+    write_audit(session, "investigation.assign_consult", username=user.username, investigation_id=inv.id, details={"added": added})
+    session.commit()
+    request.session["flash"] = {"level": "ok", "message": f"{added} identificador(es) adicionados a {inv.title}."}
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.get("/app/casos", response_class=HTMLResponse)
 def investigations(
     request: Request,
     user: User = Depends(current_user),
@@ -160,6 +313,9 @@ def create_case(
     seed_email: str = Form(""),
     seed_phone: str = Form(""),
     seed_username: str = Form(""),
+    seed_plate: str = Form(""),
+    seed_plate_owner: str = Form(""),
+    seed_plate_cpf: str = Form(""),
     max_depth: int = Form(2),
     monitor: str = Form(""),
     connectors: list[str] = Form(default=[]),
@@ -173,6 +329,9 @@ def create_case(
         parse_seed(seed_email, forced_kind="EMAIL"),
         parse_seed(seed_phone, forced_kind="PHONE"),
         parse_seed(seed_username, forced_kind="USERNAME"),
+        parse_seed(seed_plate, forced_kind="PLATE") if looks_like_plate(seed_plate) else None,
+        parse_seed(seed_plate_cpf, forced_kind="CPF"),
+        parse_seed(seed_plate_owner, forced_kind="NAME"),
     ]
     seen = {s.canonical_key for s in parsed}
     for extra in extras:
@@ -194,6 +353,15 @@ def create_case(
         created_by=user.username,
         max_attempts=get_settings().job_max_attempts,
     )
+    if looks_like_plate(seed_plate):
+        attach_plate_owner(
+            session,
+            inv,
+            plate=seed_plate,
+            owner_name=seed_plate_owner,
+            owner_cpf=seed_plate_cpf,
+            max_attempts=get_settings().job_max_attempts,
+        )
     write_audit(
         session,
         "investigation.create",
@@ -219,6 +387,7 @@ def graph_page(
     if not inv:
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app", status_code=303)
+    request.session["current_case_id"] = inv.id
     ctx = template_context(request, user)
     ctx.update(
         {
@@ -236,6 +405,50 @@ def graph_page(
         }
     )
     return templates.TemplateResponse(request, "app/graph.html", ctx)
+
+
+@router.post("/app/casos/{investigation_id}/usar")
+def use_case(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
+        return RedirectResponse("/app/casos", status_code=303)
+    request.session["current_case_id"] = inv.id
+    request.session["flash"] = {"level": "ok", "message": f"Caso corrente: {inv.title}."}
+    nxt = request.query_params.get("next") or "/app"
+    return RedirectResponse(nxt, status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/editar")
+def edit_case(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    title: str = Form(""),
+    hypothesis: str = Form(""),
+    max_depth: int = Form(2),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return RedirectResponse("/app/casos", status_code=303)
+    if title.strip():
+        inv.title = title.strip()[:255]
+    inv.hypothesis = hypothesis.strip() or None
+    inv.max_depth = max(0, min(max_depth, 4))
+    write_audit(session, "investigation.edit", username=user.username, investigation_id=inv.id)
+    session.commit()
+    request.session["flash"] = {"level": "ok", "message": "Caso atualizado."}
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
 @router.get("/app/casos/{investigation_id}/grafo.json")
@@ -295,6 +508,19 @@ def entity_page(
         "NAME" if entity.entity_type == "PERSON" else entity.entity_type
     )
     seed_q = seed_ident.value if seed_ident else entity.display_name
+    partner_companies: list[tuple[Edge, Entity]] = []
+    company_partners: list[tuple[Edge, Entity]] = []
+    for edge in edges:
+        if edge.rel_type not in {"SOCIO", "ADMIN"}:
+            continue
+        other_id = edge.to_entity_id if edge.from_entity_id == entity.id else edge.from_entity_id
+        other = neighbors.get(other_id)
+        if not other:
+            continue
+        if entity.entity_type == "PERSON" and other.entity_type == "ORG":
+            partner_companies.append((edge, other))
+        if entity.entity_type == "ORG" and other.entity_type in {"PERSON", "ORG"}:
+            company_partners.append((edge, other))
     ctx = template_context(request, user)
     ctx.update(
         {
@@ -307,6 +533,8 @@ def entity_page(
             "mask_identifier": mask_identifier,
             "seed_kind": seed_kind,
             "seed_q": seed_q,
+            "partner_companies": partner_companies,
+            "company_partners": company_partners,
         }
     )
     return templates.TemplateResponse(request, "app/entity.html", ctx)
@@ -362,6 +590,37 @@ def expand_here(
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
 
+@router.post("/app/casos/{investigation_id}/entidades/{entity_id}/editar")
+def edit_entity(
+    investigation_id: str,
+    entity_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    display_name: str = Form(""),
+    note: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    entity = session.scalar(
+        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
+    )
+    if not entity:
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    if display_name.strip():
+        entity.display_name = display_name.strip()[:512]
+    attrs = dict(entity.attrs or {})
+    if note.strip():
+        attrs["nota"] = note.strip()[:2000]
+    elif "nota" in attrs and not note.strip():
+        attrs.pop("nota", None)
+    entity.attrs = attrs
+    write_audit(session, "entity.edit", username=user.username, investigation_id=investigation_id, details={"entity_id": entity.id})
+    session.commit()
+    request.session["flash"] = {"level": "ok", "message": "Ficha atualizada."}
+    return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
+
+
 @router.post("/app/casos/{investigation_id}/processar")
 def process_now(
     investigation_id: str,
@@ -371,6 +630,48 @@ def process_now(
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     process_pending_jobs(investigation_id=investigation_id, limit=get_settings().expand_sync_limit)
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/placa")
+def add_plate(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    seed_plate: str = Form(""),
+    seed_plate_owner: str = Form(""),
+    seed_plate_cpf: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
+        return RedirectResponse("/app", status_code=303)
+    if not looks_like_plate(seed_plate):
+        request.session["flash"] = {"level": "error", "message": "Informe uma placa válida (ABC1D23 ou ABC-1234)."}
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    attach_plate_owner(
+        session,
+        inv,
+        plate=seed_plate,
+        owner_name=seed_plate_owner,
+        owner_cpf=seed_plate_cpf,
+        max_attempts=get_settings().job_max_attempts,
+    )
+    write_audit(
+        session,
+        "investigation.add_plate",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"placa": seed_plate.strip()},
+    )
+    session.commit()
+    settings = get_settings()
+    if settings.expand_sync:
+        process_pending_jobs(investigation_id=inv.id, limit=settings.expand_sync_limit, settings=settings)
+    request.session["flash"] = {"level": "ok", "message": "Veículo adicionado ao grafo."}
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -474,7 +775,7 @@ def purge_case(
     if inv:
         write_audit(session, "investigation.purge", username=user.username, investigation_id=inv.id)
         session.delete(inv)
-    return RedirectResponse("/app", status_code=303)
+    return RedirectResponse("/app/casos", status_code=303)
 
 
 @router.get("/app/admin", response_class=HTMLResponse)
@@ -501,21 +802,47 @@ def admin_page(
 def tools_map(
     request: Request,
     user: User = Depends(current_user),
+    session: Session = Depends(db_session),
 ) -> HTMLResponse:
-    tree = load_framework_tree()
-    stats = tree_stats(tree)
+    needle = request.query_params.get("busca") or ""
+    selected = get_tool(request.query_params.get("tool") or "massa")
     ctx = template_context(request, user)
     ctx.update(
         {
             "nav": "ferramentas",
-            "stats": stats,
-            "source_page": tree.get("source_page") or "https://osintframework.com/",
+            "tools": list_tools(needle),
+            "selected": selected or get_tool("massa"),
             "seed": request.query_params.get("q") or "",
             "kind": request.query_params.get("kind") or "",
-            "highlights": sorted(matching_branches(request.query_params.get("kind"))),
+            "busca": needle,
         }
     )
+    _with_cases(ctx, request, session)
     return templates.TemplateResponse(request, "app/tools.html", ctx)
+
+
+@router.post("/app/ferramentas/executar", response_class=HTMLResponse)
+def tools_run(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    tool: str = Form("massa"),
+    q: str = Form(""),
+) -> HTMLResponse:
+    require_csrf(request, csrf_token)
+    outcome = run_embedded_tool(tool, q)
+    write_audit(session, "tool.run", username=user.username, details={"tool": tool, "ok": getattr(outcome, "ok", True)})
+    ctx = template_context(request, user)
+    _with_cases(ctx, request, session)
+    ctx.update({"tool_id": tool, "q": q})
+    if isinstance(outcome, MassResult):
+        ctx["mass"] = outcome
+        template = "app/consult_mass.html"
+    else:
+        ctx["result"] = outcome
+        template = "app/consult_result.html"
+    return templates.TemplateResponse(request, template, ctx)
 
 
 @router.get("/app/ferramentas/arvore.json")

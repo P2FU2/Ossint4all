@@ -3,35 +3,51 @@
 {% block content %}
 <header class="page-head">
   <div>
-    <h1>Casos</h1>
-    <p class="lede">Cada investigação é um grafo: sementes que você alimenta e fontes públicas que expandem vínculos.</p>
+    <p class="eyebrow">Histórico</p>
+    <h1>Casos guardados</h1>
+    <p class="lede">Grafos que você decidiu aprofundar. Consultas avulsas não aparecem aqui.</p>
   </div>
-  <a class="btn primary" href="/app/nova">Nova investigação</a>
+  <div class="graph-actions">
+    <label class="save-extra">Buscar
+      <input id="case-search" type="search" placeholder="título ou hipótese" data-tip="Filtra os cartões desta lista" />
+    </label>
+    <a class="btn" href="/app" data-tip="Placa, user, telefone, sócio — sem criar caso">Consultar</a>
+    <a class="btn primary" href="/app/nova" data-tip="Vários identificadores de uma vez">Montar caso</a>
+  </div>
 </header>
 
 {% if not investigations %}
 <section class="empty">
-  <h2>Nenhum caso ainda</h2>
-  <p>Comece com um CNPJ, CPF, nome ou processo. O motor consulta só o que for público ou API oficial.</p>
-  <a class="btn primary" href="/app/nova">Começar investigação</a>
+  <h2>Nada guardado ainda</h2>
+  <p>Comece por uma consulta. Se o resultado importar, clique em Guardar no grafo.</p>
+  <a class="btn primary" href="/app">Fazer uma consulta</a>
 </section>
 {% else %}
 <div class="card-grid">
   {% for inv in investigations %}
   {% set c = counts[inv.id] %}
-  <a class="case-card" href="/app/casos/{{ inv.id }}">
-    <div class="case-top">
-      <strong>{{ inv.title }}</strong>
-      {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
-    </div>
-    <p>{{ inv.hypothesis or "Sem hipótese registrada." }}</p>
+  <div class="case-card" data-search="{{ (inv.title ~ ' ' ~ (inv.hypothesis or ''))|lower }}">
+    <a href="/app/casos/{{ inv.id }}" data-tip="Abrir o grafo deste caso">
+      <div class="case-top">
+        <strong>{{ inv.title }}</strong>
+        {% if current_case_id == inv.id %}<span class="pill">corrente</span>{% endif %}
+        {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
+      </div>
+      <p>{{ inv.hypothesis or "Sem hipótese." }}</p>
+    </a>
     <div class="kpis">
       <span>{{ c.entities }} nós</span>
       <span>{{ c.edges }} vínculos</span>
       <span>{{ c.jobs.PENDING + c.jobs.RUNNING }} na fila</span>
     </div>
-    <small>{{ inv.created_at }} · {{ (inv.connectors or [])|join(", ") }}</small>
-  </a>
+    <div class="graph-actions">
+      <form method="post" action="/app/casos/{{ inv.id }}/usar">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn" type="submit" data-tip="Consultas e a suíte passam a gravar neste caso">Usar como corrente</button>
+      </form>
+      <a class="btn" href="/app/casos/{{ inv.id }}" data-tip="Editar no grafo">Editar</a>
+    </div>
+  </div>
   {% endfor %}
 </div>
 {% endif %}

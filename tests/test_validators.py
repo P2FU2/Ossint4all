@@ -1,5 +1,5 @@
 from osint4all.config import normalize_database_url
-from osint4all.validators import normalize_cnj, validate_cnpj, validate_cpf
+from osint4all.validators import format_plate, looks_like_plate, normalize_cnj, normalize_plate, validate_cnpj, validate_cpf
 
 
 def test_cpf_valid_and_invalid() -> None:
@@ -11,6 +11,14 @@ def test_cpf_valid_and_invalid() -> None:
 def test_cnpj_valid_and_invalid() -> None:
     assert validate_cnpj("33.000.167/0001-01")
     assert not validate_cnpj("00.000.000/0000-00")
+
+
+def test_plate_normalize() -> None:
+    assert looks_like_plate("ABC1D23")
+    assert looks_like_plate("ABC-1234")
+    assert not looks_like_plate("AB123")
+    assert normalize_plate("abc-1d23") == "ABC1D23"
+    assert format_plate("abc1d23") == "ABC-1D23"
 
 
 def test_cnj_roundtrip() -> None:

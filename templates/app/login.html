@@ -10,7 +10,7 @@
 <body class="login-page">
   <form class="login-card" method="post" action="/login">
     <div class="brand-mark">OSINT4ALL</div>
-    <p class="lede">Investigação em grafo com fontes públicas e oficiais.</p>
+    <p class="lede">Consulta primeiro. Grafo só se você guardar.</p>
     {% if flash %}
     <div class="flash {{ flash.level }}">{{ flash.message }}</div>
     {% endif %}
@@ -21,8 +21,8 @@
     <label>Senha
       <input name="password" type="password" autocomplete="current-password" required />
     </label>
-    <button type="submit">Entrar</button>
-    <p class="fine">Uso jornalístico / OSINT. Sem bases restritas nem conteúdo privado.</p>
+    <button class="btn primary" type="submit">Entrar</button>
+    <p class="fine">Jornalismo investigativo. Sem DETRAN de dono, sem vazamentos, sem perfil privado.</p>
   </form>
 </body>
 </html>

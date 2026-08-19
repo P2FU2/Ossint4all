@@ -6,13 +6,17 @@
 # OSINT4ALL
 
 
-Plataforma de investigação OSINT em grafo. Você entra com CPF, CNPJ, nome, e-mail, telefone ou usuário; conectores consultam **fontes públicas e APIs oficiais** e montam a rede de vínculos com citação de origem.
+Plataforma de investigação OSINT em grafo. Você entra com CPF, CNPJ, nome, e-mail, telefone, usuário ou **placa**; conectores consultam **fontes públicas e APIs oficiais** e montam a rede de vínculos com citação de origem.
 
 Uso previsto: jornalismo investigativo. Não consulta DETRAN, cartório, operadora, bases vazadas nem perfis privados.
 
 ## O que faz
 
-- Grafo de pessoas, empresas, processos, perfis públicos, ativos mencionados e publicações
+- Consulta avulsa e **busca em massa** (um dado → correlatos) sem criar caso; dá para atribuir o resultado ao caso corrente
+- Suíte embutida (Sherlock/WhatsMyName, crt.sh, FOCA/PDF, placa, sócio): roda no painel, sem abrir GitHub nem outro site
+- Grafo de pessoas, empresas, processos, perfis públicos, veículos (placa) e publicações
+- Placa: série histórica de 1º emplacamento e vínculo `PROPRIETARIO` se você informar o nome/CPF (o DETRAN não publica o dono só com a placa)
+- Rede societária pelo nome do sócio (base aberta da Receita): empresas, QSA, CNAE, Simples/MEI, endereço e vistas Rede / Árvore / Split / Mapa
 - Expansão por profundidade (sócios → outras empresas → menções)
 - DJEN e DataJud como conectores de processo/publicação
 - TSE, Transparência, OpenCorporates, Wikidata, busca web (Brave/Google CSE) e checagem de URL pública
@@ -106,7 +110,7 @@ Mantenha o projeto que já tem Postgres e o domínio. Não crie outro.
 | `UI_SESSION_SECRET` | string longa (não deixe `change-me-ui-session-secret`) |
 | `EXPAND_SYNC` | `true` |
 
-Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`.
+Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `BRASIL_IO_API_TOKEN`.
 
 5. Custom Start Command: `python -m osint4all.main serve --host 0.0.0.0` (sem `--port 8000`; o app usa `$PORT` e também escuta 8000 para o domínio antigo).
 6. Em **Settings → Networking**, no domínio `authenticadm.org`, a porta-alvo deve ser **8000** ou **8080** (as duas funcionam). Se o site mostrar "Application failed to respond" com healthcheck verde, mude essa porta para a mesma do log `serve host=0.0.0.0 port=...`.

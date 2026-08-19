@@ -14,6 +14,8 @@ from osint4all.identifiers import canonical_key
 PUBLIC_PROFILE_TEMPLATES: list[tuple[str, str]] = [
     ("GitHub", "https://github.com/{user}"),
     ("GitLab", "https://gitlab.com/{user}"),
+    ("Bitbucket", "https://bitbucket.org/{user}"),
+    ("Codeberg", "https://codeberg.org/{user}"),
     ("Reddit", "https://www.reddit.com/user/{user}"),
     ("Medium", "https://medium.com/@{user}"),
     ("Dev.to", "https://dev.to/{user}"),
@@ -21,6 +23,7 @@ PUBLIC_PROFILE_TEMPLATES: list[tuple[str, str]] = [
     ("Wikipedia (user)", "https://en.wikipedia.org/wiki/User:{user}"),
     ("X", "https://x.com/{user}"),
     ("YouTube", "https://www.youtube.com/@{user}"),
+    ("TikTok", "https://www.tiktok.com/@{user}"),
     ("Keybase", "https://keybase.io/{user}"),
     ("Twitch", "https://www.twitch.tv/{user}"),
     ("SoundCloud", "https://soundcloud.com/{user}"),
@@ -29,7 +32,21 @@ PUBLIC_PROFILE_TEMPLATES: list[tuple[str, str]] = [
     ("Flickr", "https://www.flickr.com/people/{user}/"),
     ("Linktree", "https://linktr.ee/{user}"),
     ("About.me", "https://about.me/{user}"),
+    ("Replit", "https://replit.com/@{user}"),
+    ("Kaggle", "https://www.kaggle.com/{user}"),
+    ("Hugging Face", "https://huggingface.co/{user}"),
+    ("npm", "https://www.npmjs.com/~{user}"),
+    ("Docker Hub", "https://hub.docker.com/u/{user}"),
+    ("Gravatar", "https://gravatar.com/{user}"),
+    ("Vimeo", "https://vimeo.com/{user}"),
+    ("Dribbble", "https://dribbble.com/{user}"),
+    ("Behance", "https://www.behance.net/{user}"),
+    ("Steam", "https://steamcommunity.com/id/{user}"),
+    ("Lichess", "https://lichess.org/@/{user}"),
+    ("Product Hunt", "https://www.producthunt.com/@{user}"),
 ]
+
+CORE_PROFILE_TEMPLATES = PUBLIC_PROFILE_TEMPLATES[:12]
 
 
 def parse_public_hits(hits: list[tuple[str, str]], *, origin_key: str) -> ConnectorResult:
@@ -97,8 +114,9 @@ class UsernamePublicConnector:
         user = username_from_entity(entity)
         if not user:
             return ConnectorResult()
+        templates = CORE_PROFILE_TEMPLATES if getattr(ctx, "core_only", False) else PUBLIC_PROFILE_TEMPLATES
         hits: list[tuple[str, str]] = []
-        for label, template in PUBLIC_PROFILE_TEMPLATES:
+        for label, template in templates:
             url = template.format(user=user)
             try:
                 resp = self.http.request("GET", url, allow_404=True, max_retries=1)

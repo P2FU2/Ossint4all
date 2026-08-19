@@ -53,6 +53,7 @@ def test_apply_seed_placeholders() -> None:
 
 def test_kind_branches_and_load_offline() -> None:
     assert "Brasil · oficiais" in matching_branches("CNPJ")
+    assert "Brasil · oficiais" in matching_branches("PLATE")
     assert "Tribunais e consultas (Brazuca)" in matching_branches("CNJ")
     tree = load_framework_tree(raw={"name": "OSINT Framework", "type": "folder", "children": []})
     assert tree["name"] == "OSINT4ALL"
@@ -82,3 +83,7 @@ def test_brazil_official_portals() -> None:
     assert "BNMP" in blob
     assert "Jucesp" in blob
     assert "filiaweb" in blob.lower()
+    assert "SENATRAN" in blob
+    assert "Veículos" in blob
+    assert "rede societária" in blob.lower()
+    assert "Brasil.IO" in blob

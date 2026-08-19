@@ -2,46 +2,80 @@
 {% block title %}{{ inv.title }}{% endblock %}
 {% block main_class %}graph-main{% endblock %}
 {% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
-<script src="/static/graph.js" defer></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/graph.js?v=4" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
   <div>
-    <a class="crumb" href="/app">Casos</a>
+    <a class="crumb" href="/app/casos" data-tip="Volta à lista de casos guardados">Casos</a>
     <h1>{{ inv.title }}</h1>
-    <p class="lede">{{ inv.hypothesis or "—" }}</p>
+    <p class="lede">{{ inv.hypothesis or "Explore o grafo. Passe o mouse nos nós · clique para a ficha." }}</p>
   </div>
   <div class="graph-actions">
-    <span class="kpi">{{ entity_count }} nós</span>
-    <span class="kpi">{{ edge_count }} vínculos</span>
-    <span class="kpi" id="job-pill">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
+    <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>
+    <span class="kpi" data-tip="Relações já confirmadas (sócio, menção, proprietário…)">{{ edge_count }} vínculos</span>
+    <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote.">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
     <form method="post" action="/app/casos/{{ inv.id }}/processar">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn" type="submit">Processar fila</button>
+      <button class="btn primary" type="submit" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
     </form>
-    <form method="post" action="/app/casos/{{ inv.id }}/documento" enctype="multipart/form-data">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <label class="btn">Anexar PDF
-        <input type="file" name="arquivo" accept="application/pdf" onchange="this.form.submit()" hidden />
-      </label>
-    </form>
-    <a class="btn" href="/app/casos/{{ inv.id }}/relatorio">Relatório</a>
-    <a class="btn" href="/app/casos/{{ inv.id }}/relatorio.pdf">PDF</a>
-    {% if is_admin %}
-    <form method="post" action="/app/casos/{{ inv.id }}/monitorar">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn" type="submit">{% if inv.monitor %}Parar monitor{% else %}Monitorar{% endif %}</button>
-    </form>
-    <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar esta investigação?');">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn danger" type="submit">Apagar</button>
-    </form>
-    {% endif %}
+    <a class="btn" href="/app/casos/{{ inv.id }}/relatorio" data-tip="Relatório narrativo com fontes citadas">Relatório</a>
+    <details class="more-menu">
+      <summary class="btn" data-tip="Editar título, hipótese e profundidade">Editar</summary>
+      <div class="more-panel">
+        <form class="stack" method="post" action="/app/casos/{{ inv.id }}/editar">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>Título <input name="title" value="{{ inv.title }}" required /></label>
+          <label>Hipótese <textarea name="hypothesis" rows="2">{{ inv.hypothesis or "" }}</textarea></label>
+          <label>Profundidade <input type="number" name="max_depth" min="0" max="4" value="{{ inv.max_depth }}" /></label>
+          <button class="btn primary" type="submit">Salvar</button>
+        </form>
+      </div>
+    </details>
+    <details class="more-menu">
+      <summary class="btn" data-tip="Placa, PDF, monitor e exclusão">Mais</summary>
+      <div class="more-panel">
+        <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/placa">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input name="seed_plate" placeholder="Placa" required data-tip="ABC1D23. Sem dono no DETRAN." />
+          <input name="seed_plate_owner" placeholder="Dono (se já souber)" data-tip="Só de fonte lícita." />
+          <button class="btn" type="submit">Ligar placa</button>
+        </form>
+        <form method="post" action="/app/casos/{{ inv.id }}/documento" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label class="btn" data-tip="Lê metadados do PDF que você envia (estilo FOCA).">Anexar PDF
+            <input type="file" name="arquivo" accept="application/pdf" onchange="this.form.submit()" hidden />
+          </label>
+        </form>
+        <a class="btn" href="/app/casos/{{ inv.id }}/relatorio.pdf" data-tip="Baixa o relatório em PDF">Baixar PDF</a>
+        {% if is_admin %}
+        <form method="post" action="/app/casos/{{ inv.id }}/monitorar">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn" type="submit" data-tip="Reconsulta as sementes no cron.">{% if inv.monitor %}Parar monitor{% else %}Monitorar{% endif %}</button>
+        </form>
+        <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar esta investigação?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn danger" type="submit" data-tip="Apaga o caso e o grafo. Irreversível.">Apagar caso</button>
+        </form>
+        {% endif %}
+      </div>
+    </details>
   </div>
 </header>
 <div class="graph-toolbar">
-  <label>Filtro
+  <div class="view-tabs" role="tablist">
+    <button type="button" class="btn view-tab is-active" data-view="rede" data-tip="Layout de rede: quem se liga a quem">Rede</button>
+    <button type="button" class="btn view-tab" data-view="arvore" data-tip="Árvore a partir das sementes">Árvore</button>
+    <button type="button" class="btn view-tab" data-view="split" data-tip="Grafo + lista de empresas">Split</button>
+    <button type="button" class="btn view-tab" data-view="mapa" data-tip="Empresas no mapa (UF / município)">Mapa</button>
+  </div>
+  <label data-tip="Busca pelo nome do nó">Buscar
+    <input id="graph-search" type="search" placeholder="nome, CNPJ, placa…" />
+  </label>
+  <label data-tip="Esconde os outros tipos sem apagar o grafo.">Filtro
     <select id="type-filter">
       <option value="">todos os tipos</option>
       <option>PERSON</option>
@@ -49,6 +83,7 @@
       <option>CASE</option>
       <option>PROFILE</option>
       <option>ASSET</option>
+      <option>VEHICLE</option>
       <option>PUBLICATION</option>
     </select>
   </label>
@@ -57,9 +92,13 @@
     <span class="dot org"></span> Empresa
     <span class="dot case"></span> Processo
     <span class="dot profile"></span> Perfil
-    <span class="dot asset"></span> Ativo
+    <span class="dot asset"></span> Veículo
     <span class="dot pub"></span> Publicação
   </div>
 </div>
-<div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/"></div>
+<div class="graph-stage">
+  <aside id="split-list" class="split-list" hidden></aside>
+  <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/"></div>
+  <div id="org-map" hidden></div>
+</div>
 {% endblock %}

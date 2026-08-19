@@ -6,31 +6,37 @@
   <title>{% block title %}{{ app_name }}{% endblock %} · {{ brand }}</title>
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v=4" />
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=4" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
+      <a class="brand" href="/app" data-tip="Volta para a consulta rápida — sem abrir caso">
         {{ brand }}
-        <small>OSINT público</small>
-      </div>
-      <div class="nav-section">Investigação</div>
-      <a class="nav-link {% if nav == 'casos' %}active{% endif %}" href="/app">Casos</a>
-      <a class="nav-link {% if nav == 'nova' %}active{% endif %}" href="/app/nova">Nova investigação</a>
-      <a class="nav-link {% if nav == 'ferramentas' %}active{% endif %}" href="/app/ferramentas">Mapa de ferramentas</a>
-      {% if is_admin %}
-      <div class="nav-section">Operação</div>
-      <a class="nav-link {% if nav == 'admin' %}active{% endif %}" href="/app/admin">Fontes e auditoria</a>
-      {% endif %}
+        <small>Fontes públicas</small>
+      </a>
+      <nav>
+        <p class="nav-section">Fluxo</p>
+        <a class="nav-link {% if nav == 'consultar' %}active{% endif %}" href="/app" data-tip="Consulta avulsa: placa, rede social, telefone, sócio…">Consultar</a>
+        <a class="nav-link {% if nav == 'casos' %}active{% endif %}" href="/app/casos" data-tip="Só o que você guardou — grafo e histórico">Casos</a>
+        <a class="nav-link {% if nav == 'nova' %}active{% endif %}" href="/app/nova" data-tip="Vários identificadores de uma vez, com profundidade">Montar caso</a>
+        <a class="nav-link {% if nav == 'ferramentas' %}active{% endif %}" href="/app/ferramentas" data-tip="Suíte embutida: massa, redes, placa, PDF…">Ferramentas</a>
+        {% if is_admin %}
+        <p class="nav-section">Operação</p>
+        <a class="nav-link {% if nav == 'admin' %}active{% endif %}" href="/app/admin" data-tip="Saúde das fontes e auditoria de quem buscou o quê">Fontes</a>
+        {% endif %}
+      </nav>
       <div class="sidebar-foot">
-        <div class="user-chip">{{ user.username }} · {{ user.role }}</div>
+        {% if current_case_id %}
+        <a class="nav-link" href="/app/casos/{{ current_case_id }}" data-tip="Caso que recebe as buscas agora">Caso corrente</a>
+        {% endif %}
+        <div class="user-chip" data-tip="Conta desta sessão">{{ user.username }} · {{ user.role }}</div>
         <form method="post" action="/logout">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <button type="submit">Sair</button>
+          <button type="submit" class="btn" data-tip="Encerra a sessão">Sair</button>
         </form>
       </div>
     </aside>
@@ -41,5 +47,6 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+  <div id="tooltip" hidden></div>
 </body>
 </html>

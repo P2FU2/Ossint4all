@@ -122,6 +122,25 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
             "depth": e.depth,
             "confidence": e.confidence,
             "key": e.canonical_key,
+            "attrs": {
+                k: e.attrs.get(k)
+                for k in (
+                    "razao_social",
+                    "situacao",
+                    "municipio",
+                    "uf",
+                    "cnae",
+                    "simples",
+                    "mei",
+                    "lat",
+                    "lng",
+                    "cep",
+                    "endereco",
+                    "capital_social",
+                    "porte",
+                )
+                if e.attrs and e.attrs.get(k) not in (None, "", [])
+            },
         }
         for e in entities
     ]

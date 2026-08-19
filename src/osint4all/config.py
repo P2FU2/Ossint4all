@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     google_cse_cx: str = ""
     username_public_enable: bool = True
     crtsh_enable: bool = True
+    plate_public_enable: bool = True
+    socio_search_enable: bool = True
+    brasil_io_api_token: str = ""
 
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-4"
@@ -107,4 +110,6 @@ ALL_CONNECTORS = (
     "web_search",
     "username_public",
     "crtsh",
+    "plate_public",
+    "socio_search",
 )

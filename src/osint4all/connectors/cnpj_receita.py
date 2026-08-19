@@ -24,6 +24,54 @@ def _cnpj_from_entity(entity: Entity) -> str | None:
     return None
 
 
+def _company_attrs(data: dict[str, Any], razao: str, fantasia: str) -> dict[str, Any]:
+    secundarios = data.get("cnaes_secundarios") or data.get("cnae_secundario") or []
+    if isinstance(secundarios, list):
+        extra_cnae = []
+        for item in secundarios:
+            if isinstance(item, dict):
+                label = str(item.get("descricao") or item.get("codigo") or "")
+            else:
+                label = str(item)
+            if label:
+                extra_cnae.append(label)
+        extra_cnae = extra_cnae[:8]
+    else:
+        extra_cnae = []
+    logradouro = " ".join(
+        str(part).strip()
+        for part in (
+            data.get("descricao_tipo_de_logradouro") or data.get("tipo_logradouro"),
+            data.get("logradouro"),
+            data.get("numero"),
+            data.get("complemento"),
+        )
+        if part
+    )
+    return {
+        "razao_social": razao,
+        "nome_fantasia": fantasia,
+        "situacao": data.get("descricao_situacao_cadastral") or data.get("situacao"),
+        "data_situacao": data.get("data_situacao_cadastral"),
+        "cnae": data.get("cnae_fiscal_descricao") or data.get("cnae"),
+        "cnae_codigo": data.get("cnae_fiscal"),
+        "cnaes_secundarios": extra_cnae,
+        "municipio": data.get("municipio"),
+        "uf": data.get("uf"),
+        "cep": data.get("cep"),
+        "bairro": data.get("bairro"),
+        "endereco": logradouro or None,
+        "data_inicio": data.get("data_inicio_atividade"),
+        "porte": data.get("porte") or data.get("descricao_porte"),
+        "capital_social": data.get("capital_social"),
+        "natureza_juridica": data.get("natureza_juridica") or data.get("descricao_natureza_juridica"),
+        "simples": data.get("opcao_pelo_simples"),
+        "mei": data.get("opcao_pelo_mei"),
+        "telefone": data.get("ddd_telefone_1") or data.get("telefone"),
+        "email": data.get("correio_eletronico") or data.get("email"),
+    }
+
+
 def _qualificacao_rel(qualificacao: str) -> str:
     q = (qualificacao or "").casefold()
     if any(token in q for token in ("administrador", "diretor", "presidente", "gerente")):
@@ -47,17 +95,7 @@ def parse_cnpj_payload(data: dict[str, Any]) -> ConnectorResult:
             kind="CNPJ",
             value=cnpj,
             display_name=fantasia or razao,
-            attrs={
-                "razao_social": razao,
-                "nome_fantasia": fantasia,
-                "situacao": data.get("descricao_situacao_cadastral") or data.get("situacao"),
-                "cnae": data.get("cnae_fiscal_descricao") or data.get("cnae"),
-                "municipio": data.get("municipio"),
-                "uf": data.get("uf"),
-                "data_inicio": data.get("data_inicio_atividade"),
-                "porte": data.get("porte") or data.get("descricao_porte"),
-                "capital_social": data.get("capital_social"),
-            },
+            attrs=_company_attrs(data, razao, fantasia),
             confidence=0.95,
         )
     )
@@ -77,7 +115,11 @@ def parse_cnpj_payload(data: dict[str, Any]) -> ConnectorResult:
                 kind="CNPJ",
                 value=doc,
                 display_name=nome or doc,
-                attrs={"papel": qual},
+                attrs={
+                    "papel": qual,
+                    "entrada": socio.get("data_entrada_sociedade"),
+                    "faixa_etaria": socio.get("faixa_etaria"),
+                },
                 confidence=0.9,
             )
             other_key = canonical_key("CNPJ", doc)
@@ -87,7 +129,11 @@ def parse_cnpj_payload(data: dict[str, Any]) -> ConnectorResult:
                 kind="CPF",
                 value=doc,
                 display_name=nome or doc,
-                attrs={"papel": qual},
+                attrs={
+                    "papel": qual,
+                    "entrada": socio.get("data_entrada_sociedade"),
+                    "faixa_etaria": socio.get("faixa_etaria"),
+                },
                 confidence=0.9,
             )
             other_key = canonical_key("CPF", doc)
@@ -97,7 +143,12 @@ def parse_cnpj_payload(data: dict[str, Any]) -> ConnectorResult:
                 kind="NAME",
                 value=nome,
                 display_name=nome,
-                attrs={"papel": qual, "documento_ausente": True},
+                attrs={
+                    "papel": qual,
+                    "documento_ausente": True,
+                    "entrada": socio.get("data_entrada_sociedade"),
+                    "faixa_etaria": socio.get("faixa_etaria"),
+                },
                 confidence=0.45,
             )
             other_key = canonical_key("NAME", nome)
@@ -154,7 +205,13 @@ class CnpjReceitaConnector:
         if not cnpj:
             return ConnectorResult()
         data = self._fetch(cnpj)
-        return parse_cnpj_payload(data)
+        result = parse_cnpj_payload(data)
+        geo = self._geocode_cep(str(data.get("cep") or ""))
+        if geo:
+            for found in result.entities:
+                if found.kind == "CNPJ" and only_digits(found.value) == cnpj:
+                    found.attrs.update(geo)
+        return result
 
     def _fetch(self, cnpj: str) -> dict[str, Any]:
         providers = []
@@ -180,6 +237,23 @@ class CnpjReceitaConnector:
                 last = exc
                 continue
         raise FailedSource(str(last) if last else "falha na consulta de CNPJ")
+
+    def _geocode_cep(self, cep: str) -> dict[str, Any]:
+        digits = only_digits(cep)
+        if len(digits) != 8:
+            return {}
+        try:
+            resp = self.http.request("GET", f"https://brasilapi.com.br/api/cep/v2/{digits}", allow_404=True)
+            if resp.status_code >= 400:
+                return {}
+            data = resp.json()
+        except Exception:
+            return {}
+        loc = (data.get("location") or {}).get("coordinates") or {}
+        lat, lng = loc.get("latitude"), loc.get("longitude")
+        if lat in (None, "") or lng in (None, ""):
+            return {}
+        return {"lat": float(lat), "lng": float(lng), "cep": digits}
 
 
 def _minhareceita_url(cnpj: str) -> str:

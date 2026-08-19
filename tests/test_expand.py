@@ -4,7 +4,7 @@ from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge,
 from osint4all.db.models import Entity
 from osint4all.db.session import session_scope
 from osint4all.graph.expand import ExpansionEngine, process_pending_jobs
-from osint4all.graph.seed import create_investigation
+from osint4all.graph.seed import attach_plate_owner, create_investigation
 from osint4all.identifiers import parse_seed
 
 
@@ -77,3 +77,38 @@ def test_engine_expands_and_enqueues_child(settings) -> None:
         assert "JOAO DA SILVA" in names
         edges = session.scalars(select(Edge).where(Edge.investigation_id == inv_id)).all()
         assert any(e.rel_type == "SOCIO" for e in edges)
+
+
+def test_attach_plate_owner_links_person(settings) -> None:
+    from sqlalchemy import select
+
+    from osint4all.db.models import Edge, Entity as Ent
+
+    seed = parse_seed("ABC1D23")
+    assert seed
+    with session_scope() as session:
+        inv = create_investigation(
+            session,
+            title="Placa",
+            hypothesis="dono",
+            seeds=[seed],
+            connectors=["plate_public"],
+            max_depth=2,
+            monitor=False,
+            created_by="tester",
+        )
+        attach_plate_owner(
+            session,
+            inv,
+            plate="ABC1D23",
+            owner_name="Maria Silva Souza",
+            owner_cpf="529.982.247-25",
+        )
+        inv_id = inv.id
+
+    with session_scope() as session:
+        types = {e.entity_type for e in session.scalars(select(Ent).where(Ent.investigation_id == inv_id))}
+        assert "VEHICLE" in types
+        assert "PERSON" in types
+        edges = session.scalars(select(Edge).where(Edge.investigation_id == inv_id)).all()
+        assert any(e.rel_type == "PROPRIETARIO" for e in edges)

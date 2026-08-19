@@ -114,6 +114,17 @@ def looks_like_phone(value: str) -> bool:
     return bool(_PHONE.match(only_digits(value) if value and value.strip().startswith("+") else only_digits(value))) and 10 <= len(only_digits(value)) <= 15
 
 
+def normalize_plate(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def format_plate(value: str) -> str:
+    plate = normalize_plate(value)
+    if len(plate) == 7:
+        return f"{plate[:3]}-{plate[3:]}"
+    return plate
+
+
 def looks_like_plate(value: str) -> bool:
     return bool(_PLATE.match((value or "").strip().replace(" ", "")))
 
