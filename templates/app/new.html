@@ -1,0 +1,57 @@
+{% extends "app/base.html" %}
+{% block title %}Nova investigação{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Nova investigação</h1>
+    <p class="lede">Alimente identificadores. O motor expande sócios, processos e menções públicas até a profundidade escolhida.</p>
+  </div>
+</header>
+
+<form class="stack" method="post" action="/app/nova">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <label>Título
+    <input name="title" required placeholder="Ex.: Holding do grupo X" />
+  </label>
+  <label>Hipótese / pergunta
+    <textarea name="hypothesis" rows="3" placeholder="O que você está tentando verificar?"></textarea>
+  </label>
+
+  <fieldset class="seed-grid">
+    <legend>Sementes pontuais</legend>
+    <label>CPF <input name="seed_cpf" placeholder="000.000.000-00" /></label>
+    <label>CNPJ <input name="seed_cnpj" placeholder="00.000.000/0001-00" /></label>
+    <label>Nome <input name="seed_name" placeholder="Nome completo" /></label>
+    <label>E-mail <input name="seed_email" placeholder="nome@dominio.com" /></label>
+    <label>Telefone <input name="seed_phone" placeholder="apenas se for menção pública" /></label>
+    <label>Usuário público <input name="seed_username" placeholder="@usuario" /></label>
+  </fieldset>
+
+  <label>Ou cole uma lista (um por linha — CPF, CNPJ, CNJ, e-mail, telefone, @user, URL, nome)
+    <textarea name="seeds" rows="6" placeholder="33.000.167/0001-01"></textarea>
+  </label>
+
+  <label>Profundidade máxima
+    <input type="number" name="max_depth" min="0" max="4" value="{{ default_depth }}" />
+  </label>
+
+  <fieldset>
+    <legend>Conectores</legend>
+    <div class="checks">
+      {% for c in connectors %}
+      <label class="check">
+        <input type="checkbox" name="connectors" value="{{ c }}" {% if c in enabled %}checked{% endif %} />
+        {{ c }}
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <label class="check">
+    <input type="checkbox" name="monitor" />
+    Monitorar sementes (reconsulta no cron)
+  </label>
+
+  <button class="btn primary" type="submit">Começar investigação</button>
+</form>
+{% endblock %}

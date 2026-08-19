@@ -1,0 +1,63 @@
+{% extends "app/base.html" %}
+{% block title %}Fontes e auditoria{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Fontes e auditoria</h1>
+    <p class="lede">Saúde dos conectores, fila recente e quem buscou o quê (LGPD / redação).</p>
+  </div>
+</header>
+
+<section class="panel">
+  <h2>Conectores</h2>
+  <table class="table">
+    <thead><tr><th>Fonte</th><th>Detalhe</th></tr></thead>
+    <tbody>
+      {% for h in health %}
+      <tr>
+        <td>{{ h.source }}</td>
+        <td>{% for k, v in h.items() if k != 'source' %}{{ k }}={{ v }} {% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Fila recente</h2>
+  <table class="table">
+    <thead><tr><th>Status</th><th>Entidade</th><th>Erro</th><th>Quando</th></tr></thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr>
+        <td>{{ job.status }}</td>
+        <td>{{ job.entity_id[:8] }}…</td>
+        <td>{{ job.last_error or "—" }}</td>
+        <td>{{ job.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Fila vazia.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Auditoria</h2>
+  <table class="table">
+    <thead><tr><th>Ação</th><th>Usuário</th><th>Caso</th><th>Quando</th></tr></thead>
+    <tbody>
+      {% for a in audits %}
+      <tr>
+        <td>{{ a.action }}</td>
+        <td>{{ a.username or "—" }}</td>
+        <td>{{ (a.investigation_id or "—")[:8] }}</td>
+        <td>{{ a.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Sem eventos.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

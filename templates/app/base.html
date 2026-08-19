@@ -5,45 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}{{ app_name }}{% endblock %} · {{ brand }}</title>
   <meta name="csrf-token" content="{{ csrf_token }}" />
-  <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/static/favicon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=20260805" />
+  <link rel="stylesheet" href="/static/app.css" />
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="/static/app.js?v=20260809" defer></script>
+  <script src="/static/app.js" defer></script>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         {{ brand }}
-        <small>{{ app_name }}</small>
+        <small>OSINT público</small>
       </div>
-
-      <div class="nav-section">Consulta</div>
-      <a class="nav-link {% if nav == 'dashboard' %}active{% endif %}" href="/app">Visão geral</a>
-      <a class="nav-link {% if nav == 'processos' %}active{% endif %}" href="/app/processos">Processos</a>
-      <a class="nav-link {% if nav == 'eventos' %}active{% endif %}" href="/app/eventos">Novidades</a>
-      <a class="nav-link {% if nav == 'historico' %}active{% endif %}" href="/app/historico">Histórico</a>
-
+      <div class="nav-section">Investigação</div>
+      <a class="nav-link {% if nav == 'casos' %}active{% endif %}" href="/app">Casos</a>
+      <a class="nav-link {% if nav == 'nova' %}active{% endif %}" href="/app/nova">Nova investigação</a>
+      <a class="nav-link {% if nav == 'ferramentas' %}active{% endif %}" href="/app/ferramentas">Mapa de ferramentas</a>
       {% if is_admin %}
-      <div class="nav-section admin">Administração</div>
-      <details class="admin-menu" {% if nav_group == 'admin' or nav in ['acompanhamento','status','criterios','sistema'] %}open{% endif %}>
-        <summary>
-          Operações &amp; sistema
-          <span class="chev">▾</span>
-        </summary>
-        <div class="admin-nav">
-          <a class="nav-link {% if nav == 'acompanhamento' %}active{% endif %}" href="/app/acompanhamento">Acompanhamento</a>
-          <a class="nav-link {% if nav == 'status' %}active{% endif %}" href="/app/status">Pipeline</a>
-          <a class="nav-link {% if nav == 'criterios' %}active{% endif %}" href="/app/criterios">Critérios</a>
-          <a class="nav-link {% if nav == 'sistema' %}active{% endif %}" href="/app/sistema">Sistema</a>
-        </div>
-      </details>
+      <div class="nav-section">Operação</div>
+      <a class="nav-link {% if nav == 'admin' %}active{% endif %}" href="/app/admin">Fontes e auditoria</a>
       {% endif %}
-
       <div class="sidebar-foot">
         <div class="user-chip">{{ user.username }} · {{ user.role }}</div>
         <form method="post" action="/logout">

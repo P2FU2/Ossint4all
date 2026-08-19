@@ -1,0 +1,38 @@
+{% extends "app/base.html" %}
+{% block title %}Casos{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Casos</h1>
+    <p class="lede">Cada investigação é um grafo: sementes que você alimenta e fontes públicas que expandem vínculos.</p>
+  </div>
+  <a class="btn primary" href="/app/nova">Nova investigação</a>
+</header>
+
+{% if not investigations %}
+<section class="empty">
+  <h2>Nenhum caso ainda</h2>
+  <p>Comece com um CNPJ, CPF, nome ou processo. O motor consulta só o que for público ou API oficial.</p>
+  <a class="btn primary" href="/app/nova">Começar investigação</a>
+</section>
+{% else %}
+<div class="card-grid">
+  {% for inv in investigations %}
+  {% set c = counts[inv.id] %}
+  <a class="case-card" href="/app/casos/{{ inv.id }}">
+    <div class="case-top">
+      <strong>{{ inv.title }}</strong>
+      {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
+    </div>
+    <p>{{ inv.hypothesis or "Sem hipótese registrada." }}</p>
+    <div class="kpis">
+      <span>{{ c.entities }} nós</span>
+      <span>{{ c.edges }} vínculos</span>
+      <span>{{ c.jobs.PENDING + c.jobs.RUNNING }} na fila</span>
+    </div>
+    <small>{{ inv.created_at }} · {{ (inv.connectors or [])|join(", ") }}</small>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

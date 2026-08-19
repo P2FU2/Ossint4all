@@ -3,32 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Entrar · {{ brand }} {{ app_name }}</title>
-  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <title>Entrar · OSINT4ALL</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
-<body>
-  <div class="login-page">
-    <div class="login-card">
-      <h1 class="login-brand">{{ brand }}</h1>
-      <p class="login-sub">{{ app_name }} — acesso interno</p>
-
-      {% if error == 'creds' %}
-      <div class="error-box">Usuário ou senha inválidos.</div>
-      {% elif error == 'rate' %}
-      <div class="error-box">Muitas tentativas. Aguarde alguns minutos.</div>
-      {% endif %}
-
-      <form method="post" action="/login">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <label for="username">Usuário</label>
-        <input id="username" name="username" autocomplete="username" required autofocus />
-        <label for="password">Senha</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required />
-        <button class="btn" type="submit">Entrar</button>
-      </form>
-    </div>
-  </div>
+<body class="login-page">
+  <form class="login-card" method="post" action="/login">
+    <div class="brand-mark">OSINT4ALL</div>
+    <p class="lede">Investigação em grafo com fontes públicas e oficiais.</p>
+    {% if flash %}
+    <div class="flash {{ flash.level }}">{{ flash.message }}</div>
+    {% endif %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Usuário
+      <input name="username" autocomplete="username" required />
+    </label>
+    <label>Senha
+      <input name="password" type="password" autocomplete="current-password" required />
+    </label>
+    <button type="submit">Entrar</button>
+    <p class="fine">Uso jornalístico / OSINT. Sem bases restritas nem conteúdo privado.</p>
+  </form>
 </body>
 </html>

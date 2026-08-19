@@ -1,0 +1,62 @@
+{% extends "app/base.html" %}
+{% block title %}Mapa de ferramentas{% endblock %}
+{% block main_class %}graph-main{% endblock %}
+{% block head %}
+<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js"></script>
+<script src="/static/framework.js" defer></script>
+{% endblock %}
+{% block content %}
+<header class="graph-bar">
+  <div>
+    <h1>Mapa de ferramentas</h1>
+    <p class="lede">
+      Rede no modelo do <a href="{{ source_page }}" target="_blank" rel="noopener">OSINT Framework</a>,
+      com o ramo <a href="https://github.com/osintbrazuca/osint-brazuca" target="_blank" rel="noopener">OSINT Brazuca</a>
+      e suíte local (Sherlock, FOCA, SpiderFoot).
+      {{ stats.folders }} pastas · {{ stats.tools }} ferramentas públicas.
+      Clique num nó para abrir a ficha e o link.
+    </p>
+  </div>
+</header>
+<div class="graph-toolbar tools-toolbar">
+  <label>Semente
+    <input id="seed-input" value="{{ seed }}" placeholder="username, e-mail, CNPJ…" />
+  </label>
+  <label>Tipo
+    <select id="kind-input">
+      <option value="">todos</option>
+      {% for k in ["USERNAME","EMAIL","NAME","PHONE","CNPJ","CPF","CNJ","URL"] %}
+      <option value="{{ k }}" {% if kind == k %}selected{% endif %}>{{ k }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Buscar
+    <input id="tool-search" placeholder="WhatsMyName, whois…" />
+  </label>
+  <div class="legend">
+    <span class="dot folder"></span> pasta
+    <span class="dot tool"></span> ferramenta
+    <span class="dot br"></span> Brasil / OSINT4ALL
+    <span class="flag">T</span> local
+    <span class="flag">D</span> dork
+    <span class="flag">R</span> cadastro
+    <span class="flag">M</span> URL editável
+  </div>
+</div>
+{% if highlights %}
+<p class="fine">Ramos sugeridos para {{ kind }}: {{ highlights|join(", ") }}</p>
+{% endif %}
+<div class="tools-layout">
+  <div id="framework-tree" data-tree-url="/app/ferramentas/arvore.json" data-kind="{{ kind }}"></div>
+  <aside id="tool-drawer" class="tool-drawer" hidden>
+    <h2 id="tool-title">Ferramenta</h2>
+    <p class="muted" id="tool-meta"></p>
+    <p id="tool-desc"></p>
+    <dl class="attrs" id="tool-io"></dl>
+    <div class="graph-actions">
+      <a class="btn primary" id="tool-open" href="#" target="_blank" rel="noopener">Abrir ferramenta</a>
+    </div>
+    <p class="fine">Fonte: <span id="tool-source"></span>. Só recursos públicos; sem bases vazadas.</p>
+  </aside>
+</div>
+{% endblock %}

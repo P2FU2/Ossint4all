@@ -1,0 +1,78 @@
+{% extends "app/base.html" %}
+{% block title %}{{ entity.display_name }}{% endblock %}
+{% block content %}
+<a class="crumb" href="/app/casos/{{ inv.id }}">← Grafo · {{ inv.title }}</a>
+<header class="page-head">
+  <div>
+    <p class="type-tag">{{ entity.entity_type }}{% if entity.is_seed %} · semente{% endif %}</p>
+    <h1>{{ entity.display_name }}</h1>
+    <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · profundidade {{ entity.depth }}</p>
+  </div>
+  <div class="graph-actions">
+    <a class="btn" href="/app/ferramentas?kind={{ seed_kind }}&amp;q={{ seed_q|urlencode }}">Mapa de ferramentas</a>
+    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn primary" type="submit">Expandir daqui</button>
+    </form>
+  </div>
+</header>
+
+<section class="panel">
+  <h2>Identificadores</h2>
+  <ul class="plain">
+    {% for ident in entity.identifiers %}
+    <li><strong>{{ ident.kind }}</strong> {{ mask_identifier(ident.kind, ident.value) }}{% if ident.strong %} · forte{% endif %}</li>
+    {% else %}
+    <li>Nenhum identificador além da chave canônica.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if entity.attrs %}
+<section class="panel">
+  <h2>Atributos públicos</h2>
+  <dl class="attrs">
+    {% for k, v in entity.attrs.items() %}
+    <dt>{{ k }}</dt><dd>{{ v }}</dd>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Vínculos</h2>
+  <table class="table">
+    <thead><tr><th>Relação</th><th>Outro nó</th><th>Confiança</th><th>Fonte</th></tr></thead>
+    <tbody>
+      {% for edge in edges %}
+      {% set other_id = edge.to_entity_id if edge.from_entity_id == entity.id else edge.from_entity_id %}
+      {% set other = neighbors.get(other_id) %}
+      <tr>
+        <td>{{ edge.rel_type }}</td>
+        <td>{% if other %}<a href="/app/casos/{{ inv.id }}/entidades/{{ other.id }}">{{ other.display_name }}</a>{% else %}{{ other_id }}{% endif %}</td>
+        <td>{{ '%.2f'|format(edge.confidence) }}</td>
+        <td>{{ edge.source_connector or "—" }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Sem vínculos ainda.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Evidências</h2>
+  <ul class="evidence">
+    {% for ev in evidence %}
+    <li>
+      <strong>{{ ev.source_label }}</strong>
+      <span class="muted">{{ ev.connector }} · {{ ev.collected_at }}</span>
+      <p>{{ ev.snippet or "" }}</p>
+      {% if ev.url %}<a href="{{ ev.url }}" target="_blank" rel="noopener">fonte</a>{% endif %}
+    </li>
+    {% else %}
+    <li>Nenhuma evidência coletada ainda.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

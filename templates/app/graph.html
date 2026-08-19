@@ -1,0 +1,65 @@
+{% extends "app/base.html" %}
+{% block title %}{{ inv.title }}{% endblock %}
+{% block main_class %}graph-main{% endblock %}
+{% block head %}
+<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+<script src="/static/graph.js" defer></script>
+{% endblock %}
+{% block content %}
+<header class="graph-bar">
+  <div>
+    <a class="crumb" href="/app">Casos</a>
+    <h1>{{ inv.title }}</h1>
+    <p class="lede">{{ inv.hypothesis or "—" }}</p>
+  </div>
+  <div class="graph-actions">
+    <span class="kpi">{{ entity_count }} nós</span>
+    <span class="kpi">{{ edge_count }} vínculos</span>
+    <span class="kpi" id="job-pill">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
+    <form method="post" action="/app/casos/{{ inv.id }}/processar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn" type="submit">Processar fila</button>
+    </form>
+    <form method="post" action="/app/casos/{{ inv.id }}/documento" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <label class="btn">Anexar PDF
+        <input type="file" name="arquivo" accept="application/pdf" onchange="this.form.submit()" hidden />
+      </label>
+    </form>
+    <a class="btn" href="/app/casos/{{ inv.id }}/relatorio">Relatório</a>
+    <a class="btn" href="/app/casos/{{ inv.id }}/relatorio.pdf">PDF</a>
+    {% if is_admin %}
+    <form method="post" action="/app/casos/{{ inv.id }}/monitorar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn" type="submit">{% if inv.monitor %}Parar monitor{% else %}Monitorar{% endif %}</button>
+    </form>
+    <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar esta investigação?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn danger" type="submit">Apagar</button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+<div class="graph-toolbar">
+  <label>Filtro
+    <select id="type-filter">
+      <option value="">todos os tipos</option>
+      <option>PERSON</option>
+      <option>ORG</option>
+      <option>CASE</option>
+      <option>PROFILE</option>
+      <option>ASSET</option>
+      <option>PUBLICATION</option>
+    </select>
+  </label>
+  <div class="legend">
+    <span class="dot person"></span> Pessoa
+    <span class="dot org"></span> Empresa
+    <span class="dot case"></span> Processo
+    <span class="dot profile"></span> Perfil
+    <span class="dot asset"></span> Ativo
+    <span class="dot pub"></span> Publicação
+  </div>
+</div>
+<div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/"></div>
+{% endblock %}

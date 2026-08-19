@@ -1,4 +1,0 @@
-# Overrides opcionais de portais de consulta pública oficial.
-# Placeholders: {cnj} {digits} {nnnnnnn} {dd} {aaaa} {j} {tr} {oooo} {cnj_q} {digits_q}
-# Chaves = sigla do tribunal (stj, tjsp, trf1, …). Valores mesclam com o mapa embutido.
-portais: {}

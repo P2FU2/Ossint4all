@@ -1,8 +1,0 @@
-{# Tooltip reutilizável — ícone "i" em círculo (CSS; não usa ⓘ da fonte) #}
-{% macro tip(text) -%}
-<span class="tip" tabindex="0" data-tip="{{ text }}" aria-label="{{ text }}" role="img"><span class="tip-mark" aria-hidden="true">i</span></span>
-{%- endmacro %}
-
-{% macro with_tip(label, text) -%}
-<span class="with-tip">{{ label }}{{ tip(text) }}</span>
-{%- endmacro %}
