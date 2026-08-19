@@ -1,3 +1,4 @@
+from osint4all.config import normalize_database_url
 from osint4all.validators import normalize_cnj, validate_cnpj, validate_cpf
 
 
@@ -18,3 +19,9 @@ def test_cnj_roundtrip() -> None:
     assert parts.segmento == "8"
     assert parts.tribunal == "26"
     assert normalize_cnj(parts.numero_digits) is not None
+
+
+def test_railway_postgres_url() -> None:
+    assert normalize_database_url("postgres://u:p@host:5432/db") == "postgresql+psycopg://u:p@host:5432/db"
+    assert normalize_database_url("postgresql://u:p@host/db") == "postgresql+psycopg://u:p@host/db"
+    assert normalize_database_url("sqlite:///data/osint4all.db") == "sqlite:///data/osint4all.db"

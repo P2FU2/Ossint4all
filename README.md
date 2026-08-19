@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="static\readme_banner.png" alt="Ossint4all" width="100%">
+  <img src="static/readme_banner.png" alt="OSINT4ALL" width="100%">
 </p>
 
 # OSINT4ALL
@@ -87,4 +87,33 @@ pytest -q
 
 ```powershell
 docker compose up --build
+```
+
+## Railway
+
+O app sobe com o `Dockerfile`. Use **Postgres** (o disco do container é efêmero; SQLite some no redeploy).
+
+1. Em [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub** → `P2FU2/Script_Jus` (ou `OSINT4ALL` se já renomeou).
+2. No projeto: **New** → **Database** → **PostgreSQL**. O Railway injeta `DATABASE_URL` no serviço web.
+3. No serviço web → **Variables**:
+
+| Variável | Valor |
+|---|---|
+| `ENV` | `production` |
+| `UI_ADMIN_USER` | seu usuário |
+| `UI_ADMIN_PASSWORD` | senha forte |
+| `UI_SESSION_SECRET` | string longa aleatória (ex.: 48 caracteres) |
+| `EXPAND_SYNC` | `true` |
+
+Opcionais (só se tiver chave): `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `OPENCORPORATES_API_TOKEN`, `OPENROUTER_API_KEY`.
+
+4. **Settings** → **Networking** → **Generate Domain**. O painel fica em `https://SEU-DOMINIO.up.railway.app/login`.
+5. Health check: `GET /health` (já está no `railway.toml`).
+
+DJEN/Comunica costuma exigir IP no Brasil. No Railway (EU/US) esse conector pode falhar; CNPJ, TSE, Wikidata e username público seguem ok.
+
+Não commite `.env`. Gere o segredo localmente, por exemplo:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```

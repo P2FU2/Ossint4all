@@ -5,7 +5,18 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def normalize_database_url(url: str) -> str:
+    """Railway entrega postgres://; o SQLAlchemy 2 + psycopg precisa do dialeto explícito."""
+    text = (url or "").strip()
+    if text.startswith("postgres://"):
+        text = "postgresql://" + text[len("postgres://") :]
+    if text.startswith("postgresql://"):
+        text = "postgresql+psycopg://" + text[len("postgresql://") :]
+    return text
 
 
 class Settings(BaseSettings):
@@ -17,6 +28,13 @@ class Settings(BaseSettings):
 
     env: Literal["development", "production", "test"] = "development"
     database_url: str = "sqlite:///data/osint4all.db"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: object) -> object:
+        if isinstance(value, str) and value:
+            return normalize_database_url(value)
+        return value
 
     ui_session_secret: str = "change-me-ui-session-secret"
     ui_admin_user: str = "admin"

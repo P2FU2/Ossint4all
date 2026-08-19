@@ -40,11 +40,17 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("db_ready")
         return
     if args.cmd == "serve":
+        import os
+
         import uvicorn
 
         from osint4all.api import app
 
-        uvicorn.run(app, host=args.host, port=args.port)
+        port = int(os.environ.get("PORT") or args.port)
+        host = args.host
+        if os.environ.get("PORT") and host == "127.0.0.1":
+            host = "0.0.0.0"
+        uvicorn.run(app, host=host, port=port)
         return
     if args.cmd == "worker":
         from osint4all.worker import run_worker
