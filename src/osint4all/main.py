@@ -46,10 +46,11 @@ def main(argv: list[str] | None = None) -> None:
 
         from osint4all.api import app
 
-        port = int(os.environ.get("PORT") or args.port)
-        host = args.host
-        if os.environ.get("PORT") and host == "127.0.0.1":
-            host = "0.0.0.0"
+        # Railway injeta PORT; o start command antigo do Script_Jus usava 8000 e o healthcheck falhava.
+        railway_port = os.environ.get("PORT")
+        port = int(railway_port) if railway_port else args.port
+        host = "0.0.0.0" if railway_port else args.host
+        logger.info("serve host=%s port=%s", host, port)
         uvicorn.run(app, host=host, port=port)
         return
     if args.cmd == "worker":

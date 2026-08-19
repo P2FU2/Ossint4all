@@ -8,21 +8,23 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from osint4all.config import get_settings
-from osint4all.exceptions import ConfigurationError
+from osint4all.logging_setup import get_logger
 from osint4all.paths import project_root
 from osint4all.db.session import init_db, session_scope
 from osint4all.web.auth import seed_admin_user
 from osint4all.web.router import router
 
+logger = get_logger(__name__)
 
-def _assert_production_secrets() -> None:
+
+def _warn_production_secrets() -> None:
     settings = get_settings()
     if not settings.is_production:
         return
     if settings.ui_session_secret in {"", "change-me-ui-session-secret"}:
-        raise ConfigurationError("Defina UI_SESSION_SECRET no Railway (produção).")
+        logger.warning("UI_SESSION_SECRET ainda é o valor padrão — troque no Railway.")
     if not (settings.ui_admin_user and settings.ui_admin_password):
-        raise ConfigurationError("Defina UI_ADMIN_USER e UI_ADMIN_PASSWORD no Railway.")
+        logger.warning("UI_ADMIN_USER / UI_ADMIN_PASSWORD vazios — o login pode falhar.")
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -69,10 +71,13 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _startup() -> None:
-        _assert_production_secrets()
-        init_db()
-        with session_scope() as session:
-            seed_admin_user(session)
+        _warn_production_secrets()
+        try:
+            init_db()
+            with session_scope() as session:
+                seed_admin_user(session)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("startup_db_failed %s", exc)
 
     return app
 
