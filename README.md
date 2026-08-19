@@ -1,9 +1,10 @@
-image.png
 
+<p align="center">
+  <img src="static\readme_banner.png" alt="Ossint4all" width="100%">
+</p>
 
 # OSINT4ALL
 
-Substitui o antigo Monitor Judicial (Script_Jus). O remote git continua `P2FU2/Script_Jus` até você renomear o repositório no GitHub.
 
 Plataforma de investigação OSINT em grafo. Você entra com CPF, CNPJ, nome, e-mail, telefone ou usuário; conectores consultam **fontes públicas e APIs oficiais** e montam a rede de vínculos com citação de origem.
 
