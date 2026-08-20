@@ -1004,6 +1004,19 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .graph-menu button:hover { background: var(--gold-soft); color: var(--gold); }
 .graph-menu .sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .graph-menu .k { color: var(--muted); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px 2px; }
+.graph-menu .picks { padding: 2px 4px 6px; }
+.graph-menu label.chk {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.graph-menu label.chk:hover { background: var(--gold-soft); color: var(--gold); }
+.graph-menu label.chk input { margin-top: 2px; accent-color: var(--gold); }
 .graph-composer {
   position: fixed;
   inset: 0;
@@ -1021,7 +1034,24 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   border: 1px solid var(--gold);
   box-shadow: var(--glow), var(--shadow);
 }
-.graph-stage.is-linking #cy { cursor: crosshair; }
+.graph-stage.is-linking #cy,
+.graph-stage.is-selecting #cy { cursor: crosshair; }
+.graph-select-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(4, 21, 13, 0.94);
+  border: 1px solid var(--gold);
+  box-shadow: var(--glow), var(--shadow);
+}
+.graph-select-bar[hidden] { display: none; }
+.graph-select-bar p { margin: 0; font-size: 0.78rem; color: var(--ink); white-space: nowrap; }
 .graph-stage.is-split .graph-canvas { flex: 1.4; }
 .graph-canvas { position: relative; flex: 1; min-width: 0; min-height: 520px; display: flex; }
 .split-list { width: 340px; overflow: auto; background: #020604; padding: 12px; border-right: 1px solid var(--line); }

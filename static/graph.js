@@ -88,6 +88,8 @@
     minZoom: 0.15,
     maxZoom: 2.4,
     wheelSensitivity: 0.25,
+    boxSelectionEnabled: false,
+    selectionType: "additive",
     style: [
       {
         selector: "node",
@@ -1140,8 +1142,12 @@
   const gcLead = document.getElementById("gc-lead");
   const gcFields = document.getElementById("gc-fields");
   const stage = document.querySelector(".graph-stage");
+  const selectBar = document.getElementById("graph-select-bar");
+  const selectCount = document.getElementById("graph-select-count");
+  const selectBtn = document.getElementById("ct-select");
   let linkFrom = null;
   let composerMode = "";
+  let selectMode = false;
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -1225,6 +1231,11 @@
       gcLead.textContent = "";
       gcFields.appendChild(field("Título", "title", "text", "", { required: true, placeholder: "Hipótese, alerta, fonte…" }));
       gcFields.appendChild(field("Texto", "body", "textarea", "", { placeholder: "O que você quer lembrar" }));
+    } else if (mode === "cnpj") {
+      gcKind.textContent = "empresa";
+      gcTitle.textContent = "Adicionar empresa pelo CNPJ";
+      gcLead.textContent = "Liga ao alvo e busca o QSA / sócios.";
+      gcFields.appendChild(field("CNPJ", "cnpj", "text", "", { required: true, placeholder: "00.000.000/0001-00" }));
     } else if (mode === "diagram") {
       gcKind.textContent = "diagrama";
       gcTitle.textContent = "Adicionar diagrama";
@@ -1271,7 +1282,12 @@
   }
 
   async function postBoard(url, fields, status) {
-    const body = new URLSearchParams({ csrf_token: csrfToken(), ...fields });
+    const body = new URLSearchParams();
+    body.set("csrf_token", csrfToken());
+    Object.entries(fields || {}).forEach(([key, value]) => {
+      if (Array.isArray(value)) value.forEach((item) => body.append(key, String(item)));
+      else if (value != null) body.set(key, String(value));
+    });
     const loading = (status && status.loading) || "Gravando no quadro…";
     const done = (status && status.done) || "Quadro atualizado.";
     mutating = true;
@@ -1348,7 +1364,12 @@
     composerForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(composerForm);
-      if (composerMode === "link") {
+      if (composerMode === "cnpj") {
+        await postBoard(root.dataset.companyUrl, {
+          cnpj: String(data.get("cnpj") || ""),
+          from_id: composer.dataset.entityId || seedNodeId(),
+        }, { loading: "Ligando empresa…", done: "Empresa na fila — QSA entra sozinho." });
+      } else if (composerMode === "link") {
         await postBoard(root.dataset.linkUrl, {
           from_id: String(data.get("from_id") || ""),
           to_id: String(data.get("to_id") || ""),
@@ -1375,6 +1396,112 @@
     });
   }
 
+  function seedNodeId() {
+    const seed = cy.nodes().filter((n) => n.data("seed")).first();
+    return seed && seed.length ? seed.id() : "";
+  }
+
+  function kindLabel(kind) {
+    return ({
+      EMAIL: "E-mail",
+      USERNAME: "Rede social",
+      PHONE: "Telefone",
+      CPF: "CPF",
+      NAME: "Nome",
+      CNPJ: "CNPJ",
+      COMPANIES: "Empresas",
+      QSA: "QSA / sócios",
+    })[kind] || kind;
+  }
+
+  function canProbe(kind) {
+    return !!({
+      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1,
+    })[kind];
+  }
+
+  function menuCheck(kind, extra, checked) {
+    const label = document.createElement("label");
+    label.className = "chk";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.name = "probe_kind";
+    box.value = kind;
+    box.checked = !!checked;
+    const text = extra ? kindLabel(kind) + " · " + extra : kindLabel(kind);
+    label.append(box, document.createTextNode(" " + text));
+    return label;
+  }
+
+  function probeKinds(id, kinds, label) {
+    const clean = (kinds || []).filter(Boolean);
+    if (!clean.length) {
+      if (window.setActionStatus) window.setActionStatus("error", "Escolha ao menos um dado para buscar.");
+      return;
+    }
+    return postBoard(
+      root.dataset.entityBase + id + "/procurar",
+      { kinds: clean },
+      { loading: "Buscando " + (label || clean.map(kindLabel).join(", ")) + "…", done: "Busca na fila — o grafo atualiza sozinho." }
+    );
+  }
+
+  function validateNode(id) {
+    return postBoard(root.dataset.entityBase + id + "/confirmar", {}, {
+      loading: "Validando…",
+      done: "Nó validado.",
+    });
+  }
+
+  function selectedRemovable() {
+    return cy.nodes(":selected").filter((node) => !node.data("seed"));
+  }
+
+  function refreshSelectBar() {
+    if (!selectCount) return;
+    const n = selectedRemovable().length;
+    const seeds = cy.nodes(":selected").filter((node) => node.data("seed")).length;
+    if (!n && !seeds) {
+      selectCount.textContent = "Arraste no quadro para marcar nós.";
+      return;
+    }
+    selectCount.textContent = n
+      ? n + " nó(s) para excluir" + (seeds ? " · alvo permanece" : "")
+      : "O alvo não pode ser excluído.";
+  }
+
+  function setSelectMode(on) {
+    selectMode = !!on;
+    hideMenu();
+    stopLink();
+    if (stage) stage.classList.toggle("is-selecting", selectMode);
+    if (selectBtn) selectBtn.setAttribute("aria-pressed", selectMode ? "true" : "false");
+    if (selectBar) selectBar.hidden = !selectMode;
+    cy.boxSelectionEnabled(selectMode);
+    cy.userPanningEnabled(!selectMode);
+    cy.autoungrabify(selectMode);
+    if (!selectMode) {
+      cy.nodes().unselect();
+    } else if (window.setActionStatus) {
+      window.setActionStatus("loading", "Arraste para marcar uma área. O alvo não sai.");
+    }
+    refreshSelectBar();
+  }
+
+  function deleteSelectedArea() {
+    const ids = selectedRemovable().map((node) => node.id());
+    if (!ids.length) {
+      if (window.setActionStatus) window.setActionStatus("error", "Nenhum nó além do alvo nesta área.");
+      return;
+    }
+    if (!confirm("Excluir " + ids.length + " nó(s) desta área? O alvo permanece.")) return;
+    postBoard(root.dataset.batchUrl, { entity_ids: ids }, {
+      loading: "Removendo a área…",
+      done: ids.length + " nó(s) excluídos.",
+    });
+    setSelectMode(false);
+  }
+
   function showMenu(evt, kind) {
     if (!menu) return;
     if (window.hideAppTip) window.hideAppTip();
@@ -1387,18 +1514,33 @@
       const node = evt.target;
       const type = node.data("type") || "";
       const label = node.data("name") || node.data("label") || "";
-      head.textContent = "nó";
+      const status = node.data("status") || "";
+      const ids = node.data("ids") || [];
+      head.textContent = node.data("seed") ? "alvo" : "nó";
       menu.appendChild(head);
-      menu.appendChild(menuButton(
-        type === "ORG" ? "Procurar empresas e QSA" : "Procurar informações deste nome",
-        () => probeNode(node.id(), label, "NAME")
-      ));
-      (node.data("ids") || []).forEach((item) => {
-        if (!item || !item.kind || item.kind === "NAME") return;
-        menu.appendChild(menuButton("Procurar a partir de " + formatCardId(item), () => {
-          probeNode(node.id(), formatCardId(item), item.kind);
+      if (type === "ORG") {
+        menu.appendChild(menuButton("Buscar sócios (QSA)", () => probeKinds(node.id(), ["QSA"], "sócios")));
+        menu.appendChild(menuButton("Buscar empresas relacionadas", () => probeKinds(node.id(), ["COMPANIES"], "empresas")));
+      } else {
+        const picks = document.createElement("div");
+        picks.className = "picks";
+        const hint = document.createElement("div");
+        hint.className = "k";
+        hint.textContent = "o que buscar";
+        picks.appendChild(hint);
+        picks.appendChild(menuCheck("NAME", label, false));
+        ids.forEach((item) => {
+          if (!item || !item.kind || item.kind === "NAME" || !canProbe(item.kind)) return;
+          picks.appendChild(menuCheck(item.kind, formatCardId(item), false));
+        });
+        menu.appendChild(picks);
+        menu.appendChild(menuButton("Buscar dados selecionados", () => {
+          const chosen = [...menu.querySelectorAll("input[name=probe_kind]:checked")].map((box) => box.value);
+          probeKinds(node.id(), chosen, chosen.map(kindLabel).join(", "));
         }));
-      });
+        menu.appendChild(menuButton("Buscar empresas deste alvo", () => probeKinds(node.id(), ["COMPANIES", "NAME"], "empresas")));
+        menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: node.id() })));
+      }
       menu.appendChild(menuButton("Abrir ficha", () => {
         window.location.href = root.dataset.entityBase + node.id();
       }));
@@ -1408,6 +1550,9 @@
       const sep = document.createElement("div");
       sep.className = "sep";
       menu.appendChild(sep);
+      if (status !== "confirmed") {
+        menu.appendChild(menuButton("Validar este nó", () => validateNode(node.id())));
+      }
       menu.appendChild(menuButton("Expandir daqui", () => {
         postBoard(root.dataset.entityBase + node.id() + "/expandir", {}, {
           loading: "Rodando expansão…",
@@ -1418,14 +1563,16 @@
         const text = node.data("name") || node.data("label") || "";
         if (navigator.clipboard) navigator.clipboard.writeText(text);
       }));
-      menu.appendChild(menuButton("Desligar nó", () => {
-        if (confirm("Desligar este nó e tudo que só existe por causa dele?")) {
-          postBoard(root.dataset.entityBase + node.id() + "/desligar", {}, {
-            loading: "Removendo…",
-            done: "Nó desligado.",
-          });
-        }
-      }));
+      if (!node.data("seed")) {
+        menu.appendChild(menuButton(status === "confirmed" ? "Excluir nó" : "Excluir (não validado)", () => {
+          if (confirm("Excluir este nó e o que só existe por causa dele?")) {
+            postBoard(root.dataset.entityBase + node.id() + "/desligar", {}, {
+              loading: "Removendo…",
+              done: "Nó excluído.",
+            });
+          }
+        }));
+      }
     } else if (kind === "edge") {
       const edge = evt.target;
       head.textContent = "seta";
@@ -1444,6 +1591,8 @@
     } else {
       head.textContent = "quadro";
       menu.appendChild(head);
+      menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: seedNodeId() })));
+      menu.appendChild(menuButton("Selecionar área e excluir", () => setSelectMode(true)));
       menu.appendChild(menuButton("Adicionar anotação", () => openComposer("note")));
       menu.appendChild(menuButton("Adicionar diagrama", () => openComposer("diagram")));
       menu.appendChild(menuButton("Adicionar ligação (seta)", () => startLink(null)));
@@ -1453,24 +1602,59 @@
 
   cy.on("cxttap", "node", (evt) => {
     evt.preventDefault();
+    if (selectMode) return;
     showMenu(evt, "node");
   });
   cy.on("cxttap", "edge", (evt) => {
     evt.preventDefault();
+    if (selectMode) return;
     showMenu(evt, "edge");
   });
   cy.on("cxttap", (evt) => {
     if (evt.target !== cy) return;
     evt.preventDefault();
+    if (selectMode) {
+      setSelectMode(false);
+      return;
+    }
     showMenu(evt, "bg");
   });
-  root.addEventListener("contextmenu", (event) => event.preventDefault());
+  function blockBrowserMenu(event) {
+    if (!event.target || !event.target.closest) return;
+    if (event.target.closest(".graph-main, .graph-panel, .graph-stage, .graph-canvas, #cy, #graph-menu, #graph-composer, .graph-balloon, .graph-select-bar, .canvas-tools")) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+  document.addEventListener("contextmenu", blockBrowserMenu, true);
+  if (menu) {
+    menu.addEventListener("click", (event) => event.stopPropagation());
+    menu.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  }
+  if (selectBtn) selectBtn.addEventListener("click", () => setSelectMode(!selectMode));
+  const selectDelete = document.getElementById("graph-select-delete");
+  const selectCancel = document.getElementById("graph-select-cancel");
+  if (selectDelete) selectDelete.addEventListener("click", deleteSelectedArea);
+  if (selectCancel) selectCancel.addEventListener("click", () => setSelectMode(false));
+  if (selectBar) selectBar.addEventListener("click", (event) => event.stopPropagation());
+  cy.on("boxend", () => {
+    if (!selectMode) return;
+    cy.nodes(":selected").filter((node) => node.data("seed")).unselect();
+    refreshSelectBar();
+  });
+  cy.on("select unselect", "node", () => {
+    if (selectMode) refreshSelectBar();
+  });
   document.addEventListener("click", hideMenu);
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     hideMenu();
     closeComposer();
     stopLink();
+    if (selectMode) setSelectMode(false);
   });
 
   document.querySelectorAll('form[action*="/explodir"], form[action*="/processar"]').forEach((form) => {

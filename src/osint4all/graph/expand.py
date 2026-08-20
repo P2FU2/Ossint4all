@@ -14,6 +14,26 @@ from osint4all.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
+PROBE_CONNECTORS = {
+    "EMAIL": frozenset({"email_public", "web_search", "username_public", "google_public"}),
+    "USERNAME": frozenset({"username_public", "web_search", "google_public"}),
+    "PHONE": frozenset({"phone_public", "web_search"}),
+    "NAME": frozenset({"socio_search", "web_search", "wikidata", "tse", "google_public"}),
+    "CPF": frozenset({"socio_search", "tse", "transparencia", "web_search"}),
+    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search"}),
+    "COMPANIES": frozenset({"socio_search", "cnpj_receita", "opencorporates"}),
+    "QSA": frozenset({"cnpj_receita", "socio_search"}),
+}
+
+
+def connectors_for_kinds(kinds: list[str] | tuple[str, ...] | None) -> set[str] | None:
+    if not kinds:
+        return None
+    wanted: set[str] = set()
+    for kind in kinds:
+        wanted |= PROBE_CONNECTORS.get(str(kind or "").upper(), set())
+    return wanted
+
 
 class ExpansionEngine:
     def __init__(
@@ -40,8 +60,11 @@ class ExpansionEngine:
             profile=case_target_profile(session, investigation.id),
         )
         applied = 0
+        scoped = connectors_for_kinds(list((entity.attrs or {}).get("probe_kinds") or []))
         for connector in self.connectors:
             if enabled and connector.name not in enabled:
+                continue
+            if scoped is not None and connector.name not in scoped:
                 continue
             if not connector.accepts(entity):
                 continue
@@ -93,6 +116,10 @@ class ExpansionEngine:
                 max_attempts=self.settings.job_max_attempts,
             )
             applied += 1
+        attrs = dict(entity.attrs or {})
+        if "probe_kinds" in attrs:
+            attrs.pop("probe_kinds", None)
+            entity.attrs = attrs
         entity.last_seen_at = utcnow()
         return applied
 

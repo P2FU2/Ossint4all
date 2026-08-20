@@ -40,8 +40,10 @@ from osint4all.db.repository import (
     create_manual_edge,
     delete_case_note,
     delete_edge,
+    detach_entities,
     detach_entity,
     enqueue_expand,
+    find_entity_by_key,
     enqueue_qsa_network,
     graph_counts,
     graph_payload,
@@ -53,14 +55,16 @@ from osint4all.db.repository import (
     purge_investigation,
     update_edge,
 )
+from osint4all.connectors.base import FoundEntity
 from osint4all.graph.expand import process_pending_jobs
+from osint4all.graph.resolve import upsert_found_entity
 from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.media import collect_target_media, fields_from_identifiers
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
 from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results, tool_id_for_kind
-from osint4all.identifiers import collect_form_seeds
+from osint4all.identifiers import collect_form_seeds, parse_seed
 from osint4all.validators import looks_like_plate, validate_cnpj
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
 from osint4all.security import mask_identifier
@@ -1274,6 +1278,7 @@ def probe_node(
     session: Session = Depends(db_session),
     csrf_token: str = Form(""),
     kind: str = Form(""),
+    kinds: list[str] = Form(default=[]),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
@@ -1281,6 +1286,12 @@ def probe_node(
     if not inv or not entity or entity.investigation_id != inv.id:
         _set_flash(request, "error", "Não foi possível procurar neste nó.")
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    selected = [str(item).strip().upper() for item in list(kinds or []) + ([kind] if kind else []) if str(item).strip()]
+    selected = list(dict.fromkeys(selected))
+    if selected:
+        attrs = dict(entity.attrs or {})
+        attrs["probe_kinds"] = selected
+        entity.attrs = attrs
     enqueue_expand(
         session,
         investigation=inv,
@@ -1294,7 +1305,7 @@ def probe_node(
         "entity.probe",
         username=user.username,
         investigation_id=inv.id,
-        details={"entity_id": entity.id, "name": entity.display_name, "kind": kind},
+        details={"entity_id": entity.id, "name": entity.display_name, "kinds": selected or [kind]},
     )
     session.commit()
     if _wants_json(request):
@@ -1357,7 +1368,8 @@ def confirm_node(
         enqueue_expand(session, investigation=inv, entity=entity, depth=entity.depth, max_attempts=get_settings().job_max_attempts)
     write_audit(session, "entity.confirm", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id})
     session.commit()
-    _sync_expand(investigation_id)
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, confirmed=True)
     _set_flash(request, "ok", "Nó confirmado. A próxima camada pode expandir daqui.")
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
@@ -1388,8 +1400,8 @@ def verify_node(
         enqueue_expand(session, investigation=inv, entity=entity, depth=entity.depth, max_attempts=get_settings().job_max_attempts)
     write_audit(session, "entity.verify", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id, "verdict": verdict})
     session.commit()
-    if verdict == "confirmed":
-        _sync_expand(investigation_id)
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, verdict=verdict)
     _set_flash(request, "ok", f"Veredito: {verdict_label(verdict)}.")
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
@@ -1415,6 +1427,84 @@ def detach_node(
         if _wants_json(request):
             return _json_case(session, investigation_id, ok=False, error="Esse nó já não está no caso.")
         _set_flash(request, "error", "Esse nó já não está no caso.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/entidades/lote/desligar")
+def detach_nodes(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    entity_ids: list[str] = Form(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    removed = detach_entities(session, investigation_id, [item for item in entity_ids if item], keep_seeds=True)
+    write_audit(session, "entity.detach_batch", username=user.username, investigation_id=investigation_id, details={"removed": removed})
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, removed=removed)
+    _set_flash(request, "ok", f"{removed} nó(s) removidos. O alvo permanece.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/empresas")
+def add_company(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    cnpj: str = Form(""),
+    from_id: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    seed = parse_seed(cnpj, forced_kind="CNPJ")
+    if not seed:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "CNPJ inválido"}, status_code=400)
+        _set_flash(request, "error", "Informe um CNPJ válido.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    org = find_entity_by_key(session, inv.id, seed.canonical_key)
+    if not org:
+        org = upsert_found_entity(
+            session,
+            inv,
+            FoundEntity(
+                entity_type="ORG",
+                kind="CNPJ",
+                value=seed.value,
+                display_name=seed.display_name,
+                confidence=0.99,
+            ),
+            depth=1,
+            is_seed=False,
+        )
+    attrs = dict(org.attrs or {})
+    attrs["probe_kinds"] = ["QSA"]
+    org.attrs = attrs
+    enqueue_expand(session, investigation=inv, entity=org, depth=org.depth, max_attempts=get_settings().job_max_attempts, force=True)
+    source = session.get(Entity, from_id) if from_id else None
+    if source and source.investigation_id == inv.id and source.id != org.id:
+        create_manual_edge(session, inv, from_id=source.id, to_id=org.id, rel_type="EMPRESA", note="CNPJ acrescentado no grafo")
+    write_audit(session, "investigation.add_company", username=user.username, investigation_id=inv.id, details={"cnpj": seed.display_name})
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, queued=True)
+    _set_flash(request, "ok", "Empresa ligada ao alvo. QSA e sócios entram na fila.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 

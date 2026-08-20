@@ -3,7 +3,7 @@ from __future__ import annotations
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.db.models import Entity
 from osint4all.db.session import session_scope
-from osint4all.graph.expand import ExpansionEngine, process_pending_jobs
+from osint4all.graph.expand import ExpansionEngine, connectors_for_kinds, process_pending_jobs
 from osint4all.graph.seed import attach_plate_owner, create_investigation
 from osint4all.identifiers import parse_seed
 
@@ -45,6 +45,75 @@ class FakeCnpj:
 
     def health(self) -> dict:
         return {"source": self.name, "enabled": True}
+
+
+def test_connectors_for_kinds_scopes_sources() -> None:
+    assert connectors_for_kinds(None) is None
+    assert connectors_for_kinds([]) is None
+    email = connectors_for_kinds(["EMAIL"])
+    assert email is not None
+    assert "email_public" in email
+    assert "cnpj_receita" not in email
+    companies = connectors_for_kinds(["COMPANIES"])
+    assert companies is not None
+    assert "socio_search" in companies
+    mixed = connectors_for_kinds(["EMAIL", "QSA"])
+    assert mixed is not None
+    assert "email_public" in mixed
+    assert "cnpj_receita" in mixed
+    assert connectors_for_kinds(["BIRTHDATE"]) == set()
+
+
+class _CountConnector:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.calls = 0
+
+    def accepts(self, entity: Entity) -> bool:
+        return True
+
+    def collect(self, entity: Entity, ctx: ExpandContext) -> ConnectorResult:
+        self.calls += 1
+        return ConnectorResult()
+
+    def health(self) -> dict:
+        return {"source": self.name, "enabled": True}
+
+
+def test_probe_kinds_runs_only_selected_connectors(settings) -> None:
+    email = _CountConnector("email_public")
+    receita = _CountConnector("cnpj_receita")
+    seed = parse_seed("ana@example.com", forced_kind="EMAIL")
+    assert seed
+    with session_scope() as session:
+        inv = create_investigation(
+            session,
+            title="Alvo",
+            hypothesis="email",
+            seeds=[seed],
+            connectors=["email_public", "cnpj_receita"],
+            max_depth=2,
+            monitor=False,
+            created_by="tester",
+        )
+        entity = inv.entities[0]
+        attrs = dict(entity.attrs or {})
+        attrs["probe_kinds"] = ["EMAIL"]
+        entity.attrs = attrs
+        inv_id = inv.id
+        entity_id = entity.id
+
+    engine = ExpansionEngine(settings=settings, connectors=[email, receita])
+    with session_scope() as session:
+        from osint4all.db.models import Investigation
+
+        inv = session.get(Investigation, inv_id)
+        entity = session.get(Entity, entity_id)
+        assert inv and entity
+        engine.expand_entity(inv, entity, depth=0)
+        assert "probe_kinds" not in (entity.attrs or {})
+    assert email.calls == 1
+    assert receita.calls == 0
 
 
 def test_engine_expands_and_enqueues_child(settings) -> None:

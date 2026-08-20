@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=24" defer></script>
+<script src="/static/graph.js?v=25" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -186,10 +186,13 @@
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
   <div class="graph-canvas">
-    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
   </div>
   <div class="canvas-tools" aria-label="Canvas">
     <div class="canvas-tools-group">
+      <button type="button" class="canvas-btn" id="ct-select" data-tip="Selecionar área e excluir nós" aria-label="Selecionar área" aria-pressed="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" stroke-dasharray="2 1.6"/></svg>
+      </button>
       <button type="button" class="canvas-btn" id="ct-dots" data-tip="Fundo pontilhado" aria-label="Fundo pontilhado" aria-pressed="true">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="5" r="1.15"/><circle cx="10" cy="5" r="1.15"/><circle cx="15" cy="5" r="1.15"/><circle cx="5" cy="10" r="1.15"/><circle cx="10" cy="10" r="1.15"/><circle cx="15" cy="10" r="1.15"/><circle cx="5" cy="15" r="1.15"/><circle cx="10" cy="15" r="1.15"/><circle cx="15" cy="15" r="1.15"/></svg>
       </button>
@@ -228,6 +231,11 @@
     <label><input type="checkbox" data-type="VEHICLE" checked /> Veículo</label>
     <label><input type="checkbox" data-type="PUBLICATION" checked /> Publicação</label>
     <label><input type="checkbox" data-type="NOTE" checked /> Anotação</label>
+  </div>
+  <div id="graph-select-bar" class="graph-select-bar" hidden>
+    <p id="graph-select-count">Arraste no quadro para marcar nós.</p>
+    <button type="button" class="btn danger" id="graph-select-delete">Excluir selecionados</button>
+    <button type="button" class="btn" id="graph-select-cancel">Cancelar</button>
   </div>
   <aside id="graph-balloon" class="graph-balloon" hidden>
     <p class="type-tag" id="gb-kind"></p>

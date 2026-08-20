@@ -10,6 +10,7 @@ from osint4all.db.repository import (
     create_manual_edge,
     delete_case_note,
     delete_edge,
+    detach_entities,
     detach_entity,
     graph_counts,
     graph_payload,
@@ -205,6 +206,56 @@ def test_detach_removes_derived_people_and_companies(settings, db) -> None:
     assert db.get(Entity, partner.id) is None
     assert db.get(Entity, person.id) is not None
     assert db.get(Entity, extra.id) is not None
+
+
+def test_detach_entities_keeps_seed(settings, db) -> None:
+    inv = _case(db)
+    person = inv.entities[0]
+    extra = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:00000000000191",
+        display_name="Solta",
+        attrs={"status": "unconfirmed"},
+        depth=1,
+    )
+    db.add(extra)
+    db.flush()
+    removed = detach_entities(db, inv.id, [person.id, extra.id], keep_seeds=True)
+    assert removed == 1
+    assert db.get(Entity, person.id) is not None
+    assert db.get(Entity, extra.id) is None
+
+
+def test_add_company_links_to_target_without_becoming_seed(settings, db) -> None:
+    from osint4all.graph.resolve import upsert_found_entity
+
+    inv = _case(db)
+    person = inv.entities[0]
+    seed = parse_seed("33.000.167/0001-01", forced_kind="CNPJ")
+    assert seed
+    org = upsert_found_entity(
+        db,
+        inv,
+        FoundEntity(
+            entity_type="ORG",
+            kind="CNPJ",
+            value=seed.value,
+            display_name=seed.display_name,
+            confidence=0.99,
+        ),
+        depth=1,
+        is_seed=False,
+    )
+    attrs = dict(org.attrs or {})
+    attrs["probe_kinds"] = ["QSA"]
+    org.attrs = attrs
+    edge = create_manual_edge(db, inv, from_id=person.id, to_id=org.id, rel_type="EMPRESA", note="CNPJ")
+    db.flush()
+    assert org.is_seed is False
+    assert org.attrs["probe_kinds"] == ["QSA"]
+    assert edge is not None
+    assert edge.rel_type == "EMPRESA"
 
 
 def test_same_person_stays_in_one_block(settings, db) -> None:

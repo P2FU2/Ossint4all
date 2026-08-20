@@ -62,6 +62,7 @@ EDGE_REL_TYPES = (
     "PARTE",
     "PAI",
     "MAE",
+    "EMPRESA",
 )
 
 
@@ -862,6 +863,25 @@ def _delete_entity_local(session: Session, investigation_id: str, entity: Entity
     session.execute(delete(CaseNote).where(CaseNote.entity_id == entity_id))
     session.delete(entity)
     session.flush()
+
+
+def detach_entities(
+    session: Session,
+    investigation_id: str,
+    entity_ids: list[str],
+    *,
+    keep_seeds: bool = True,
+) -> int:
+    seeds = seed_entity_ids(session, investigation_id) if keep_seeds else set()
+    removed = 0
+    seen: set[str] = set()
+    for entity_id in entity_ids:
+        if not entity_id or entity_id in seen or entity_id in seeds:
+            continue
+        seen.add(entity_id)
+        if detach_entity(session, investigation_id, entity_id):
+            removed += 1
+    return removed
 
 
 def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bool:
