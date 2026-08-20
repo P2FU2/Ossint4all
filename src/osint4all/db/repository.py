@@ -66,6 +66,8 @@ EDGE_REL_TYPES = (
     "PAI",
     "MAE",
     "EMPRESA",
+    "TITULAR",
+    "PATRIMONIO",
 )
 
 
@@ -91,6 +93,8 @@ CASE_ID_LABELS = {
     "FATHER": "Pai",
     "MOTHER": "Mãe",
     "URL": "URL",
+    "BANK": "Conta",
+    "WEALTH": "Patrimônio",
 }
 _TARGET_FIELD_KINDS = frozenset(
     {"NAME", "CPF", "CNPJ", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ", "BIRTHDATE"}
@@ -777,6 +781,17 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "username",
                     "identity_match",
                     "places",
+                    "banco",
+                    "agencia",
+                    "conta",
+                    "tipo_conta",
+                    "pix",
+                    "fonte",
+                    "valor",
+                    "ano",
+                    "patrimonio_estimado",
+                    "patrimonio_ano",
+                    "patrimonio_fonte",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
             },

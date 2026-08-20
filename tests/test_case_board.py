@@ -332,6 +332,45 @@ def test_add_company_links_to_target_without_becoming_seed(settings, db) -> None
     assert edge.rel_type == "EMPRESA"
 
 
+def test_add_bank_and_wealth_link_to_target(settings, db) -> None:
+    from osint4all.graph.assets import add_bank_account, add_wealth_estimate
+
+    inv = _case(db)
+    person = inv.entities[0]
+    bank = add_bank_account(
+        db,
+        inv,
+        person,
+        bank="Itaú",
+        agency="0001",
+        account="12345-6",
+        account_type="corrente",
+        pix="ehleite@uol.com.br",
+        source="notícia pública",
+    )
+    wealth = add_wealth_estimate(
+        db,
+        inv,
+        person,
+        amount="R$ 2.400.000",
+        year="2024",
+        source="declaração em processo",
+    )
+    db.flush()
+    assert bank is not None
+    assert bank.entity_type == "ASSET"
+    assert bank.attrs["banco"] == "Itaú"
+    assert wealth is not None
+    assert wealth.display_name.startswith("Patrimônio")
+    assert person.attrs["patrimonio_estimado"] == "R$ 2.400.000"
+    assert person.attrs["patrimonio_ano"] == "2024"
+    rels = {e.rel_type for e in db.scalars(select(Edge).where(Edge.investigation_id == inv.id))}
+    assert "TITULAR" in rels
+    assert "PATRIMONIO" in rels
+    assert add_bank_account(db, inv, person) is None
+    assert add_wealth_estimate(db, inv, person, amount="") is None
+
+
 def test_same_person_stays_in_one_block(settings, db) -> None:
     seed = parse_seed("Eduardo Hermelino Leite", forced_kind="NAME")
     inv = create_investigation(

@@ -1,4 +1,4 @@
-from osint4all.consult import KIND_LABELS, _graph_from_cnpj, ficha_from_cnpj_result, public_ficha, resolve_kind, run_consult
+from osint4all.consult import ConsultGraph, ConsultHit, ConsultResult, GraphNode, KIND_LABELS, _graph_from_cnpj, ficha_from_cnpj_result, public_ficha, resolve_kind, run_consult
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 
 
@@ -141,3 +141,27 @@ def test_ficha_from_cnpj_lists_opening_email_and_partners() -> None:
     offline = public_ficha("19215658000149", mode="CNPJ")
     assert offline["ok"]
     assert any(label == "CNPJ" for label, _ in offline["facts"])
+
+
+def test_assignable_pairs_include_query_and_cnpjs() -> None:
+    result = ConsultResult(
+        kind="NAME",
+        query="Eduardo Hermelino Leite",
+        title="Eduardo Hermelino Leite",
+        summary="2 empresa(s)",
+        ok=True,
+        hits=[
+            ConsultHit("EHL GESTAO", "ATIVA · SP · 33000167000101", "https://minhareceita.org/33000167000101", "empresa"),
+            ConsultHit("Aleph / OCCRP", "datasets", "https://aleph.occrp.org/search?q=eduardo", "fonte"),
+        ],
+        graph=ConsultGraph(
+            nodes=[
+                GraphNode("person", "Eduardo Hermelino Leite", "person", "nome consultado"),
+                GraphNode("org-0", "EHL GESTAO", "org", "33000167000101"),
+            ]
+        ),
+    )
+    pairs = result.assignable_pairs()
+    assert ("NAME", "Eduardo Hermelino Leite") in pairs
+    assert ("CNPJ", "33000167000101") in pairs
+    assert all(kind != "FONTE" for kind, _ in pairs)

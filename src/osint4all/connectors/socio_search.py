@@ -257,19 +257,26 @@ class SocioSearchConnector:
         origin = entity.canonical_key
         result = ConnectorResult()
         if cpf:
-            result.merge(self.collect_by_cpf(cpf, origin))
+            cpf_hit = self.collect_by_cpf(cpf, origin)
+            if cpf_hit.entities:
+                return cpf_hit
+            result.merge(ConnectorResult(notes=list(cpf_hit.notes)))
+        if not name:
             return result
+        probe = {str(item).upper() for item in (getattr(entity, "attrs", None) or {}).get("probe_kinds") or []}
+        explicit = bool(probe & {"COMPANIES", "CNPJ", "QSA"})
         profile = getattr(ctx, "profile", None)
-        if name_search_blocked(name, profile):
+        if not cpf and not explicit and name_search_blocked(name, profile):
             result.notes.append(
                 "Este é o alvo e o caso já tem CPF/contato. A busca por nome fica desligada para não misturar homônimo."
             )
             return result
-        result.merge(self._casadosdados(name, origin, name_only=True))
+        name_only = not bool(cpf)
+        result.merge(self._casadosdados(name, origin, name_only=name_only, cpf=cpf or ""))
         if self.settings.brasil_io_api_token:
-            result.merge(self._brasil_io(name, origin, name_only=True))
+            result.merge(self._brasil_io(name, origin, name_only=name_only, cpf=cpf or ""))
         if not result.entities:
-            result.merge(self._web_mentions(name, origin, ctx, name_only=True))
+            result.merge(self._web_mentions(name, origin, ctx, name_only=name_only, cpf=cpf or ""))
         if not result.entities:
             result.notes.append("Nenhuma empresa com QSA que confirme este nome. Nada foi ligado ao alvo.")
         return result
@@ -317,7 +324,7 @@ class SocioSearchConnector:
             )
         return out
 
-    def _casadosdados(self, name: str, origin: str, *, name_only: bool = True) -> ConnectorResult:
+    def _casadosdados(self, name: str, origin: str, *, name_only: bool = True, cpf: str = "") -> ConnectorResult:
         payload = {
             "busca_textual": [
                 {
@@ -346,9 +353,9 @@ class SocioSearchConnector:
         except Exception:
             return ConnectorResult()
         rows = _walk_cnpj_rows(data)
-        pairs = confirm_company_rows(rows, name=name, fetch=self._qsa_payload)
+        pairs = confirm_company_rows(rows, name=name, cpf=cpf, fetch=self._qsa_payload)
         if not pairs:
-            return ConnectorResult(notes=["Casa dos Dados achou CNPJ, mas o QSA oficial não lista este nome."])
+            return ConnectorResult(notes=["Casa dos Dados achou CNPJ, mas o QSA oficial não lista esta pessoa."])
         return self._emit_verified(
             pairs,
             origin=origin,
@@ -385,7 +392,7 @@ class SocioSearchConnector:
             source_url="https://brasil.io/dataset/socios-brasil/socios/",
         )
 
-    def _brasil_io(self, name: str, origin: str, *, name_only: bool = True) -> ConnectorResult:
+    def _brasil_io(self, name: str, origin: str, *, name_only: bool = True, cpf: str = "") -> ConnectorResult:
         resp = self.http.request(
             "GET",
             "https://api.brasil.io/v1/dataset/socios-brasil/socios/data/",
@@ -398,9 +405,9 @@ class SocioSearchConnector:
         rows = data.get("results") if isinstance(data, dict) else data
         if not isinstance(rows, list):
             rows = []
-        pairs = confirm_company_rows(rows if isinstance(rows, list) else [], name=name, fetch=self._qsa_payload)
+        pairs = confirm_company_rows(rows if isinstance(rows, list) else [], name=name, cpf=cpf, fetch=self._qsa_payload)
         if not pairs:
-            return ConnectorResult(notes=["Brasil.IO achou CNPJ, mas o QSA oficial não lista este nome."])
+            return ConnectorResult(notes=["Brasil.IO achou CNPJ, mas o QSA oficial não lista esta pessoa."])
         return self._emit_verified(
             pairs,
             origin=origin,
@@ -408,7 +415,7 @@ class SocioSearchConnector:
             source_url="https://brasil.io/dataset/socios-brasil/socios/",
         )
 
-    def _web_mentions(self, name: str, origin: str, ctx: ExpandContext, *, name_only: bool = True) -> ConnectorResult:
+    def _web_mentions(self, name: str, origin: str, ctx: ExpandContext, *, name_only: bool = True, cpf: str = "") -> ConnectorResult:
         from osint4all.connectors.cnpj_receita import CnpjReceitaConnector, parse_cnpj_payload
         from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 
@@ -428,7 +435,7 @@ class SocioSearchConnector:
                 parsed = parse_cnpj_payload(receita._fetch(cnpj))
             except Exception:
                 continue
-            if partner_link_verdict(parsed, name=name):
+            if partner_link_verdict(parsed, name=name, cpf=cpf):
                 org = next((e for e in parsed.entities if e.kind == "CNPJ"), None)
                 verified.append({"cnpj": cnpj, "razao_social": (org.display_name if org else cnpj)})
         if not verified:

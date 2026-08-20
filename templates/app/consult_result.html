@@ -64,6 +64,10 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="kind" value="{{ result.kind }}" />
       <input type="hidden" name="value" value="{{ result.query }}" />
+      {% for pair_kind, pair_value in result.assignable_pairs() %}
+      <input type="hidden" name="kinds" value="{{ pair_kind }}" />
+      <input type="hidden" name="values" value="{{ pair_value }}" />
+      {% endfor %}
       {% if result.kind == "PLATE" %}
       <label class="save-extra" data-tip="Opcional. Só se você já tem o nome de fonte lícita.">
         Dono conhecido
@@ -85,6 +89,10 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="kind" value="{{ result.kind }}" />
       <input type="hidden" name="value" value="{{ result.query }}" />
+      {% for pair_kind, pair_value in result.assignable_pairs() %}
+      <input type="hidden" name="kinds" value="{{ pair_kind }}" />
+      <input type="hidden" name="values" value="{{ pair_value }}" />
+      {% endfor %}
       {% if result.kind == "PLATE" and not cases %}
       <label class="save-extra">Dono conhecido
         <input name="owner" placeholder="Nome (opcional)" autocomplete="off" />

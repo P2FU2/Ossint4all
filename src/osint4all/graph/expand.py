@@ -23,6 +23,8 @@ PROBE_CONNECTORS = {
     "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search"}),
     "COMPANIES": frozenset({"socio_search", "cnpj_receita"}),
     "QSA": frozenset({"cnpj_receita", "socio_search"}),
+    "PROCESSOS": frozenset({"djen", "datajud"}),
+    "CNJ": frozenset({"djen", "datajud"}),
 }
 
 

@@ -39,10 +39,10 @@ MODES = (
     ("USERNAME", "Rede social", "URLs públicas (GitHub, X, Telegram…). Sem login.", "@usuario"),
     ("PHONE", "Telefone", "DDD, cidade e menções públicas. Sem operadora.", "11 99999-0000"),
     ("NAME", "Sócio / nome", "Empresas do quadro societário na base aberta da Receita.", "Nome e sobrenome"),
+    ("PROCESSOS", "Processos", "Nome, CPF, CNPJ ou número CNJ. DataJud, DJEN, PJe e menções públicas. Sem tribunal fechado.", "nome ou 0000123-45.2024.8.26.0100"),
     ("CNPJ", "CNPJ", "Ficha, QSA e mapa de empresas relacionadas (sócios PJ e outras firmas dos sócios).", "00.000.000/0001-00"),
     ("CPF", "CPF", "Valida, cruza QSA público, sanções e menções. A Receita não devolve o nome por API.", "000.000.000-00"),
     ("EMAIL", "E-mail", "Local-part, Keybase, Gravatar e redes públicas. Sem caixa nem leak.", "nome@dominio.com"),
-    ("PROCESSOS", "Processo", "CNJ ou nome da parte. DataJud, DJEN, PJe e menções públicas. Sem tribunal fechado.", "0000123-45.2024.8.26.0100 ou nome"),
     ("NEGATIVA", "Negativa", "CEIS, CNEP, TCU, CVM, TSE e menções de condenação em fonte oficial.", "Nome, CPF ou CNPJ"),
     ("IMOVEL", "Imóvel", "Leilão Caixa, SNCR, DOU. Sem matrícula de cartório nem IPTU autenticado.", "Nome, CPF, CNPJ ou endereço"),
     ("DIARIO", "Diário", "DOU, Imprensa Nacional, DJEN e diários estaduais públicos.", "Nome, CPF, CNPJ ou termo"),
@@ -57,8 +57,8 @@ KIND_LABELS = {
     "CNPJ": "CNPJ",
     "CPF": "CPF",
     "EMAIL": "E-mail",
-    "CNJ": "Processo",
-    "PROCESSOS": "Processo",
+    "CNJ": "Processos",
+    "PROCESSOS": "Processos",
     "NEGATIVA": "Negativa",
     "IMOVEL": "Imóvel",
     "DIARIO": "Diário oficial",
@@ -288,6 +288,41 @@ class ConsultResult:
     @property
     def graph_payload(self) -> dict[str, Any] | None:
         return self.graph.to_payload() if self.graph and self.graph.nodes else None
+
+    def assignable_pairs(self) -> list[tuple[str, str]]:
+        """Nome consultado + CNPJs da árvore/hits, para gravar no caso."""
+        seen: set[tuple[str, str]] = set()
+        out: list[tuple[str, str]] = []
+
+        def add(kind: str, value: str) -> None:
+            kind = (kind or "").upper()
+            value = (value or "").strip()
+            if not value or kind in {"", "FILE", "MASSA"}:
+                return
+            key = (kind, value)
+            if key in seen:
+                return
+            seen.add(key)
+            out.append(key)
+
+        add(self.kind, self.query)
+        if self.graph:
+            for node in self.graph.nodes:
+                digits = only_digits(getattr(node, "meta", "") or "")
+                if validate_cnpj(digits):
+                    add("CNPJ", digits)
+        for hit in self.hits:
+            if hit.kind not in {"empresa", "cnpj", "org"}:
+                continue
+            digits = only_digits(hit.meta or "")
+            if validate_cnpj(digits):
+                add("CNPJ", digits)
+                continue
+            url = (hit.url or "").rstrip("/")
+            tail = only_digits(url.rsplit("/", 1)[-1]) if url else ""
+            if validate_cnpj(tail):
+                add("CNPJ", tail)
+        return out
 
 
 def resolve_kind(mode: str, raw: str) -> str | None:

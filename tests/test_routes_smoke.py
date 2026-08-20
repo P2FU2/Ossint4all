@@ -44,7 +44,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Negativa" in logged.text
     assert "Imóvel" in logged.text
     assert "Diário" in logged.text
-    assert "Processo" in logged.text
+    assert "Processos" in logged.text
 
     token = _csrf(logged.text)
     mass = client.post("/app/consultar", data={"csrf_token": token, "q": "ABC1D23", "modo": "massa"})
@@ -87,6 +87,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert tools.status_code == 200
     assert "Redes sociais" in tools.text
     assert "Busca em massa" in tools.text
+    assert "Processos" in tools.text
     assert "github.com" not in tools.text.lower()
     assert "search-history" in tools.text
 

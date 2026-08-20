@@ -57,6 +57,10 @@ def test_connectors_for_kinds_scopes_sources() -> None:
     companies = connectors_for_kinds(["COMPANIES"])
     assert companies is not None
     assert "socio_search" in companies
+    processos = connectors_for_kinds(["PROCESSOS"])
+    assert processos is not None
+    assert "djen" in processos
+    assert "datajud" in processos
     mixed = connectors_for_kinds(["EMAIL", "QSA"])
     assert mixed is not None
     assert "email_public" in mixed

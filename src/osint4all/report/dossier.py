@@ -82,6 +82,8 @@ _ENTITY_TYPES = {
     "NOTE": "Nota",
     "EVENT": "Evento",
     "PLACE": "Local",
+    "ASSET": "Ativo",
+    "VEHICLE": "Veículo",
 }
 
 _ID_KINDS = {
@@ -94,6 +96,8 @@ _ID_KINDS = {
     "birthdate": "Nascimento",
     "rg": "RG",
     "title": "Título",
+    "bank": "Conta",
+    "wealth": "Patrimônio",
 }
 
 _STATUS_LABELS = {

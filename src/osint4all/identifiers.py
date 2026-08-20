@@ -76,6 +76,10 @@ def canonical_key(kind: str, value: str) -> str:
         return f"father:{_collapse_name(value).casefold()}"
     if kind == "MOTHER":
         return f"mother:{_collapse_name(value).casefold()}"
+    if kind == "BANK":
+        return f"bank:{_collapse_name(value).casefold()}"
+    if kind == "WEALTH":
+        return f"wealth:{_collapse_name(value).casefold()}"
     return f"{kind.lower()}:{(value or '').strip().casefold()}"
 
 
@@ -94,6 +98,8 @@ def entity_type_for_kind(kind: str) -> str:
         "BIRTHDATE": "PERSON",
         "FATHER": "PERSON",
         "MOTHER": "PERSON",
+        "BANK": "ASSET",
+        "WEALTH": "ASSET",
     }.get(kind.upper(), "PERSON")
 
 

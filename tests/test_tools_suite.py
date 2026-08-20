@@ -28,6 +28,7 @@ def test_suite_search_and_internal_urls() -> None:
     assert any(t.id == "hostficha" for t in list_tools("photon"))
     plates = list_tools("placa")
     assert any(t.id == "plate" for t in plates)
+    assert any(t.id == "cnj" for t in list_tools("processos"))
     assert all("/app/ferramentas?tool=" in f"/app/ferramentas?tool={t.id}" for t in list_tools())
     assert tool_id_for_kind("NAME") == "name"
     assert tool_id_for_kind("CNJ") == "cnj"
@@ -97,8 +98,24 @@ def test_graph_tools_plan_matches_dossier() -> None:
     assert plan["email"]["ready"] is True
     assert plan["name"]["checked"] is False
     assert plan["cnpj"]["ready"] is False
+    assert plan["cnj"]["ready"] is False
     assert plan["username"]["ready"] is False
     assert "pdf" not in plan
+
+
+def test_graph_tools_plan_processos_ready_on_name() -> None:
+    named = {item["id"]: item for item in graph_tools_plan([
+        {"kind": "NAME", "value": "Eduardo Hermelino Leite"},
+        {"kind": "CPF", "value": "52998224725"},
+    ])}
+    assert named["cnj"]["ready"] is True
+    assert named["cnj"]["checked"] is False
+    assert "Eduardo Hermelino Leite" in named["cnj"]["values"]
+    numbered = {item["id"]: item for item in graph_tools_plan([
+        {"kind": "CNJ", "value": "00001234520248260100"},
+    ])}
+    assert numbered["cnj"]["ready"] is True
+    assert numbered["cnj"]["checked"] is True
 
 
 def test_outcome_to_connector_adds_without_name_dump() -> None:

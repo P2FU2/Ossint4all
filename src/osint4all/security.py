@@ -34,4 +34,9 @@ def mask_identifier(kind: str, value: str) -> str:
             return f"{name[:1]}***@{domain}"
         digits = only_digits(value)
         return f"***{digits[-4:]}" if len(digits) >= 4 else "***"
+    if kind == "BANK" and value:
+        digits = only_digits(value)
+        if len(digits) >= 4:
+            return f"conta ***{digits[-4:]}"
+        return value
     return value

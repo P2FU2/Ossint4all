@@ -49,7 +49,7 @@ EMBEDDED_TOOLS: tuple[EmbeddedTool, ...] = (
     EmbeddedTool("cnpj", "CNPJ", "Ficha, QSA e mapa de empresas relacionadas.", "CNPJ", "00.000.000/0001-00", "Minha Receita / BrasilAPI"),
     EmbeddedTool("cpf", "CPF", "Valida e cruza QSA público, sanções e menções. Sem nome pela Receita.", "CPF", "000.000.000-00", "Receita / Transparência"),
     EmbeddedTool("email", "E-mail", "Linha do tempo: @user, Keybase, Gravatar e redes. Sem caixa nem leak.", "EMAIL", "nome@dominio.com", "Holehe, Maigret, user-scanner"),
-    EmbeddedTool("cnj", "Processo", "CNJ ou nome da parte. DataJud, DJEN, PJe e menções públicas.", "PROCESSOS", "0000001-23.2024.8.26.0100 ou nome", "DataJud / DJEN"),
+    EmbeddedTool("cnj", "Processos", "Nome, CPF, CNPJ ou CNJ. DataJud, DJEN, PJe e menções públicas.", "PROCESSOS", "nome, CPF ou 0000001-23.2024.8.26.0100", "DataJud / DJEN"),
     EmbeddedTool("negativa", "Negativa", "CEIS, CNEP, TCU, CVM, TSE e menções de condenação em fonte oficial.", "NEGATIVA", "Nome, CPF ou CNPJ", "Transparência / TCU"),
     EmbeddedTool("imovel", "Imóvel", "Leilão Caixa, SNCR, SIGEF e DOU. Sem matrícula de cartório.", "IMOVEL", "Nome, CPF, CNPJ ou endereço", "Caixa / Incra"),
     EmbeddedTool("diario", "Diário oficial", "DOU, Imprensa Nacional, DJEN e diários estaduais públicos.", "DIARIO", "Nome, CPF, CNPJ ou termo", "in.gov.br / Querido Diário"),
@@ -122,7 +122,7 @@ TOOL_GRAPH_KINDS: dict[str, tuple[str, ...]] = {
     "cnpj": ("CNPJ",),
     "cpf": ("CPF",),
     "email": ("EMAIL",),
-    "cnj": ("CNJ",),
+    "cnj": ("CNJ", "NAME", "CPF", "CNPJ"),
     "negativa": ("NAME", "CPF", "CNPJ"),
     "imovel": ("NAME", "CPF", "CNPJ"),
     "diario": ("NAME", "CPF", "CNPJ"),
@@ -184,6 +184,9 @@ def graph_tools_plan(dossier: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     break
             if len(values) >= _MAX_TOOL_VALUES:
                 break
+        auto = bool(values) and tool.id in _AUTO_CHECK_TOOLS
+        if tool.id == "cnj":
+            auto = bool(by_kind.get("CNJ"))
         plan.append(
             {
                 "id": tool.id,
@@ -191,7 +194,7 @@ def graph_tools_plan(dossier: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "summary": tool.summary,
                 "values": values,
                 "ready": bool(values),
-                "checked": bool(values) and tool.id in _AUTO_CHECK_TOOLS,
+                "checked": auto,
                 "hint": ", ".join(values[:2]) if values else "sem este dado no grafo",
             }
         )

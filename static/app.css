@@ -506,6 +506,72 @@ input:focus, textarea:focus, select:focus {
   box-shadow: var(--glow);
   outline: none;
 }
+input[type="checkbox"],
+input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  padding: 0;
+  margin: 1px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #03140c;
+  box-shadow: none;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--muted);
+  flex: 0 0 12px;
+  accent-color: var(--muted);
+}
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]:hover,
+input[type="radio"]:hover {
+  border-color: rgba(148, 163, 156, 0.4);
+}
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  background: rgba(148, 163, 156, 0.16);
+  border-color: rgba(148, 163, 156, 0.38);
+  box-shadow: none;
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 6px;
+  height: 3px;
+  margin-top: -1px;
+  border-left: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+}
+input[type="radio"]:checked::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+input[type="checkbox"]:focus,
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus,
+input[type="radio"]:focus-visible {
+  border-color: rgba(148, 163, 156, 0.5);
+  box-shadow: none;
+  outline: none;
+}
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+label:has(> input[type="checkbox"]):not(.media-tile-pick),
+label:has(> input[type="radio"]):not(.mode-chip) {
+  flex-direction: row;
+  align-items: center;
+}
 fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .seed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .seed-grid > .lede { grid-column: 1 / -1; font-size: 0.8rem; }
@@ -961,12 +1027,12 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .track-shell {
   display: flex;
   align-items: center;
-  height: 32px;
-  padding: 3px;
-  background: #02110b;
-  border: 1px solid rgba(94, 234, 212, 0.28);
+  height: 30px;
+  padding: 2px;
+  background: rgba(4, 21, 13, 0.55);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  box-shadow: inset 0 0 0 1px rgba(2, 16, 10, 0.6);
+  box-shadow: none;
 }
 .track-group { gap: 0; }
 .track-kicker {
@@ -1000,9 +1066,9 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .view-tab.track-item.is-active,
 .chip.track-item.is-on,
 .chip.track-item:has(input:checked) {
-  background: linear-gradient(180deg, #d8fff6 0%, #5eead4 100%);
-  color: #02110b;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28), 0 0 10px rgba(94, 234, 212, 0.45);
+  background: rgba(148, 163, 156, 0.14);
+  color: var(--ink);
+  box-shadow: none;
 }
 .track-shell {
   gap: 10px;
@@ -1031,50 +1097,50 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   -webkit-appearance: none;
   appearance: none;
   width: 120px;
-  height: 6px;
+  height: 2px;
   margin: 0;
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, #5eead4, #0d6b5c);
+  background: var(--line);
   box-shadow: none;
 }
 .year-slider.track-shell input[type="range"]::-webkit-slider-runnable-track {
-  height: 6px;
+  height: 2px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #5eead4, #0d6b5c);
+  background: var(--line);
 }
 .year-slider.track-shell input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   margin-top: -5px;
   border-radius: 50%;
-  background: #f4fff8;
-  border: 1px solid #9ff3e4;
-  box-shadow: 0 0 8px rgba(94, 234, 212, 0.55);
+  background: var(--muted);
+  border: 1px solid var(--line);
+  box-shadow: none;
   cursor: pointer;
 }
 .year-slider.track-shell input[type="range"]::-moz-range-track {
-  height: 6px;
+  height: 2px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, #5eead4, #0d6b5c);
+  background: var(--line);
 }
 .year-slider.track-shell input[type="range"]::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: #f4fff8;
-  border: 1px solid #9ff3e4;
-  box-shadow: 0 0 8px rgba(94, 234, 212, 0.55);
+  background: var(--muted);
+  border: 1px solid var(--line);
+  box-shadow: none;
   cursor: pointer;
 }
 .year-slider.track-shell output {
   min-width: 3.2ch;
-  color: var(--ink);
-  font-size: 0.78rem;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .mini-graph {
@@ -1249,7 +1315,8 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .graph-menu .picks { padding: 2px 4px 6px; }
 .graph-menu label.chk {
   display: flex;
-  align-items: flex-start;
+  flex-direction: row;
+  align-items: center;
   gap: 8px;
   padding: 6px 10px;
   color: var(--ink);
@@ -1258,7 +1325,7 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   line-height: 1.35;
 }
 .graph-menu label.chk:hover { background: var(--gold-soft); color: var(--gold); }
-.graph-menu label.chk input { margin-top: 2px; accent-color: var(--gold); }
+.graph-menu label.chk input { margin: 0; }
 .graph-composer {
   position: fixed;
   inset: 0;
@@ -1384,6 +1451,7 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .graph-stage.is-split .canvas-layers { left: 396px; }
 .canvas-layers label {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
@@ -1502,11 +1570,11 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   z-index: 8;
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
-  gap: 10px 14px;
+  gap: 8px 12px;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 16px;
   background: #04150d;
   border-bottom: 1px solid var(--line);
 }
@@ -1638,7 +1706,7 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   font-size: 0.78rem;
 }
 .tool-pick label.is-off { opacity: 0.42; }
-.tool-pick input { margin-top: 3px; accent-color: var(--gold); }
+.tool-pick input { margin-top: 3px; }
 .tool-pick strong { display: block; color: var(--gold); font-weight: 500; }
 .tool-pick small { display: block; color: var(--muted); font-size: 0.7rem; }
 .tool-pick .btn { align-self: stretch; text-align: center; }

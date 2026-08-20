@@ -67,6 +67,7 @@ from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.media import collect_target_media, fields_from_identifiers, media_picks_to_result, parse_media_picks
+from osint4all.graph.assets import add_bank_account, add_wealth_estimate
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
 from osint4all.tools_suite import (
     MassResult,
@@ -79,7 +80,7 @@ from osint4all.tools_suite import (
     seeds_from_results,
     tool_id_for_kind,
 )
-from osint4all.identifiers import collect_form_seeds, parse_seed
+from osint4all.identifiers import canonical_key, collect_form_seeds, parse_seed
 from osint4all.validators import looks_like_plate, validate_cnpj
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
 from osint4all.security import mask_identifier
@@ -322,6 +323,24 @@ def _assign_seeds(
     if not seeds:
         return 0
     add_seed_entities(session, inv, seeds, max_attempts=get_settings().job_max_attempts, enqueue=enqueue)
+    origin = session.scalar(
+        select(Entity).where(Entity.investigation_id == inv.id, Entity.is_seed.is_(True), Entity.entity_type == "PERSON")
+    )
+    if origin is None:
+        origin = session.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON"))
+    for seed in seeds:
+        if seed.kind != "CNPJ" or origin is None:
+            continue
+        org = find_entity_by_key(session, inv.id, canonical_key("CNPJ", seed.value))
+        if org and org.id != origin.id:
+            create_manual_edge(
+                session,
+                inv,
+                from_id=origin.id,
+                to_id=org.id,
+                rel_type="CANDIDATO",
+                note="Nome no quadro societário público.",
+            )
     plate = next((s for s in seeds if s.kind == "PLATE"), None)
     if plate and owner.strip():
         attach_plate_owner(
@@ -760,6 +779,12 @@ def consult_assign(
     session.commit()
     if added:
         _set_flash(request, "ok", f"{added} identificador(es) adicionados a {inv.title}.")
+    elif value and (kind or "").upper() == "NAME":
+        _set_flash(
+            request,
+            "error",
+            "Este nome já é o alvo do caso. As empresas da busca não vieram no envio — rode a consulta de novo e adicione outra vez.",
+        )
     else:
         _set_flash(request, "error", "Nenhum identificador válido para acrescentar a este caso.")
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
@@ -1819,6 +1844,77 @@ def add_company(
     if _wants_json(request):
         return _json_case(session, investigation_id, ok=True, queued=True)
     _set_flash(request, "ok", "Empresa ligada ao alvo. QSA e sócios entram na fila.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/patrimonio")
+def add_asset(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    kind: str = Form("bank"),
+    from_id: str = Form(""),
+    bank: str = Form(""),
+    agency: str = Form(""),
+    account: str = Form(""),
+    account_type: str = Form(""),
+    pix: str = Form(""),
+    amount: str = Form(""),
+    year: str = Form(""),
+    source: str = Form(""),
+    note: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    host = session.get(Entity, from_id) if from_id else None
+    if host is None or host.investigation_id != inv.id:
+        host = session.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.is_seed.is_(True)))
+    if host is None:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "sem nó para ligar o ativo"}, status_code=400)
+        _set_flash(request, "error", "Não há alvo para ligar este ativo.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    mode = (kind or "bank").strip().lower()
+    if mode == "wealth":
+        node = add_wealth_estimate(session, inv, host, amount=amount, year=year, source=source, note=note)
+        if not node:
+            if _wants_json(request):
+                return JSONResponse({"ok": False, "error": "informe o valor estimado"}, status_code=400)
+            _set_flash(request, "error", "Informe o patrimônio estimado.")
+            return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+        write_audit(session, "investigation.add_wealth", username=user.username, investigation_id=inv.id, details={"amount": amount, "year": year})
+        message = "Patrimônio estimado gravado no dossiê. Não consulta banco nem declaração oficial."
+    else:
+        node = add_bank_account(
+            session,
+            inv,
+            host,
+            bank=bank,
+            agency=agency,
+            account=account,
+            account_type=account_type,
+            pix=pix,
+            source=source,
+            note=note,
+        )
+        if not node:
+            if _wants_json(request):
+                return JSONResponse({"ok": False, "error": "informe banco, agência, conta ou PIX"}, status_code=400)
+            _set_flash(request, "error", "Informe banco, agência, conta ou uma chave PIX.")
+            return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+        write_audit(session, "investigation.add_bank", username=user.username, investigation_id=inv.id, details={"bank": bank})
+        message = "Conta ligada ao nó. Dado manual — o painel não consulta instituição financeira."
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True)
+    _set_flash(request, "ok", message)
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 

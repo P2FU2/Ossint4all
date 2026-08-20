@@ -631,6 +631,17 @@
     nascimento: "nascimento",
     nome_pai: "pai",
     nome_mae: "mãe",
+    banco: "banco",
+    agencia: "agência",
+    conta: "conta",
+    tipo_conta: "tipo",
+    pix: "PIX",
+    fonte: "fonte",
+    valor: "valor",
+    ano: "ano",
+    patrimonio_estimado: "patrimônio",
+    patrimonio_ano: "ano da estimativa",
+    patrimonio_fonte: "fonte do patrimônio",
   };
   const balloon = document.getElementById("graph-balloon");
   const gbKind = document.getElementById("gb-kind");
@@ -1260,9 +1271,10 @@
       input = document.createElement("select");
       (extra && extra.options ? extra.options : []).forEach((opt) => {
         const option = document.createElement("option");
-        option.value = opt;
-        option.textContent = opt;
-        if (opt === value) option.selected = true;
+        const pair = Array.isArray(opt);
+        option.value = pair ? opt[0] : opt;
+        option.textContent = pair ? opt[1] : opt;
+        if ((pair ? opt[0] : opt) === value) option.selected = true;
         input.appendChild(option);
       });
     } else {
@@ -1293,6 +1305,25 @@
       gcTitle.textContent = "Adicionar empresa pelo CNPJ";
       gcLead.textContent = "Liga ao alvo e busca o QSA / sócios.";
       gcFields.appendChild(field("CNPJ", "cnpj", "text", "", { required: true, placeholder: "00.000.000/0001-00" }));
+    } else if (mode === "bank") {
+      gcKind.textContent = "conta";
+      gcTitle.textContent = "Adicionar conta bancária";
+      gcLead.textContent = "Dado manual de fonte lícita. O painel não consulta banco.";
+      gcFields.appendChild(field("Banco", "bank", "text", "", { placeholder: "Itaú, 341…" }));
+      gcFields.appendChild(field("Agência", "agency", "text", "", { placeholder: "0001" }));
+      gcFields.appendChild(field("Conta", "account", "text", "", { placeholder: "12345-6" }));
+      gcFields.appendChild(field("Tipo", "account_type", "select", "", { options: [["", "—"], ["corrente", "Corrente"], ["poupança", "Poupança"], ["pagamento", "Pagamento"], ["investimento", "Investimento"], ["outro", "Outro"]] }));
+      gcFields.appendChild(field("PIX público", "pix", "text", "", { placeholder: "chave já publicada" }));
+      gcFields.appendChild(field("Fonte", "source", "text", "", { placeholder: "notícia, processo, declaração…" }));
+      gcFields.appendChild(field("Nota", "note", "text", "", { placeholder: "opcional" }));
+    } else if (mode === "wealth") {
+      gcKind.textContent = "patrimônio";
+      gcTitle.textContent = "Adicionar patrimônio estimado";
+      gcLead.textContent = "Estimativa sua, com fonte. Não é declaração da Receita.";
+      gcFields.appendChild(field("Valor", "amount", "text", "", { required: true, placeholder: "R$ 2.400.000" }));
+      gcFields.appendChild(field("Ano", "year", "text", "", { placeholder: "2024" }));
+      gcFields.appendChild(field("Fonte", "source", "text", "", { placeholder: "notícia, leilão, declaração…" }));
+      gcFields.appendChild(field("Nota", "note", "text", "", { placeholder: "opcional" }));
     } else if (mode === "diagram") {
       gcKind.textContent = "diagrama";
       gcTitle.textContent = "Adicionar diagrama";
@@ -1458,6 +1489,23 @@
           cnpj: String(data.get("cnpj") || ""),
           from_id: composer.dataset.entityId || seedNodeId(),
         }, { loading: "Ligando empresa…", done: "Empresa na fila — QSA entra sozinho." });
+      } else if (composerMode === "bank" || composerMode === "wealth") {
+        await postBoard(root.dataset.assetUrl, {
+          kind: composerMode,
+          from_id: composer.dataset.entityId || seedNodeId(),
+          bank: String(data.get("bank") || ""),
+          agency: String(data.get("agency") || ""),
+          account: String(data.get("account") || ""),
+          account_type: String(data.get("account_type") || ""),
+          pix: String(data.get("pix") || ""),
+          amount: String(data.get("amount") || ""),
+          year: String(data.get("year") || ""),
+          source: String(data.get("source") || ""),
+          note: String(data.get("note") || ""),
+        }, {
+          loading: "Gravando no dossiê…",
+          done: composerMode === "bank" ? "Conta ligada ao nó." : "Patrimônio estimado gravado.",
+        });
       } else if (composerMode === "link") {
         await postBoard(root.dataset.linkUrl, {
           from_id: String(data.get("from_id") || ""),
@@ -1500,12 +1548,14 @@
       CNPJ: "CNPJ",
       COMPANIES: "Empresas",
       QSA: "QSA / sócios",
+      PROCESSOS: "Processos",
+      CNJ: "Processo",
     })[kind] || kind;
   }
 
   function canProbe(kind) {
     return !!({
-      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1,
+      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1, PROCESSOS: 1, CNJ: 1,
     })[kind];
   }
 
@@ -1656,6 +1706,11 @@
       if (type === "ORG") {
         menu.appendChild(menuButton("Buscar sócios (QSA)", () => probeKinds(node.id(), ["QSA"], "sócios")));
         menu.appendChild(menuButton("Buscar empresas relacionadas", () => probeKinds(node.id(), ["COMPANIES"], "empresas")));
+        menu.appendChild(menuButton("Buscar processos", () => probeKinds(node.id(), ["PROCESSOS"], "processos")));
+        menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: node.id() })));
+      } else if (type === "CASE") {
+        menu.appendChild(menuButton("Buscar comunicações deste processo", () => probeKinds(node.id(), ["PROCESSOS", "CNJ"], "processos")));
       } else {
         const picks = document.createElement("div");
         picks.className = "picks";
@@ -1674,7 +1729,10 @@
           probeKinds(node.id(), chosen, chosen.map(kindLabel).join(", "));
         }));
         menu.appendChild(menuButton("Buscar empresas deste alvo", () => probeKinds(node.id(), ["COMPANIES"], "empresas")));
+        menu.appendChild(menuButton("Buscar processos", () => probeKinds(node.id(), ["PROCESSOS"], "processos")));
         menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: node.id() })));
       }
       menu.appendChild(menuButton("Abrir ficha", () => {
         window.location.href = root.dataset.entityBase + node.id();
@@ -1731,6 +1789,8 @@
       head.textContent = "quadro";
       menu.appendChild(head);
       menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: seedNodeId() })));
+      menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: seedNodeId() })));
+      menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Selecionar área e excluir", () => setSelectMode(true)));
       menu.appendChild(menuButton("Adicionar anotação", () => openComposer("note")));
       menu.appendChild(menuButton("Adicionar diagrama", () => openComposer("diagram")));

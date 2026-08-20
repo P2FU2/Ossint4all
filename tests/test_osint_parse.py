@@ -108,6 +108,68 @@ def test_socio_search_reads_cpf_anchor() -> None:
     assert cpf_from_entity(named) is None
 
 
+def test_company_confirms_by_cpf_in_qsa() -> None:
+    from osint4all.connectors.base import ConnectorResult, FoundEntity
+
+    parsed = ConnectorResult(
+        entities=[
+            FoundEntity(entity_type="ORG", kind="CNPJ", value="07810004000184", display_name="X"),
+            FoundEntity(entity_type="PERSON", kind="CPF", value="52998224725", display_name="ANA"),
+        ]
+    )
+    assert partner_link_verdict(parsed, name="Outro Nome Completo", cpf="52998224725") == "cpf"
+    rows = [{"cnpj": "07.810.004/0001-84", "razao_social": "X"}]
+    payloads = {
+        "07810004000184": {
+            "cnpj": "07810004000184",
+            "razao_social": "X",
+            "qsa": [{"nome_socio": "ANA", "cnpj_cpf_do_socio": "52998224725"}],
+        }
+    }
+    kept = confirm_company_rows(rows, name="Outro Nome Completo", cpf="52998224725", payloads=payloads)
+    assert len(kept) == 1
+    assert kept[0][1] == "cpf"
+
+
+def test_companies_probe_uses_name_when_cpf_index_empty() -> None:
+    from osint4all.connectors.base import ConnectorResult, ExpandContext
+    from osint4all.graph.identity import TargetProfile
+
+    conn = SocioSearchConnector(Settings(brasil_io_api_token="", socio_search_enable=True))
+    seen: dict[str, str] = {}
+
+    def fake_casa(name, origin, *, name_only=True, cpf=""):
+        seen["name"] = name
+        seen["cpf"] = cpf
+        seen["name_only"] = str(name_only)
+        return ConnectorResult(notes=["casa"])
+
+    conn._casadosdados = fake_casa  # type: ignore[method-assign]
+    conn._web_mentions = lambda *a, **k: ConnectorResult()  # type: ignore[method-assign]
+    person = type(
+        "E",
+        (),
+        {
+            "canonical_key": "cpf:52998224725",
+            "display_name": "Eduardo Hermelino Leite",
+            "entity_type": "PERSON",
+            "identifiers": [],
+            "attrs": {"probe_kinds": ["COMPANIES"]},
+        },
+    )()
+    ctx = ExpandContext(
+        investigation=None,  # type: ignore[arg-type]
+        settings=Settings(),
+        enabled={"socio_search"},
+        profile=TargetProfile(name="Eduardo Hermelino Leite", cpf="52998224725"),
+    )
+    result = conn.collect(person, ctx)
+    assert seen["name"] == "Eduardo Hermelino Leite"
+    assert seen["cpf"] == "52998224725"
+    assert seen["name_only"] == "False"
+    assert any("casa" in note for note in result.notes)
+
+
 def test_cpf_search_does_not_invent_companies() -> None:
     conn = SocioSearchConnector(Settings(brasil_io_api_token=""))
     empty = conn.collect_by_cpf("52998224725", "cpf:52998224725")

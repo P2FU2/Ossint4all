@@ -524,3 +524,41 @@ def test_enqueue_skips_company_off_the_target(settings, db) -> None:
     assert jobs == []
     assert db.get(Entity, stray.id) is None
     assert queued >= 0
+
+
+def test_assign_name_search_adds_companies_when_name_already_on_case(db) -> None:
+    from sqlalchemy import select
+
+    from osint4all.consult import ConsultResult
+    from osint4all.web.router import _assign_seeds
+
+    name = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    cpf = parse_seed("529.982.247-25", forced_kind="CPF")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="assign",
+        seeds=[name, cpf],
+        connectors=[],
+        max_depth=1,
+        monitor=False,
+        created_by="t",
+        enqueue=False,
+    )
+    parts = [
+        ConsultResult(kind="NAME", query="Maria Silva Souza", title="Maria Silva Souza", summary="", ok=True),
+        ConsultResult(kind="CNPJ", query="33.000.167/0001-01", title="Petrobras", summary="", ok=True),
+    ]
+    added = _assign_seeds(db, inv, parts)
+    db.flush()
+    assert added >= 1
+    orgs = list(db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "ORG")))
+    assert orgs
+    person = db.scalar(
+        select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON", Entity.is_seed.is_(True))
+    )
+    assert person is not None
+    links = list(
+        db.scalars(select(Edge).where(Edge.investigation_id == inv.id, Edge.from_entity_id == person.id, Edge.rel_type == "CANDIDATO"))
+    )
+    assert links

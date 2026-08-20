@@ -145,11 +145,55 @@
       {% endif %}
     </fieldset>
     <label>Nota <textarea name="note" rows="2">{{ entity.attrs.get("nota") or "" }}</textarea></label>
+    {% if entity.entity_type in ("PERSON", "ORG") %}
+    <p class="muted">{% if entity.attrs.get("patrimonio_estimado") %}Estimativa atual: {{ entity.attrs.get("patrimonio_estimado") }}{% if entity.attrs.get("patrimonio_ano") %} ({{ entity.attrs.get("patrimonio_ano") }}){% endif %}{% if entity.attrs.get("patrimonio_fonte") %} · {{ entity.attrs.get("patrimonio_fonte") }}{% endif %}{% else %}Sem patrimônio estimado neste nó.{% endif %}</p>
+    {% endif %}
     <div class="graph-actions">
       <button class="btn" type="submit" name="depois" value="gravar">Só gravar</button>
       <button class="btn primary" type="submit" name="depois" value="buscar" data-tip="Grava e busca só com estes dados">Salvar e buscar com estes dados</button>
     </div>
   </form>
+  {% if entity.entity_type in ("PERSON", "ORG") %}
+  <h3>Conta bancária</h3>
+  <p class="lede">O que você já sabe de fonte lícita. O painel não consulta instituição financeira.</p>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/patrimonio">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="kind" value="bank" />
+    <input type="hidden" name="from_id" value="{{ entity.id }}" />
+    <fieldset class="seed-grid compact">
+      <label>Banco <input name="bank" placeholder="Itaú, 341…" autocomplete="off" /></label>
+      <label>Agência <input name="agency" autocomplete="off" /></label>
+      <label>Conta <input name="account" autocomplete="off" /></label>
+      <label>Tipo
+        <select name="account_type">
+          <option value="">—</option>
+          <option value="corrente">Corrente</option>
+          <option value="poupança">Poupança</option>
+          <option value="pagamento">Pagamento</option>
+          <option value="investimento">Investimento</option>
+          <option value="outro">Outro</option>
+        </select>
+      </label>
+      <label>PIX público <input name="pix" placeholder="chave já publicada" autocomplete="off" /></label>
+      <label>Fonte <input name="source" placeholder="notícia, processo, declaração…" autocomplete="off" /></label>
+    </fieldset>
+    <label>Nota <input name="note" autocomplete="off" /></label>
+    <button class="btn" type="submit">Ligar conta a este nó</button>
+  </form>
+  <h3>Patrimônio estimado</h3>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/patrimonio">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="kind" value="wealth" />
+    <input type="hidden" name="from_id" value="{{ entity.id }}" />
+    <fieldset class="seed-grid compact">
+      <label>Valor <input name="amount" placeholder="R$ 2.400.000" required autocomplete="off" /></label>
+      <label>Ano <input name="year" placeholder="2024" inputmode="numeric" autocomplete="off" /></label>
+      <label>Fonte <input name="source" placeholder="notícia, leilão, declaração…" autocomplete="off" /></label>
+    </fieldset>
+    <label>Nota <input name="note" autocomplete="off" /></label>
+    <button class="btn" type="submit">Gravar estimativa</button>
+  </form>
+  {% endif %}
   <h3>Já na ficha</h3>
   <ul class="plain">
     {% for ident in entity.identifiers %}
