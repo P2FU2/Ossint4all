@@ -195,7 +195,7 @@ def run_consult(raw: str, *, mode: str = "auto", settings: Settings | None = Non
         if kind == "EMAIL":
             return _consult_email(text, settings, quick=quick)
         if kind == "NAME":
-            return _consult_name(text, settings)
+            return _consult_name(text, settings, quick=quick)
         if kind == "CNJ":
             return _consult_cnj(text)
     except Exception as exc:  # noqa: BLE001
@@ -302,13 +302,13 @@ def _consult_plate(raw: str, settings: Settings | None = None, *, quick: bool = 
     )
 
 
-def _consult_username(raw: str, settings: Settings, *, quick: bool = False) -> ConsultResult:
+def _consult_username(raw: str, settings: Settings, *, quick: bool = False, core_only: bool | None = None) -> ConsultResult:
     user = raw.strip().lstrip("@").lower()
     conn = UsernamePublicConnector(settings)
     hits: list[ConsultHit] = []
     if _live_ok(settings, quick) and settings.username_public_enable:
         fake = SimpleNamespace(canonical_key=f"username:{user}", display_name=user, entity_type="PROFILE", identifiers=[])
-        result = conn.collect(fake, SimpleNamespace(core_only=quick))
+        result = conn.collect(fake, SimpleNamespace(core_only=quick if core_only is None else core_only))
         hits = [ConsultHit(e.display_name, e.value, e.value, "perfil") for e in result.entities]
     timeline = [
         TimelineEvent(h.title, h.meta, h.url, when="perfil ativo", kind="social")
@@ -361,6 +361,17 @@ def _consult_cnpj(raw: str, settings: Settings, *, quick: bool = False) -> Consu
     if not validate_cnpj(raw):
         return ConsultResult(kind="CNPJ", query=raw, title=raw, summary="", ok=False, error="CNPJ inválido.")
     digits = only_digits(raw)
+    if not _live_ok(settings, quick):
+        formatted = _format_cnpj(digits)
+        return ConsultResult(
+            kind="CNPJ",
+            query=digits,
+            title=formatted,
+            summary="CNPJ válido. A ficha, o QSA e o mapa de relacionadas vêm da Minha Receita / BrasilAPI ao consultar ao vivo.",
+            facts=[("CNPJ", formatted)],
+            hits=[ConsultHit("Minha Receita", "Ficha oficial", f"https://minhareceita.org/{digits}", "fonte")],
+            notes=["Fora de teste, esta consulta puxa razão social, sócios e empresas ligadas."],
+        )
     data = CnpjReceitaConnector(settings)._fetch(digits)
     parsed = parse_cnpj_payload(data)
     org = next((e for e in parsed.entities if e.kind == "CNPJ" and only_digits(e.value) == digits), None)
@@ -608,7 +619,7 @@ def _consult_email(raw: str, settings: Settings | None = None, *, quick: bool = 
     profiles = 0
     if _live_ok(settings, quick) and settings.username_public_enable:
         try:
-            social = _consult_username(local, settings, quick=True)
+            social = _consult_username(local, settings, quick=quick, core_only=True)
             for hit in social.hits:
                 profiles += 1
                 hits.append(hit)
@@ -655,9 +666,18 @@ def _consult_email(raw: str, settings: Settings | None = None, *, quick: bool = 
     )
 
 
-def _consult_name(raw: str, settings: Settings) -> ConsultResult:
+def _consult_name(raw: str, settings: Settings, *, quick: bool = False) -> ConsultResult:
     if " " not in raw.strip():
         return ConsultResult(kind="NAME", query=raw, title=raw, summary="", ok=False, error="Use nome e sobrenome.")
+    if not _live_ok(settings, quick):
+        return ConsultResult(
+            kind="NAME",
+            query=raw.strip(),
+            title=raw.strip(),
+            summary="Nome reconhecido. O cruzamento com o QSA público roda ao vivo.",
+            facts=[("Nome", raw.strip())],
+            notes=["Fora de teste, busca empresas em que este nome aparece no quadro societário aberto."],
+        )
     conn = SocioSearchConnector(settings)
     fake = SimpleNamespace(canonical_key=f"name:{raw.strip().casefold()}", display_name=raw.strip(), entity_type="PERSON", identifiers=[])
     parsed = conn.collect(fake, SimpleNamespace(investigation=SimpleNamespace(id="consult"), settings=settings))

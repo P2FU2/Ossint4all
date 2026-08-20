@@ -91,7 +91,7 @@
       {% endif %}
       <button class="btn" type="submit" data-tip="Cria um caso novo só com este resultado">Novo caso</button>
     </form>
-    <a class="btn" href="/app/ferramentas?tool={% if result.kind == 'USERNAME' %}username{% elif result.kind == 'PLATE' %}plate{% elif result.kind == 'PHONE' %}phone{% elif result.kind == 'CNPJ' %}cnpj{% elif result.kind == 'EMAIL' %}email{% elif result.kind == 'CPF' %}cpf{% else %}massa{% endif %}&amp;q={{ result.query|urlencode }}" data-tip="Abre a suíte embutida neste tipo">Ferramentas</a>
+    <a class="btn" href="/app/ferramentas?tool={{ tool_id_for_kind(result.kind) }}&amp;q={{ result.query|urlencode }}" data-tip="Abre a suíte embutida neste tipo">Ferramentas</a>
     <a class="btn ghost" href="/app?modo={{ result.kind }}" data-tip="Nova consulta do mesmo tipo">Outra consulta</a>
   </footer>
 </article>

@@ -9,7 +9,7 @@
     <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · profundidade {{ entity.depth }}</p>
   </div>
   <div class="graph-actions">
-    <a class="btn" href="/app/ferramentas?kind={{ seed_kind }}&amp;q={{ seed_q|urlencode }}" data-tip="Ferramentas públicas para este tipo">Mapa de ferramentas</a>
+    <a class="btn" href="/app/ferramentas?tool={{ tool_id_for_kind(seed_kind) }}&amp;kind={{ seed_kind }}&amp;q={{ seed_q|urlencode }}" data-tip="Ferramentas públicas para este tipo">Mapa de ferramentas</a>
     <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn primary" type="submit" data-tip="Enfileira fontes a partir deste nó.">Expandir daqui</button>

@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from sqlalchemy import delete, desc, select, update
 from sqlalchemy.orm import Session
 
-from osint4all.db.history import kind_label
+from osint4all.db.history import kind_label, replay_spec
 from osint4all.db.models import SearchChain, SearchChainStep, User
 from osint4all.identifiers import parse_seed
 
@@ -278,7 +278,7 @@ def ingest_outcome(session: Session, user: User, outcome: object) -> SearchChain
     existing = _chain_steps(session, matched.id)
     if existing:
         last = existing[-1]
-        if last.query.strip().casefold() == query.casefold() and (last.kind or "") == kind:
+        if _same_query(last.query, query) and (last.kind or "") == kind:
             last.identifiers = idents
             last.findings = slim_findings(outcome)
             last.summary = summary[:400]
@@ -364,6 +364,7 @@ def chain_view(session: Session, user: User, *, current_query: str = "") -> dict
             if title and title not in seen_findings:
                 seen_findings.add(title)
                 all_findings.append(item)
+        spec = replay_spec(step.kind, step.kind)
         view_steps.append(
             {
                 "id": step.id,
@@ -378,6 +379,9 @@ def chain_view(session: Session, user: User, *, current_query: str = "") -> dict
                 "findings": findings,
                 "is_current": _same_query(step.query, needle),
                 "index": index + 1,
+                "action": spec["action"],
+                "tool": spec["tool"],
+                "mode": spec["mode"],
             }
         )
         prev_keys = keys
@@ -403,6 +407,36 @@ def chain_view(session: Session, user: User, *, current_query: str = "") -> dict
             }
         )
     linked = len(view_steps) > 1
+    chips: list[dict[str, str]] = []
+    seen_keys: set[str] = set()
+    for step in steps:
+        for ident in step.identifiers or []:
+            key = str(ident.get("key") or "")
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            value = str(ident.get("value") or "")
+            kind = str(ident.get("kind") or "")
+            chips.append(
+                {
+                    "kind": kind,
+                    "kind_label": kind_label(kind),
+                    "value": value,
+                    "label": f"@{value.lstrip('@')}" if kind == "USERNAME" else value,
+                }
+            )
+    export_lines = [chain.title or "Cadeia", ""]
+    for step in view_steps:
+        export_lines.append(f"{step['index']}. [{step['kind_label']}] {step['query']}")
+        if step["link"]:
+            export_lines.append(f"   cruza em {step['link']}")
+        if step["summary"]:
+            export_lines.append(f"   {step['summary']}")
+        for item in step["findings"][:6]:
+            export_lines.append(f"   - {item.get('title') or ''}")
+    if chips:
+        export_lines.append("")
+        export_lines.append("Identificadores: " + ", ".join(c["label"] for c in chips))
     return {
         "id": chain.id,
         "title": chain.title,
@@ -411,6 +445,8 @@ def chain_view(session: Session, user: User, *, current_query: str = "") -> dict
         "steps": view_steps,
         "findings": all_findings[:16],
         "just_linked": linked and bool(needle) and view_steps[-1]["is_current"],
+        "idents": chips[:20],
+        "export": "\n".join(export_lines).strip(),
         "graph_payload": {
             "nodes": nodes,
             "edges": edges,

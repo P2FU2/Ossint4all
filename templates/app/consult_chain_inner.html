@@ -11,11 +11,13 @@
       {% endif %}
     </div>
     <div class="chain-actions">
-      {% if chain.linked %}
       <form method="post" action="/app/cadeia/grafo">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn primary" type="submit" data-tip="Cria um caso com todos os identificadores desta cadeia">guardar caso</button>
       </form>
+      {% if chain.export %}
+      <button type="button" class="btn ghost" data-chain-export data-tip="Copia o fio e os achados para a área de transferência">copiar fio</button>
+      <textarea class="chain-export" hidden>{{ chain.export }}</textarea>
       {% endif %}
       <form method="post" action="/app/cadeia/nova" hx-post="/app/cadeia/nova" hx-target="#consult-chain" hx-swap="outerHTML">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -23,6 +25,16 @@
       </form>
     </div>
   </header>
+
+  {% if chain.idents %}
+  <ul class="chain-idents">
+    {% for ident in chain.idents %}
+    <li>
+      <button type="button" class="inspect-open chain-chip" data-inspect='{{ {"title": ident.label, "kind": ident.kind|lower or "id", "meta": ident.kind_label, "url": "", "when": ""}|tojson }}'>{{ ident.label }}</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 
   {% if chain.graph_payload %}
   <div class="mini-graph chain-graph" data-graph='{{ chain.graph_payload | tojson }}' aria-label="Árvore da cadeia"></div>
@@ -34,10 +46,11 @@
       {% if step.link %}
       <p class="chain-join">cruza em <strong>{{ step.link }}</strong></p>
       {% endif %}
-      <form class="history-replay" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
+      <form class="history-replay" method="post" action="{{ step.action or '/app/consultar' }}" hx-post="{{ step.action or '/app/consultar' }}" hx-target=".consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="q" value="{{ step.query }}" />
-        <input type="hidden" name="modo" value="{{ step.kind or 'auto' }}" />
+        <input type="hidden" name="modo" value="{{ step.mode or step.kind or 'auto' }}" />
+        {% if step.tool %}<input type="hidden" name="tool" value="{{ step.tool }}" />{% endif %}
         <button type="submit" class="chain-node" data-tip="Repete esta consulta da cadeia">
           <span class="chain-index">{{ step.index }}</span>
           <span class="chain-body">

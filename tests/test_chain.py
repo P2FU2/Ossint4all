@@ -40,6 +40,10 @@ def test_username_then_email_joins_chain(db, settings) -> None:
     titles = " ".join(step["title"] for step in view["steps"]).lower()
     assert "@ana" in titles
     assert "ana@exemplo.com" in titles
+    assert any(item["label"] in {"@ana", "ana@exemplo.com"} or "ana" in item["label"] for item in view["idents"])
+    assert "@ana" in view["export"]
+    ingest_outcome(db, user, email)
+    assert len(chain_view(db, user, current_query="ana@exemplo.com")["steps"]) == 2
 
 
 def test_unrelated_plate_starts_new_chain(db, settings) -> None:

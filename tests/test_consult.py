@@ -36,6 +36,17 @@ def test_phone_email_cpf() -> None:
     assert any("Transparência" in (h.title or "") for h in cpf.hits)
 
 
+def test_cnpj_and_name_stay_offline_in_pytest() -> None:
+    cnpj = run_consult("33000167000101", mode="CNPJ")
+    assert cnpj.ok
+    assert cnpj.kind == "CNPJ"
+    assert "ao vivo" in cnpj.summary
+    name = run_consult("Ana Silva", mode="NAME")
+    assert name.ok
+    assert name.kind == "NAME"
+    assert name.hits == []
+
+
 def test_cnpj_graph_from_partners() -> None:
     parsed = parse_cnpj_payload(
         {

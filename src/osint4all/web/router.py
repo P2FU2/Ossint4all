@@ -14,13 +14,13 @@ from osint4all.config import ALL_CONNECTORS, get_settings
 from osint4all.paths import project_root
 from osint4all.connectors.registry import connector_health, enabled_connector_names
 from osint4all.db.chain import active_chain, chain_seeds, chain_view, ingest_outcome, reset_chain
-from osint4all.db.history import clear_searches, kind_label as history_kind_label, list_searches, record_search, replay_mode
+from osint4all.db.history import clear_searches, kind_label as history_kind_label, list_searches, record_search, replay_spec
 from osint4all.db.models import AuditLog, Edge, Entity, Evidence, ExpansionJob, Investigation, User
 from osint4all.db.repository import enqueue_expand, graph_payload, job_counts
 from osint4all.graph.expand import process_pending_jobs
 from osint4all.consult import MODES, ConsultResult, run_consult
 from osint4all.graph.seed import add_seed_entities, attach_plate_owner, create_investigation
-from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results
+from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results, tool_id_for_kind
 from osint4all.identifiers import parse_seed, parse_seed_lines
 from osint4all.validators import looks_like_plate
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
@@ -37,6 +37,7 @@ from osint4all.web.auth import (
 from osint4all.web.deps import current_user, db_session, require_admin, require_csrf, template_context
 
 templates = Jinja2Templates(directory=str(project_root() / "templates"))
+templates.env.globals["tool_id_for_kind"] = tool_id_for_kind
 router = APIRouter()
 
 
@@ -61,11 +62,14 @@ def _history_view(session: Session, user: User) -> list[dict]:
     items: list[dict] = []
     for row in list_searches(session, user):
         stamp = row.created_at.strftime("%d/%m %H:%M") if row.created_at else ""
+        spec = replay_spec(row.mode, row.kind)
         items.append(
             {
                 "id": row.id,
                 "query": row.query,
-                "mode": replay_mode(row.mode, row.kind),
+                "mode": spec["mode"],
+                "tool": spec["tool"],
+                "action": spec["action"],
                 "kind": row.kind,
                 "kind_label": history_kind_label(row.kind or row.mode),
                 "title": row.title or row.query,
@@ -304,6 +308,7 @@ def chain_to_graph(
     write_audit(session, "investigation.from_chain", username=user.username, investigation_id=inv.id, details={"steps": len(seeds)})
     session.commit()
     request.session["current_case_id"] = inv.id
+    request.session["flash"] = {"level": "ok", "message": f"Caso criado a partir da cadeia · {len(seeds)} identificador(es)."}
     if get_settings().expand_sync:
         process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
@@ -318,33 +323,47 @@ def consult_to_graph(
     kind: str = Form(""),
     value: str = Form(""),
     owner: str = Form(""),
+    values: list[str] = Form(default=[]),
+    kinds: list[str] = Form(default=[]),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    seed = parse_seed(value, forced_kind=kind or None)
-    if not seed:
+    seeds = []
+    seen: set[str] = set()
+    candidates = [(kind, value), *zip(kinds, values, strict=False)]
+    for item_kind, item_value in candidates:
+        if not item_value:
+            continue
+        seed = parse_seed(item_value, forced_kind=item_kind or None)
+        if seed and seed.canonical_key not in seen:
+            seen.add(seed.canonical_key)
+            seeds.append(seed)
+    if not seeds:
         request.session["flash"] = {"level": "error", "message": "Não deu para abrir o grafo com esse valor."}
         return RedirectResponse("/app", status_code=303)
+    seed = seeds[0]
     inv = create_investigation(
         session,
         title=f"Consulta · {seed.display_name}",
         hypothesis="Gerada a partir de uma consulta rápida.",
-        seeds=[seed],
+        seeds=seeds,
         connectors=list(enabled_connector_names()),
         max_depth=get_settings().default_max_depth,
         monitor=False,
         created_by=user.username,
         max_attempts=get_settings().job_max_attempts,
     )
-    if seed.kind == "PLATE":
+    plate = next((item for item in seeds if item.kind == "PLATE"), None)
+    if plate:
         attach_plate_owner(
             session,
             inv,
-            plate=value,
+            plate=plate.value,
             owner_name=owner.strip(),
             max_attempts=get_settings().job_max_attempts,
         )
-    write_audit(session, "investigation.from_consult", username=user.username, investigation_id=inv.id, details={"kind": seed.kind})
+    write_audit(session, "investigation.from_consult", username=user.username, investigation_id=inv.id, details={"kind": seed.kind, "seeds": len(seeds)})
     session.commit()
+    request.session["current_case_id"] = inv.id
     if get_settings().expand_sync:
         process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
@@ -934,19 +953,22 @@ def tools_map(
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
     needle = request.query_params.get("busca") or ""
-    selected = get_tool(request.query_params.get("tool") or "massa")
+    tool_id = request.query_params.get("tool") or tool_id_for_kind(request.query_params.get("kind") or "")
+    selected = get_tool(tool_id) or get_tool("massa")
     ctx = template_context(request, user)
     ctx.update(
         {
             "nav": "ferramentas",
             "tools": list_tools(needle),
-            "selected": selected or get_tool("massa"),
+            "selected": selected,
             "seed": request.query_params.get("q") or "",
             "kind": request.query_params.get("kind") or "",
             "busca": needle,
         }
     )
     _with_cases(ctx, request, session)
+    _with_history(ctx, session, user)
+    _with_chain(ctx, session, user)
     return templates.TemplateResponse(request, "app/tools.html", ctx)
 
 
@@ -969,6 +991,7 @@ def tools_run(
     ingest_outcome(session, user, outcome)
     ctx = template_context(request, user)
     _with_cases(ctx, request, session)
+    _with_history(ctx, session, user)
     _with_chain(ctx, session, user, current_query=q)
     ctx.update({"tool_id": tool, "q": q})
     if isinstance(outcome, MassResult):

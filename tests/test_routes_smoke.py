@@ -70,6 +70,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Redes sociais" in tools.text
     assert "Busca em massa" in tools.text
     assert "github.com" not in tools.text.lower()
+    assert "search-history" in tools.text
 
     token = _csrf(tools.text)
     created = client.post(

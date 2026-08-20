@@ -68,7 +68,7 @@
       </label>
       <button class="btn primary" type="submit" data-tip="Adiciona todos os identificadores ao caso e expande o grafo">Adicionar ao caso</button>
       {% else %}
-      <button class="btn primary" type="submit" formaction="/app/consultar/grafo" formmethod="post" name="kind" value="{{ mass.kind }}" data-tip="Ainda não há caso. Isto cria um e guarda a semente principal.">Guardar no grafo</button>
+      <button class="btn primary" type="submit" formaction="/app/consultar/grafo" formmethod="post" name="kind" value="{{ mass.kind }}" data-tip="Ainda não há caso. Isto cria um com todos os identificadores desta massa.">Guardar no grafo</button>
       <input type="hidden" name="value" value="{{ mass.query }}" />
       {% endif %}
     </form>

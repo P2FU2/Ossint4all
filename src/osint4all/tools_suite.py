@@ -93,6 +93,22 @@ class MassResult:
         return "Busca em massa"
 
 
+def tool_id_for_kind(kind: str) -> str:
+    return {
+        "USERNAME": "username",
+        "PLATE": "plate",
+        "PHONE": "phone",
+        "NAME": "name",
+        "CNPJ": "cnpj",
+        "CPF": "cpf",
+        "EMAIL": "email",
+        "CNJ": "cnj",
+        "URL": "crtsh",
+        "MASSA": "massa",
+        "massa": "massa",
+    }.get((kind or "").upper() if (kind or "") != "massa" else "massa", "massa")
+
+
 def list_tools(query: str = "") -> list[EmbeddedTool]:
     needle = (query or "").casefold().strip()
     if not needle:
@@ -213,15 +229,16 @@ def _derive(primary: ConsultResult) -> list[tuple[str, str]]:
 
 
 def _run_derived(kind: str, value: str, settings: Settings, *, quick: bool = True) -> ConsultResult | None:
+    live = not quick
     if kind == "URL":
-        return _consult_domain(value, settings, live=True)
+        return _consult_domain(value, settings, live=live)
     if kind == "USERNAME":
         return run_consult(value, mode="USERNAME", settings=settings, quick=quick)
     if kind == "NAME" and " " in value.strip():
-        return run_consult(value, mode="NAME", settings=settings)
+        return run_consult(value, mode="NAME", settings=settings, quick=quick)
     if kind == "NAME":
-        return _consult_web(value, settings, live=True)
-    return run_consult(value, mode=kind, settings=settings)
+        return _consult_web(value, settings, live=live)
+    return run_consult(value, mode=kind, settings=settings, quick=quick)
 
 
 def _consult_domain(raw: str, settings: Settings, *, live: bool) -> ConsultResult:

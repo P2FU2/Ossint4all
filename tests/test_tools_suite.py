@@ -1,6 +1,6 @@
 from osint4all.consult import ConsultResult, run_consult
 from osint4all.graph.seed import add_seed_entities, create_investigation
-from osint4all.tools_suite import get_tool, list_tools, run_mass, seeds_from_results
+from osint4all.tools_suite import get_tool, list_tools, run_mass, seeds_from_results, tool_id_for_kind
 
 
 def test_suite_search_and_internal_urls() -> None:
@@ -11,6 +11,9 @@ def test_suite_search_and_internal_urls() -> None:
     plates = list_tools("placa")
     assert any(t.id == "plate" for t in plates)
     assert all("/app/ferramentas?tool=" in f"/app/ferramentas?tool={t.id}" for t in list_tools())
+    assert tool_id_for_kind("NAME") == "name"
+    assert tool_id_for_kind("CNJ") == "cnj"
+    assert tool_id_for_kind("URL") == "crtsh"
 
 
 def test_mass_plate_offline() -> None:
@@ -57,6 +60,21 @@ def test_assign_seeds_to_existing_case(settings, db) -> None:
 
 def test_consult_rejects_empty_mass() -> None:
     assert run_consult("", mode="massa").ok is False
+
+
+def test_mass_derived_domain_stays_offline(monkeypatch) -> None:
+    from osint4all import tools_suite
+
+    seen: dict[str, bool] = {}
+
+    def wrap(raw, settings, *, live):
+        seen["live"] = live
+        return ConsultResult(kind="URL", query=raw, title=raw, summary="offline", ok=True)
+
+    monkeypatch.setattr(tools_suite, "_consult_domain", wrap)
+    mass = run_mass("ana@exemplo.com", live=True)
+    assert mass.ok
+    assert seen.get("live") is False
 
 
 def test_mass_keeps_going_if_derived_breaks(monkeypatch) -> None:

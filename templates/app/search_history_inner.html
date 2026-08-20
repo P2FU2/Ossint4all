@@ -11,13 +11,16 @@
   {% endif %}
 </header>
 {% if history %}
+<label class="sr-only" for="history-search">Filtrar histórico</label>
+<input id="history-search" class="history-filter" type="search" placeholder="filtrar log…" autocomplete="off" />
 <ul class="history-list">
   {% for item in history %}
-  <li>
-    <form class="history-replay" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
+  <li data-search="{{ (item.kind_label ~ ' ' ~ item.title ~ ' ' ~ item.query ~ ' ' ~ (item.summary or ''))|lower }}">
+    <form class="history-replay" method="post" action="{{ item.action or '/app/consultar' }}" hx-post="{{ item.action or '/app/consultar' }}" hx-target=".consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="q" value="{{ item.query }}" />
       <input type="hidden" name="modo" value="{{ item.mode }}" />
+      {% if item.tool %}<input type="hidden" name="tool" value="{{ item.tool }}" />{% endif %}
       <button type="submit" class="history-item {% if not item.ok %}is-fail{% endif %}" data-tip="Repete esta consulta">
         <span class="history-meta">
           <span class="history-kind">{{ item.kind_label }}</span>
@@ -31,5 +34,5 @@
   {% endfor %}
 </ul>
 {% else %}
-<p class="history-empty">nenhuma consulta nesta sessão ainda. o log fica só na sua conta.</p>
+<p class="history-empty">nenhuma consulta nesta conta ainda. o log não mistura com outros usuários.</p>
 {% endif %}

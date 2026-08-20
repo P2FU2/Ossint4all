@@ -16,7 +16,7 @@
     <p class="lede">E-mail vira linha do tempo de redes. CPF cruza QSA e listas. CNPJ desenha empresas ligadas. Placa traz série, veículo e dono só se a menção for pública.</p>
   </section>
 
-  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="button[type=submit]" hx-timeout="45000">
+  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="closest form" hx-timeout="45000">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="mode-rail" role="radiogroup" aria-label="Tipo de consulta">
       {% for key, label, tip, ph in modes %}

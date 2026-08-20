@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -24,6 +24,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def _uuid() -> str:
     return str(uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -66,7 +70,7 @@ class SearchHistory(Base):
     title: Mapped[str] = mapped_column(String(255), default="")
     summary: Mapped[str] = mapped_column(String(400), default="")
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, server_default=func.now())
 
 
 class SearchChain(Base):
@@ -77,8 +81,8 @@ class SearchChain(Base):
     user_id: Mapped[str] = mapped_column(String(36), index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, server_default=func.now(), onupdate=_now)
 
 
 class SearchChainStep(Base):
@@ -94,7 +98,7 @@ class SearchChainStep(Base):
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     identifiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     findings: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, server_default=func.now())
 
 
 class Investigation(Base):

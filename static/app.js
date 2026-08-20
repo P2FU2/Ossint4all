@@ -37,7 +37,8 @@ document.addEventListener("submit", (event) => {
     const text = el.getAttribute("data-tip");
     if (!text) return;
     window.clearTimeout(hideTimer);
-    tip.textContent = text + " · clique para a ficha";
+    const extra = el.classList.contains("inspect-hint") || el.classList.contains("inspect-open") ? " · clique para a ficha" : "";
+    tip.textContent = text + extra;
     tip.hidden = false;
     active = el;
     place(x, y);
@@ -67,7 +68,7 @@ document.addEventListener("submit", (event) => {
 
   window.showAppTip = (text, x, y) => {
     window.clearTimeout(hideTimer);
-    tip.textContent = text + " · clique para a ficha";
+    tip.textContent = text;
     tip.hidden = false;
     active = tip;
     place(x, y);
@@ -99,6 +100,8 @@ document.addEventListener("submit", (event) => {
   const factsEl = document.getElementById("inspect-facts");
   const actionsEl = document.getElementById("inspect-actions");
   const closeBtn = document.getElementById("inspect-close");
+  const shell = document.querySelector(".app-shell");
+  let lastFocus = null;
   if (!overlay || !titleEl || !actionsEl) return;
 
   const KIND_LABEL = {
@@ -199,11 +202,21 @@ document.addEventListener("submit", (event) => {
 
   function runConsult(q, modo) {
     fillSearch(q, modo);
-    const form = document.querySelector(".consult-form");
     close();
+    const form = document.querySelector("form.consult-form[action='/app/consultar'], form.consult-form[hx-post='/app/consultar']");
     if (form) {
       if (form.requestSubmit) form.requestSubmit();
       else form.submit();
+      return;
+    }
+    const csrf = document.querySelector('meta[name="csrf-token"]');
+    const target = document.querySelector(".consult-result");
+    if (window.htmx && csrf && target) {
+      window.htmx.ajax("POST", "/app/consultar", {
+        target,
+        swap: "innerHTML",
+        values: { csrf_token: csrf.getAttribute("content") || "", q, modo },
+      });
       return;
     }
     window.location.assign("/app?modo=" + encodeURIComponent(modo) + "&q=" + encodeURIComponent(q));
@@ -267,14 +280,21 @@ document.addEventListener("submit", (event) => {
         if (input) input.focus();
       }));
     }
+    lastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.hidden = false;
+    overlay.setAttribute("aria-hidden", "false");
+    if (shell) shell.setAttribute("aria-hidden", "true");
     document.body.classList.add("inspect-open-body");
     if (closeBtn) closeBtn.focus();
   }
 
   function close() {
     overlay.hidden = true;
+    overlay.setAttribute("aria-hidden", "true");
+    if (shell) shell.removeAttribute("aria-hidden");
     document.body.classList.remove("inspect-open-body");
+    if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+    lastFocus = null;
   }
 
   window.openInspect = openInspect;
@@ -284,7 +304,23 @@ document.addEventListener("submit", (event) => {
     if (event.target === overlay) close();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !overlay.hidden) close();
+    if (overlay.hidden) return;
+    if (event.key === "Escape") {
+      close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusables = [...overlay.querySelectorAll("button")];
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   document.addEventListener("click", (event) => {
@@ -334,6 +370,32 @@ document.addEventListener("submit", (event) => {
       });
     }
   }, true);
+})();
+
+(function chainAndHistoryUX() {
+  document.body.addEventListener("input", (event) => {
+    const box = event.target;
+    if (!box || box.id !== "history-search") return;
+    const needle = box.value.trim().toLowerCase();
+    document.querySelectorAll(".history-list li[data-search]").forEach((row) => {
+      const hay = row.getAttribute("data-search") || "";
+      row.hidden = Boolean(needle) && !hay.includes(needle);
+    });
+  });
+  document.body.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-chain-export]");
+    if (!btn) return;
+    const area = btn.parentElement && btn.parentElement.querySelector(".chain-export");
+    const text = area ? area.value : "";
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    btn.textContent = "copiado";
+    window.setTimeout(() => {
+      btn.textContent = "copiar fio";
+    }, 1200);
+  });
 })();
 
 (function consultUX() {

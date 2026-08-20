@@ -447,6 +447,7 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .empty-steps strong { color: var(--ink); }
 
 .consult-chain { margin-top: 22px; }
+.consult-chain.is-empty { display: none; margin: 0; }
 .chain-box {
   padding: 18px 18px 14px;
   border: 1px dashed var(--line);
@@ -623,6 +624,33 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   font-size: 0.76rem;
   line-height: 1.45;
 }
+.history-filter {
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: rgba(3, 16, 10, 0.9);
+  color: var(--ink);
+  font-size: 0.76rem;
+}
+.chain-idents {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chain-chip {
+  text-decoration: none;
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 2px;
+  font-size: 0.72rem;
+  font-family: var(--display);
+}
+.chain-export { position: absolute; left: -9999px; }
 
 .result-banner { padding: 12px 14px; border-radius: 2px; background: rgba(255, 92, 122, 0.1); border: 1px solid rgba(255, 92, 122, 0.3); margin-top: 22px; }
 .result-card {
