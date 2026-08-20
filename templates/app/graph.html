@@ -5,22 +5,26 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=7" defer></script>
+<script src="/static/graph.js?v=8" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
   <div>
     <a class="crumb" href="/app/casos" data-tip="Volta à lista de casos guardados">Casos</a>
     <h1>{{ inv.title }}</h1>
-    <p class="lede">{{ inv.hypothesis or "Nós tracejados são candidatos. Clique para a ficha · desligar remove o nó e as ligações." }}</p>
+    <p class="lede">{{ inv.hypothesis or "Clique no nó para a ficha. Clique na linha para editar a ligação. Desligar um nó impede que ele volte na expansão." }}</p>
   </div>
   <div class="graph-actions">
     <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>
     <span class="kpi" data-tip="Relações já confirmadas (sócio, menção, proprietário…)">{{ edge_count }} vínculos</span>
     <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote.">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
+    <form method="post" action="/app/casos/{{ inv.id }}/explodir">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn primary" type="submit" data-tip="Puxa o QSA oficial de cada empresa e segue sócios com CNPJ/CPF até o último nível. Nomes sem documento ficam candidatos.">Explodir QSA</button>
+    </form>
     <form method="post" action="/app/casos/{{ inv.id }}/processar">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn primary" type="submit" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
+      <button class="btn" type="submit" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
     </form>
     <a class="btn" href="/app/casos/{{ inv.id }}/relatorio" data-tip="Relatório narrativo com fontes citadas">Relatório</a>
     <details class="more-menu">
@@ -56,11 +60,11 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <button class="btn" type="submit" data-tip="Reconsulta as sementes no cron.">{% if inv.monitor %}Parar monitor{% else %}Monitorar{% endif %}</button>
         </form>
-        <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar esta investigação?');">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <button class="btn danger" type="submit" data-tip="Apaga o caso e o grafo. Irreversível.">Apagar caso</button>
-        </form>
         {% endif %}
+        <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar este caso, o grafo, as notas e os arquivos?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn danger" type="submit" data-tip="Apaga o caso, nós, vínculos, anotações e uploads. Irreversível.">Apagar caso</button>
+        </form>
       </div>
     </details>
   </div>
@@ -85,6 +89,7 @@
       <option>ASSET</option>
       <option>VEHICLE</option>
       <option>PUBLICATION</option>
+      <option>NOTE</option>
     </select>
   </label>
   <div class="legend">
@@ -94,11 +99,104 @@
     <span class="dot profile"></span> Perfil
     <span class="dot asset"></span> Veículo
     <span class="dot pub"></span> Publicação
+    <span class="dot note"></span> Anotação
   </div>
 </div>
+
+{% macro note_branch(items) %}
+<ul class="note-tree">
+  {% for item in items %}
+  <li>
+    <div class="note-card">
+      <strong>{{ item.note.title }}</strong>
+      {% if item.note.body %}<p>{{ item.note.body }}</p>{% endif %}
+      <span class="muted">{% if item.note.created_by %}{{ item.note.created_by }} · {% endif %}{{ item.note.created_at.strftime("%d/%m %H:%M") if item.note.created_at else "" }}</span>
+      <div class="graph-actions">
+        {% if item.note.entity_id %}
+        <a class="btn" href="/app/casos/{{ inv.id }}/entidades/{{ item.note.entity_id }}">Ver nó</a>
+        {% endif %}
+        <form method="post" action="/app/casos/{{ inv.id }}/notas/{{ item.note.id }}/apagar" onsubmit="return confirm('Apagar esta anotação?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn danger" type="submit">Apagar</button>
+        </form>
+      </div>
+    </div>
+    {% if item.children %}{{ note_branch(item.children) }}{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+<details class="case-board" open>
+  <summary data-tip="Anotações e ligações manuais ficam gravadas neste caso">Quadro do caso · anotações e ligações</summary>
+  <div class="board-grid">
+    <section>
+      <h2>Anotações</h2>
+      {% if board_notes %}
+      {{ note_branch(board_notes) }}
+      {% else %}
+      <p class="muted">Nenhuma anotação ainda. Elas persistem com o caso e podem virar nó na árvore.</p>
+      {% endif %}
+      <form class="stack" method="post" action="/app/casos/{{ inv.id }}/notas">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>Título <input name="title" required placeholder="Hipótese, alerta, fonte…" /></label>
+        <label>Texto <textarea name="body" rows="3" placeholder="O que você quer lembrar neste caso"></textarea></label>
+        <label>Ligar a um nó
+          <select name="entity_id">
+            <option value="">Caso inteiro</option>
+            {% for e in board_entities %}
+            <option value="{{ e.id }}">{{ e.display_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Responder a
+          <select name="parent_id">
+            <option value="">Nova raiz</option>
+            {% for note in board_note_flat %}
+            <option value="{{ note.id }}">{{ note.title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" name="on_graph" value="1" /> Colocar no grafo (árvore / rede / split)</label>
+        <button class="btn primary" type="submit">Gravar anotação</button>
+      </form>
+    </section>
+    <section>
+      <h2>Nova ligação</h2>
+      <p class="muted">Cria um vínculo persistente entre dois nós que já estão no caso.</p>
+      <form class="stack" method="post" action="/app/casos/{{ inv.id }}/ligacoes">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>De
+          <select name="from_id" required>
+            {% for e in board_entities %}
+            <option value="{{ e.id }}">{{ e.display_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Para
+          <select name="to_id" required>
+            {% for e in board_entities %}
+            <option value="{{ e.id }}">{{ e.display_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Tipo
+          <select name="rel_type">
+            {% for rel in rel_types %}
+            <option value="{{ rel }}" {% if rel == "RELACIONADO" %}selected{% endif %}>{{ rel }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Nota da ligação <input name="note" placeholder="Por que estes nós se ligam" /></label>
+        <button class="btn primary" type="submit">Ligar no grafo</button>
+      </form>
+    </section>
+  </div>
+</details>
+
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
-  <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/"></div>
+  <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/"></div>
   <div id="org-map" hidden></div>
 </div>
 {% endblock %}

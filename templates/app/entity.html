@@ -103,6 +103,13 @@
 </section>
 {% endif %}
 
+{% if entity.attrs.get("nota") %}
+<section class="panel">
+  <h2>Anotação deste nó</h2>
+  <p>{{ entity.attrs.get("nota") }}</p>
+</section>
+{% endif %}
+
 {% if entity.attrs %}
 <section class="panel">
   <h2>Atributos públicos</h2>
@@ -117,19 +124,26 @@
 <section class="panel">
   <h2>Vínculos</h2>
   <table class="table">
-    <thead><tr><th>Relação</th><th>Outro nó</th><th>Confiança</th><th>Fonte</th></tr></thead>
+    <thead><tr><th>Relação</th><th>Outro nó</th><th>Confiança</th><th>Fonte</th><th></th></tr></thead>
     <tbody>
       {% for edge in edges %}
       {% set other_id = edge.to_entity_id if edge.from_entity_id == entity.id else edge.from_entity_id %}
       {% set other = neighbors.get(other_id) %}
       <tr>
-        <td>{{ edge.rel_type }}</td>
+        <td>{{ edge.rel_type }}{% if edge.attrs.get("nota") %}<span class="muted"> · {{ edge.attrs.get("nota") }}</span>{% endif %}</td>
         <td>{% if other %}<a href="/app/casos/{{ inv.id }}/entidades/{{ other.id }}">{{ other.display_name }}</a>{% else %}{{ other_id }}{% endif %}</td>
         <td>{{ '%.2f'|format(edge.confidence) }}</td>
         <td>{{ edge.source_connector or "—" }}</td>
+        <td class="graph-actions">
+          <a class="btn" href="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}">Editar</a>
+          <form method="post" action="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}/apagar" onsubmit="return confirm('Remover só esta ligação?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button class="btn danger" type="submit">Apagar</button>
+          </form>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="4">Sem vínculos ainda.</td></tr>
+      <tr><td colspan="5">Sem vínculos ainda.</td></tr>
       {% endfor %}
     </tbody>
   </table>

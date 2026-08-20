@@ -46,6 +46,10 @@
         <button class="btn" type="submit" data-tip="Consultas e a suíte passam a gravar neste caso">Usar como corrente</button>
       </form>
       <a class="btn" href="/app/casos/{{ inv.id }}" data-tip="Editar no grafo">Editar</a>
+      <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar este caso, o grafo e as anotações?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn danger" type="submit" data-tip="Remove o caso persistido. Irreversível.">Apagar</button>
+      </form>
     </div>
   </div>
   {% endfor %}

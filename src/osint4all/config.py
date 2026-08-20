@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     expand_sync: bool = True
     expand_sync_limit: int = 25
-    default_max_depth: int = 2
+    default_max_depth: int = 3
 
     cnpj_enable: bool = True
     cnpj_provider: Literal["minhareceita", "brasilapi"] = "minhareceita"

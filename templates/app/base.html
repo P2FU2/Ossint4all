@@ -6,9 +6,9 @@
   <title>{% block title %}{{ app_name }}{% endblock %} · {{ brand }}</title>
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/app.css?v=15" />
+  <link rel="stylesheet" href="/static/app.css?v=18" />
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="/static/app.js?v=15" defer></script>
+  <script src="/static/app.js?v=17" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -60,6 +60,7 @@
       </header>
       <p class="lede" id="inspect-meta"></p>
       <dl class="fact-grid" id="inspect-facts"></dl>
+      <div id="inspect-lists"></div>
       <p class="inspect-lock">Nada daqui abre site externo. Endereço fica só para copiar ou consultar de novo no painel.</p>
       <div class="inspect-actions" id="inspect-actions"></div>
     </div>

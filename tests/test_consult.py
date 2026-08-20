@@ -1,4 +1,4 @@
-from osint4all.consult import KIND_LABELS, _graph_from_cnpj, resolve_kind, run_consult
+from osint4all.consult import KIND_LABELS, _graph_from_cnpj, ficha_from_cnpj_result, public_ficha, resolve_kind, run_consult
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 
 
@@ -102,5 +102,39 @@ def test_cnpj_graph_from_partners() -> None:
     payload = graph.to_payload()
     assert len(payload["nodes"]) >= 3
     assert payload["edges"]
+    assert payload["consulted_at"]
     assert any(n["kind"] == "org" for n in payload["nodes"])
     assert any(n["kind"] == "person" for n in payload["nodes"])
+    root = next(n for n in payload["nodes"] if n["id"].startswith("cnpj-"))
+    assert root["socios"]
+
+
+def test_ficha_from_cnpj_lists_opening_email_and_partners() -> None:
+    parsed = parse_cnpj_payload(
+        {
+            "cnpj": "19215658000149",
+            "razao_social": "EHL GESTAO EMPRESARIAL E NEGOCIOS LTDA",
+            "data_inicio_atividade": "2013-11-08",
+            "capital_social": "100000.00",
+            "correio_eletronico": "contato@ehl.example",
+            "qsa": [
+                {"nome_socio": "EDUARDO HERMELINO LEITE", "qualificacao_socio": "Sócio-Administrador"},
+                {
+                    "nome_socio": "OUTRA EMPRESA LTDA",
+                    "cnpj_cpf_do_socio": "33000167000101",
+                    "qualificacao_socio": "Sócio",
+                },
+            ],
+        }
+    )
+    card = ficha_from_cnpj_result(parsed, consulted_at="20/08/2026 11:00")
+    labels = [label for label, _ in card["facts"]]
+    assert "data da consulta" in labels
+    assert "ano de abertura" in labels
+    assert "capital social" in labels
+    assert "e-mail de contato" in labels
+    assert any("EDUARDO" in item for item in card["socios"])
+    assert card["participacoes"]
+    offline = public_ficha("19215658000149", mode="CNPJ")
+    assert offline["ok"]
+    assert any(label == "CNPJ" for label, _ in offline["facts"])

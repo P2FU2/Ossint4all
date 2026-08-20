@@ -16,9 +16,24 @@ from osint4all.connectors.registry import connector_health, enabled_connector_na
 from osint4all.db.chain import active_chain, alvo_fields, chain_seeds, chain_view, ingest_outcome, reset_chain
 from osint4all.db.history import clear_searches, kind_label as history_kind_label, list_searches, record_search, replay_spec
 from osint4all.db.models import AuditLog, Edge, Entity, Evidence, ExpansionJob, Investigation, User
-from osint4all.db.repository import confirm_entity, detach_entity, enqueue_expand, graph_payload, job_counts
+from osint4all.db.repository import (
+    EDGE_REL_TYPES,
+    add_case_note,
+    confirm_entity,
+    create_manual_edge,
+    delete_case_note,
+    delete_edge,
+    detach_entity,
+    enqueue_expand,
+    enqueue_qsa_network,
+    graph_payload,
+    job_counts,
+    list_notes,
+    note_tree,
+    update_edge,
+)
 from osint4all.graph.expand import process_pending_jobs
-from osint4all.consult import MODES, ConsultResult, run_consult
+from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.seed import add_seed_entities, attach_plate_owner, create_investigation
 from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results, tool_id_for_kind
@@ -250,6 +265,16 @@ def consult_run(
     return templates.TemplateResponse(request, template, ctx)
 
 
+@router.get("/app/ficha.json")
+def ficha_lookup(
+    q: str = "",
+    modo: str = "auto",
+    user: User = Depends(current_user),
+) -> JSONResponse:
+    card = public_ficha(q, mode=modo)
+    return JSONResponse(card)
+
+
 @router.post("/app/historico/limpar")
 def history_clear(
     request: Request,
@@ -411,7 +436,7 @@ def alvo_to_graph(
             hypothesis="Dossiê do alvo em camadas. Vínculos por âncora forte ou QSA.",
             seeds=seeds,
             connectors=list(enabled_connector_names()),
-            max_depth=get_settings().default_max_depth,
+            max_depth=4,
             monitor=False,
             created_by=user.username,
             max_attempts=get_settings().job_max_attempts,
@@ -646,6 +671,7 @@ def graph_page(
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app", status_code=303)
     request.session["current_case_id"] = inv.id
+    notes = list_notes(session, inv.id)
     ctx = template_context(request, user)
     ctx.update(
         {
@@ -660,6 +686,12 @@ def graph_page(
                 select(func.count()).select_from(Edge).where(Edge.investigation_id == inv.id)
             )
             or 0,
+            "board_note_flat": notes,
+            "board_notes": note_tree(notes),
+            "board_entities": session.scalars(
+                select(Entity).where(Entity.investigation_id == inv.id).order_by(Entity.display_name)
+            ).all(),
+            "rel_types": EDGE_REL_TYPES,
         }
     )
     return templates.TemplateResponse(request, "app/graph.html", ctx)
@@ -928,6 +960,44 @@ def detach_node(
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
+@router.post("/app/casos/{investigation_id}/explodir")
+def explode_qsa(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return RedirectResponse("/app/casos", status_code=303)
+    queued = enqueue_qsa_network(session, inv, max_attempts=get_settings().job_max_attempts)
+    write_audit(
+        session,
+        "investigation.explode_qsa",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"queued": queued, "max_depth": inv.max_depth},
+    )
+    session.commit()
+    processed = 0
+    if get_settings().expand_sync:
+        for _ in range(6):
+            n = process_pending_jobs(investigation_id=inv.id, limit=10)
+            if not n:
+                break
+            processed += n
+    request.session["flash"] = {
+        "level": "ok",
+        "message": (
+            f"QSA explodido até o nível {inv.max_depth}: {queued} âncora(s) na fila, {processed} lote(s) rodado(s). "
+            "Sócios só com nome entram como candidatos; CNPJ/CPF seguem expandindo."
+        ),
+    }
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
 @router.post("/app/casos/{investigation_id}/processar")
 def process_now(
     investigation_id: str,
@@ -937,6 +1007,138 @@ def process_now(
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     process_pending_jobs(investigation_id=investigation_id, limit=get_settings().expand_sync_limit)
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/notas")
+def add_note(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    title: str = Form(""),
+    body: str = Form(""),
+    entity_id: str = Form(""),
+    parent_id: str = Form(""),
+    on_graph: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return RedirectResponse("/app/casos", status_code=303)
+    add_case_note(
+        session,
+        inv,
+        title=title,
+        body=body,
+        entity_id=entity_id or None,
+        parent_id=parent_id or None,
+        created_by=user.username,
+        on_graph=bool(on_graph),
+    )
+    write_audit(session, "note.add", username=user.username, investigation_id=inv.id, details={"on_graph": bool(on_graph)})
+    session.commit()
+    request.session["flash"] = {"level": "ok", "message": "Anotação gravada no caso."}
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/notas/{note_id}/apagar")
+def remove_note(
+    investigation_id: str,
+    note_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    if delete_case_note(session, investigation_id, note_id):
+        write_audit(session, "note.delete", username=user.username, investigation_id=investigation_id, details={"note_id": note_id})
+        session.commit()
+        request.session["flash"] = {"level": "ok", "message": "Anotação removida."}
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/ligacoes")
+def add_link(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    from_id: str = Form(""),
+    to_id: str = Form(""),
+    rel_type: str = Form("RELACIONADO"),
+    note: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return RedirectResponse("/app/casos", status_code=303)
+    edge = create_manual_edge(session, inv, from_id=from_id, to_id=to_id, rel_type=rel_type, note=note)
+    write_audit(session, "edge.create", username=user.username, investigation_id=inv.id, details={"rel": rel_type})
+    session.commit()
+    request.session["flash"] = {
+        "level": "ok" if edge else "error",
+        "message": "Ligação gravada no grafo." if edge else "Escolha dois nós diferentes.",
+    }
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.get("/app/casos/{investigation_id}/ligacoes/{edge_id}", response_class=HTMLResponse)
+def edge_page(
+    investigation_id: str,
+    edge_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    inv = session.get(Investigation, investigation_id)
+    edge = session.scalar(select(Edge).where(Edge.id == edge_id, Edge.investigation_id == investigation_id))
+    if not inv or not edge:
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    src = session.get(Entity, edge.from_entity_id)
+    dst = session.get(Entity, edge.to_entity_id)
+    ctx = template_context(request, user)
+    ctx.update({"nav": "casos", "inv": inv, "edge": edge, "src": src, "dst": dst, "rel_types": EDGE_REL_TYPES})
+    return templates.TemplateResponse(request, "app/edge.html", ctx)
+
+
+@router.post("/app/casos/{investigation_id}/ligacoes/{edge_id}/editar")
+def edit_link(
+    investigation_id: str,
+    edge_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    rel_type: str = Form("RELACIONADO"),
+    note: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    edge = update_edge(session, investigation_id, edge_id, rel_type=rel_type, note=note)
+    if edge:
+        write_audit(session, "edge.edit", username=user.username, investigation_id=investigation_id, details={"rel": rel_type})
+        session.commit()
+        request.session["flash"] = {"level": "ok", "message": "Ligação atualizada."}
+    return RedirectResponse(f"/app/casos/{investigation_id}/ligacoes/{edge_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/ligacoes/{edge_id}/apagar")
+def remove_link(
+    investigation_id: str,
+    edge_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    if delete_edge(session, investigation_id, edge_id):
+        write_audit(session, "edge.delete", username=user.username, investigation_id=investigation_id, details={"edge_id": edge_id})
+        session.commit()
+        request.session["flash"] = {"level": "ok", "message": "Ligação removida. Os nós continuam no caso."}
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -1073,7 +1275,7 @@ def toggle_monitor(
 def purge_case(
     investigation_id: str,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(current_user),
     session: Session = Depends(db_session),
     csrf_token: str = Form(""),
 ) -> RedirectResponse:
@@ -1082,6 +1284,15 @@ def purge_case(
     if inv:
         write_audit(session, "investigation.purge", username=user.username, investigation_id=inv.id)
         session.delete(inv)
+        session.commit()
+        upload = project_root() / "data" / "uploads" / investigation_id
+        if upload.exists():
+            import shutil
+
+            shutil.rmtree(upload, ignore_errors=True)
+        if request.session.get("current_case_id") == investigation_id:
+            request.session.pop("current_case_id", None)
+        request.session["flash"] = {"level": "ok", "message": "Caso apagado. Nós, vínculos, notas e uploads foram removidos."}
     return RedirectResponse("/app/casos", status_code=303)
 
 

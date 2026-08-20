@@ -121,6 +121,8 @@ class Investigation(Base):
     entities: Mapped[list[Entity]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
     edges: Mapped[list[Edge]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
     jobs: Mapped[list[ExpansionJob]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
+    notes: Mapped[list[CaseNote]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
+    blocked_keys: Mapped[list[BlockedKey]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
 
 
 class Entity(Base):
@@ -203,6 +205,34 @@ class Evidence(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     entity: Mapped[Entity | None] = relationship(back_populates="evidence")
+
+
+class CaseNote(Base):
+    __tablename__ = "case_notes"
+    __table_args__ = (Index("ix_case_notes_inv", "investigation_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id"), index=True)
+    entity_id: Mapped[str | None] = mapped_column(ForeignKey("entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("case_notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    investigation: Mapped[Investigation] = relationship(back_populates="notes")
+
+
+class BlockedKey(Base):
+    __tablename__ = "blocked_keys"
+    __table_args__ = (UniqueConstraint("investigation_id", "canonical_key", name="uq_blocked_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id"), index=True)
+    canonical_key: Mapped[str] = mapped_column(String(512), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    investigation: Mapped[Investigation] = relationship(back_populates="blocked_keys")
 
 
 class ExpansionJob(Base):

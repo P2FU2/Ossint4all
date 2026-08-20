@@ -98,6 +98,7 @@ document.addEventListener("submit", (event) => {
   const kindEl = document.getElementById("inspect-kind");
   const metaEl = document.getElementById("inspect-meta");
   const factsEl = document.getElementById("inspect-facts");
+  const listsEl = document.getElementById("inspect-lists");
   const actionsEl = document.getElementById("inspect-actions");
   const closeBtn = document.getElementById("inspect-close");
   const shell = document.querySelector(".app-shell");
@@ -231,10 +232,36 @@ document.addEventListener("submit", (event) => {
     const wrap = document.createElement("div");
     const dt = document.createElement("dt");
     const dd = document.createElement("dd");
+    const text = String(value || "").trim();
     dt.textContent = label;
-    dd.textContent = value;
+    dd.textContent = !text || text === "—" || text === "None" ? "não informado" : text;
     wrap.append(dt, dd);
     return wrap;
+  }
+
+  function asPairs(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) {
+      return raw
+        .map((item) => (Array.isArray(item) ? [item[0], item[1]] : [item.label || item[0], item.value || item[1]]))
+        .filter((item) => item[0]);
+    }
+    return Object.entries(raw);
+  }
+
+  function renderList(title, items) {
+    if (!listsEl || !items || !items.length) return;
+    const kicker = document.createElement("p");
+    kicker.className = "section-kicker";
+    kicker.textContent = title;
+    const ul = document.createElement("ul");
+    ul.className = "inspect-list";
+    items.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = typeof item === "string" ? item : [item.name, item.papel, item.meta].filter(Boolean).join(" · ");
+      ul.appendChild(li);
+    });
+    listsEl.append(kicker, ul);
   }
 
   function action(label, onClick, primary) {
@@ -246,40 +273,55 @@ document.addEventListener("submit", (event) => {
     return btn;
   }
 
-  function openInspect(raw) {
-    const data = parsePayload(raw) || {};
+  function paintFacts(data) {
     const title = String(data.title || "ficha").trim() || "ficha";
     const kind = String(data.kind || "item");
     const meta = String(data.meta || "");
     const url = String(data.url || "");
     const when = String(data.when || "");
-    const seed = guessSeed(title, meta, url);
-    if (window.hideAppTip) window.hideAppTip();
+    const seed = guessSeed(title, meta, url, ...(asPairs(data.facts).map((pair) => pair[1])));
     titleEl.textContent = title;
     kindEl.textContent = KIND_LABEL[kind] || kind || "ficha";
     metaEl.textContent = meta || KIND_WHY[kind] || "Detalhe desta fonte, sem sair do painel.";
     factsEl.replaceChildren();
     factsEl.appendChild(fact("tipo", KIND_LABEL[kind] || kind));
-    if (when) factsEl.appendChild(fact("quando", when));
+    if (when) factsEl.appendChild(fact("data da consulta", when));
+    asPairs(data.facts).forEach(([label, value]) => {
+      if (!label) return;
+      if (when && String(label).toLowerCase() === "data da consulta") return;
+      factsEl.appendChild(fact(label, value));
+    });
     if (url) {
       factsEl.appendChild(fact("endereço", url));
       const host = hostOf(url);
       if (host) factsEl.appendChild(fact("host", host));
     }
+    if (data.error) factsEl.appendChild(fact("fonte", data.error));
     factsEl.appendChild(fact("leitura", KIND_WHY[kind] || "Item interno da consulta. Clique nas ações abaixo."));
     if (seed) factsEl.appendChild(fact("consultável", seed.q + " · " + seed.modo));
+    if (listsEl) listsEl.replaceChildren();
+    renderList("sócios / QSA", data.socios || []);
+    renderList("participações", data.participacoes || []);
+    return { title, kind, meta, url, when, seed };
+  }
+
+  function openInspect(raw) {
+    const data = parsePayload(raw) || {};
+    if (window.hideAppTip) window.hideAppTip();
+    const painted = paintFacts(data);
+    const lines = [painted.title, painted.kind, painted.meta, painted.when, painted.url]
+      .concat(asPairs(data.facts).map((pair) => pair[0] + ": " + pair[1]))
+      .concat(data.socios || [])
+      .concat(data.participacoes || [])
+      .filter(Boolean);
     actionsEl.replaceChildren();
-    actionsEl.appendChild(action("copiar título", () => copyText(title)));
-    if (url) actionsEl.appendChild(action("copiar URL", () => copyText(url)));
-    actionsEl.appendChild(
-      action("copiar ficha", () =>
-        copyText([title, kind, meta, when, url].filter(Boolean).join("\n"))
-      )
-    );
-    if (seed) {
-      actionsEl.appendChild(action("consultar isto", () => runConsult(seed.q, seed.modo), true));
+    actionsEl.appendChild(action("copiar título", () => copyText(painted.title)));
+    if (painted.url) actionsEl.appendChild(action("copiar URL", () => copyText(painted.url)));
+    actionsEl.appendChild(action("copiar ficha", () => copyText(lines.join("\n"))));
+    if (painted.seed) {
+      actionsEl.appendChild(action("consultar isto", () => runConsult(painted.seed.q, painted.seed.modo), true));
       actionsEl.appendChild(action("colocar no campo", () => {
-        fillSearch(seed.q, seed.modo);
+        fillSearch(painted.seed.q, painted.seed.modo);
         close();
         const input = document.getElementById("q");
         if (input) input.focus();
@@ -291,6 +333,29 @@ document.addEventListener("submit", (event) => {
     if (shell) shell.setAttribute("aria-hidden", "true");
     document.body.classList.add("inspect-open-body");
     if (closeBtn) closeBtn.focus();
+    if (painted.seed && painted.seed.modo === "CNPJ" && !data.enriched) {
+      factsEl.appendChild(fact("ficha oficial", "buscando na Receita…"));
+      fetch("/app/ficha.json?q=" + encodeURIComponent(painted.seed.q) + "&modo=CNPJ")
+        .then((resp) => (resp.ok ? resp.json() : Promise.reject()))
+        .then((ficha) => {
+          if (overlay.hidden) return;
+          paintFacts({
+            title: ficha.title || painted.title,
+            kind: ficha.kind || "empresa",
+            meta: ficha.meta || painted.meta,
+            url: painted.url,
+            when: painted.when || (ficha.facts && ficha.facts[0] && ficha.facts[0][1]) || "",
+            facts: ficha.facts || [],
+            socios: ficha.socios || [],
+            participacoes: ficha.participacoes || data.participacoes || [],
+            error: ficha.error || "",
+            enriched: true,
+          });
+        })
+        .catch(() => {
+          if (!overlay.hidden) factsEl.appendChild(fact("ficha oficial", "indisponível nesta passagem"));
+        });
+    }
   }
 
   function close() {
@@ -348,13 +413,18 @@ document.addEventListener("submit", (event) => {
     const node = event.target.closest(".tree-node");
     if (node) {
       event.preventDefault();
-      openInspect({
-        title: node.getAttribute("data-title") || "nó",
-        kind: node.getAttribute("data-kind") || "node",
-        meta: node.getAttribute("data-meta") || "",
-        url: node.getAttribute("data-url") || "",
-        when: "",
-      });
+      const packed = node.getAttribute("data-inspect");
+      if (packed) {
+        openInspect(packed);
+      } else {
+        openInspect({
+          title: node.getAttribute("data-title") || "nó",
+          kind: node.getAttribute("data-kind") || "node",
+          meta: node.getAttribute("data-meta") || "",
+          url: node.getAttribute("data-url") || "",
+          when: "",
+        });
+      }
       return;
     }
     const source = event.target.closest("[data-inspect]");
@@ -648,8 +718,20 @@ document.addEventListener("submit", (event) => {
         const title = String(node.label || node.id);
         const sub = String(node.meta || info.hint || "").slice(0, 42);
         const seed = node.id === root.id ? " is-seed" : "";
+        const kindKey = node.kind === "org" ? "empresa" : node.kind === "person" ? "socio" : "node";
+        const inspect = escapeXml(
+          JSON.stringify({
+            title,
+            kind: kindKey,
+            meta: node.meta || info.hint || "",
+            when: data.consulted_at || "",
+            facts: node.facts || [],
+            socios: node.socios || [],
+            participacoes: node.participacoes || [],
+          })
+        );
         return (
-          `<g class="tree-node kind-${escapeXml(node.kind)}${seed}" transform="translate(${p.x - CARD_W / 2},${p.y})" data-title="${escapeXml(title)}" data-meta="${escapeXml(node.meta || info.hint || "")}" data-kind="node" style="cursor:pointer">` +
+          `<g class="tree-node kind-${escapeXml(node.kind)}${seed}" transform="translate(${p.x - CARD_W / 2},${p.y})" data-title="${escapeXml(title)}" data-meta="${escapeXml(node.meta || info.hint || "")}" data-kind="${kindKey}" data-inspect="${inspect}" style="cursor:pointer">` +
           `<rect width="${CARD_W}" height="${CARD_H}" rx="3"/>` +
           `<text class="tree-kicker" x="10" y="16">${escapeXml(info.title)}</text>` +
           `<text class="tree-title" x="10" y="34">${escapeXml(title.slice(0, 26))}</text>` +

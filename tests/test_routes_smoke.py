@@ -92,6 +92,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Caso corrente" in created.text
     assert "Editar" in created.text
     assert "Buscar" in created.text
+    assert "Explodir QSA" in created.text
 
     token = _csrf(created.text)
     edited = client.post(

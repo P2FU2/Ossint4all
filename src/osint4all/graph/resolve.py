@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from osint4all.connectors.base import ConnectorResult, FoundEntity
 from osint4all.db.models import Edge, Entity, Evidence, Identifier, Investigation
-from osint4all.db.repository import add_identifier, enqueue_expand, find_entity_by_key, utcnow
-from osint4all.graph.identity import found_canonical_key, is_unconfirmed
+from osint4all.db.repository import add_identifier, blocked_key_set, enqueue_expand, find_entity_by_key, utcnow
+from osint4all.graph.identity import found_canonical_key, should_enqueue_child
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
 
 
@@ -102,8 +102,12 @@ def apply_result(
 ) -> list[Entity]:
     created: list[Entity] = []
     ref_map: dict[str, Entity] = {origin.canonical_key: origin}
+    blocked = blocked_key_set(session, investigation.id)
 
     for found in result.entities:
+        key = found_canonical_key(found)
+        if key in blocked or canonical_key(found.kind, found.value) in blocked:
+            continue
         entity = upsert_found_entity(session, investigation, found, depth=depth + 1)
         ref_map[found_canonical_key(found)] = entity
         ref_map[canonical_key(found.kind, found.value)] = entity
@@ -112,8 +116,7 @@ def apply_result(
             enqueue_children
             and depth + 1 < investigation.max_depth
             and entity.id != origin.id
-            and not is_unconfirmed(entity)
-            and not is_unconfirmed(found)
+            and should_enqueue_child(found, entity)
         ):
             enqueue_expand(
                 session,

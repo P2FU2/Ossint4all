@@ -1,8 +1,8 @@
 from osint4all.connectors.base import FoundEntity
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 from osint4all.db.models import Entity
-from osint4all.db.repository import detach_entity
-from osint4all.graph.identity import found_canonical_key, is_unconfirmed, names_match
+from osint4all.db.repository import detach_entity, enqueue_qsa_network
+from osint4all.graph.identity import found_canonical_key, has_expandable_anchor, is_unconfirmed, names_match
 from osint4all.graph.layers import confirmed_seeds, run_alvo_layer
 from osint4all.graph.resolve import apply_result
 from osint4all.graph.seed import create_investigation
@@ -73,7 +73,7 @@ def test_alvo_layer_plate_offline() -> None:
     assert layer.confirmed
 
 
-def test_unconfirmed_child_not_enqueued(settings, db) -> None:
+def test_unconfirmed_name_child_not_enqueued(settings, db) -> None:
     seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
     inv = create_investigation(
         db,
@@ -81,6 +81,46 @@ def test_unconfirmed_child_not_enqueued(settings, db) -> None:
         hypothesis="teste",
         seeds=[seed],
         connectors=["socio_search"],
+        max_depth=2,
+        monitor=False,
+        created_by="tester",
+    )
+    origin = next(e for e in inv.entities if e.is_seed)
+    found = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="JOAO PEREIRA LIMA",
+        display_name="JOAO PEREIRA LIMA",
+        attrs={"status": "unconfirmed", "candidate_key": "qsa:1"},
+        confidence=0.4,
+    )
+    from osint4all.connectors.base import ConnectorResult, FoundEdge
+
+    apply_result(
+        db,
+        inv,
+        origin,
+        ConnectorResult(
+            entities=[found],
+            edges=[FoundEdge(from_ref=origin.canonical_key, to_ref=found_canonical_key(found), rel_type="CANDIDATO")],
+        ),
+        connector="cnpj_receita",
+        depth=0,
+        enqueue_children=True,
+        max_attempts=3,
+    )
+    jobs = [j for j in inv.jobs if j.entity_id != origin.id]
+    assert jobs == []
+
+
+def test_unconfirmed_cnpj_child_is_enqueued(settings, db) -> None:
+    seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=["cnpj_receita"],
         max_depth=2,
         monitor=False,
         created_by="tester",
@@ -110,7 +150,8 @@ def test_unconfirmed_child_not_enqueued(settings, db) -> None:
         max_attempts=3,
     )
     jobs = [j for j in inv.jobs if j.entity_id != origin.id]
-    assert jobs == []
+    assert len(jobs) == 1
+    assert has_expandable_anchor(found)
 
 
 def test_detach_removes_edges(settings, db) -> None:
@@ -153,3 +194,36 @@ def test_detach_removes_edges(settings, db) -> None:
     left = db.scalars(select(Edge).where(Edge.investigation_id == inv.id)).all()
     assert left == []
     assert db.get(Entity, other.id) is None
+
+
+def test_enqueue_qsa_network_raises_depth_and_queues_cnpj(settings, db) -> None:
+    seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=["cnpj_receita"],
+        max_depth=2,
+        monitor=False,
+        created_by="tester",
+    )
+    company = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={"status": "unconfirmed"},
+        depth=1,
+    )
+    db.add(company)
+    db.flush()
+    queued = enqueue_qsa_network(db, inv, max_attempts=3)
+    db.flush()
+    assert inv.max_depth == 4
+    assert queued >= 1
+    from osint4all.db.models import ExpansionJob
+    from sqlalchemy import select
+
+    jobs = db.scalars(select(ExpansionJob).where(ExpansionJob.entity_id == company.id)).all()
+    assert jobs

@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
@@ -94,12 +95,139 @@ class TimelineEvent:
     kind: str = "event"
 
 
+def _consult_stamp() -> str:
+    return datetime.now().strftime("%d/%m/%Y %H:%M")
+
+
+def _year_of(value: str) -> str:
+    match = re.search(r"(19|20)\d{2}", value or "")
+    return match.group(0) if match else ""
+
+
+def _org_card_facts(attrs: dict[str, Any] | None, *, consulted_at: str = "") -> list[tuple[str, str]]:
+    data = attrs or {}
+    pairs: list[tuple[str, str]] = []
+    if consulted_at:
+        pairs.append(("data da consulta", consulted_at))
+    abertura = str(data.get("data_inicio") or "").strip()
+    if abertura:
+        pairs.append(("abertura", abertura))
+        year = _year_of(abertura)
+        if year:
+            pairs.append(("ano de abertura", year))
+    skip = {label for label, _ in pairs}
+    mapping = (
+        ("capital social", "capital_social"),
+        ("e-mail de contato", "email"),
+        ("telefone", "telefone"),
+        ("situação", "situacao"),
+        ("CNAE", "cnae"),
+        ("porte", "porte"),
+        ("natureza", "natureza_juridica"),
+        ("endereço", "endereco"),
+        ("razão social", "razao_social"),
+    )
+    for label, key in mapping:
+        value = str(data.get(key) or "").strip()
+        if value and label not in skip:
+            pairs.append((label, value))
+            skip.add(label)
+    city = str(data.get("municipio") or "").strip()
+    uf = str(data.get("uf") or "").strip()
+    if city or uf:
+        pairs.append(("município", f"{city} / {uf}".strip(" /")))
+    return pairs
+
+
+def ficha_from_cnpj_result(parsed: Any, *, consulted_at: str = "") -> dict[str, Any]:
+    org = next((e for e in parsed.entities if e.kind == "CNPJ"), None)
+    org_digits = only_digits(org.value) if org else ""
+    partners = [e for e in parsed.entities if not (e.kind == "CNPJ" and only_digits(e.value) == org_digits)]
+    attrs = (org.attrs if org else {}) or {}
+    stamp = consulted_at or _consult_stamp()
+    facts = _org_card_facts(attrs, consulted_at=stamp)
+    if org:
+        facts.insert(1, ("CNPJ", _format_cnpj(org.value)))
+    socios = [
+        " · ".join(
+            bit
+            for bit in (
+                e.display_name,
+                str((e.attrs or {}).get("papel") or e.kind),
+                _format_cnpj(e.value) if e.kind == "CNPJ" else "",
+            )
+            if bit
+        )
+        for e in partners
+    ]
+    participacoes = [e.display_name for e in partners if e.kind == "CNPJ"]
+    if socios:
+        facts.append(("sócios / QSA", f"{len(socios)} registro(s)"))
+    if participacoes:
+        facts.append(("participações (sócio PJ)", f"{len(participacoes)} empresa(s)"))
+    return {
+        "ok": True,
+        "title": (org.display_name if org else "") or str(attrs.get("razao_social") or "empresa"),
+        "kind": "empresa",
+        "meta": str(attrs.get("situacao") or attrs.get("cnae") or "Ficha pública da Receita."),
+        "facts": facts,
+        "socios": socios,
+        "participacoes": participacoes,
+    }
+
+
+def public_ficha(raw: str, *, mode: str = "auto", settings: Settings | None = None, quick: bool = False) -> dict[str, Any]:
+    settings = settings or get_settings()
+    text = (raw or "").strip()
+    stamp = _consult_stamp()
+    if not text:
+        return {"ok": False, "title": "", "facts": [], "socios": [], "participacoes": [], "error": "Informe um identificador."}
+    forced = (mode or "auto").upper()
+    seed = parse_seed(text, forced_kind=None if forced in {"", "AUTO"} else forced)
+    kind = seed.kind if seed else forced
+    if kind != "CNPJ" or not seed:
+        return {
+            "ok": True,
+            "title": text,
+            "kind": "node",
+            "facts": [("data da consulta", stamp), ("identificador", text)],
+            "socios": [],
+            "participacoes": [],
+        }
+    digits = only_digits(seed.value)
+    if not _live_ok(settings, quick):
+        return {
+            "ok": True,
+            "title": _format_cnpj(digits),
+            "kind": "empresa",
+            "facts": [("data da consulta", stamp), ("CNPJ", _format_cnpj(digits))],
+            "socios": [],
+            "participacoes": [],
+            "meta": "Ficha completa da Receita só ao vivo.",
+        }
+    try:
+        parsed = parse_cnpj_payload(CnpjReceitaConnector(settings)._fetch(digits))
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "title": _format_cnpj(digits),
+            "facts": [("data da consulta", stamp), ("CNPJ", _format_cnpj(digits))],
+            "socios": [],
+            "participacoes": [],
+            "error": str(exc),
+        }
+    return ficha_from_cnpj_result(parsed, consulted_at=stamp)
+
+
 @dataclass
 class GraphNode:
     id: str
     label: str
     kind: str = "org"
     meta: str = ""
+    facts: list[tuple[str, str]] = field(default_factory=list)
+    socios: list[str] = field(default_factory=list)
+    participacoes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -115,11 +243,24 @@ class ConsultGraph:
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
     caption: str = ""
+    consulted_at: str = field(default_factory=_consult_stamp)
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "caption": self.caption,
-            "nodes": [{"id": n.id, "label": n.label, "kind": n.kind, "meta": n.meta} for n in self.nodes],
+            "consulted_at": self.consulted_at,
+            "nodes": [
+                {
+                    "id": n.id,
+                    "label": n.label,
+                    "kind": n.kind,
+                    "meta": n.meta,
+                    "facts": list(n.facts),
+                    "socios": list(n.socios),
+                    "participacoes": list(n.participacoes),
+                }
+                for n in self.nodes
+            ],
             "edges": [
                 {"source": e.source, "target": e.target, "label": e.label, "explain": e.explain} for e in self.edges
             ],
@@ -434,7 +575,12 @@ def _consult_cnpj(raw: str, settings: Settings, *, quick: bool = False) -> Consu
         ("Telefone", str(attrs.get("telefone") or "—")),
         ("E-mail", str(attrs.get("email") or "—")),
     ]
-    graph = _graph_from_cnpj(digits, str(attrs.get("razao_social") or org.display_name if org else digits), partners)
+    graph = _graph_from_cnpj(
+        digits,
+        str(attrs.get("razao_social") or org.display_name if org else digits),
+        partners,
+        attrs,
+    )
     timeline = [
         TimelineEvent("Abertura", str(attrs.get("data_inicio") or "n/d"), when=str(attrs.get("data_inicio") or "n/d"), kind="org"),
         TimelineEvent("Situação cadastral", str(attrs.get("situacao") or "n/d"), when=str(attrs.get("data_situacao") or "n/d"), kind="org"),
@@ -542,7 +688,15 @@ def _consult_cpf(raw: str, settings: Settings | None = None, *, quick: bool = Fa
                     )
                 )
                 nid = f"cnpj-{cnpj or companies}"
-                graph.nodes.append(GraphNode(nid, entity.display_name, "org", cnpj or "CNPJ"))
+                graph.nodes.append(
+                    GraphNode(
+                        nid,
+                        entity.display_name,
+                        "org",
+                        cnpj or "CNPJ",
+                        facts=_org_card_facts(entity.attrs, consulted_at=graph.consulted_at),
+                    )
+                )
                 graph.edges.append(
                     GraphEdge("cpf", nid, "sócio no QSA", "Este CPF aparece no quadro societário público desta empresa.")
                 )
@@ -717,14 +871,35 @@ def _consult_name(raw: str, settings: Settings, *, quick: bool = False) -> Consu
         )
         for e in orgs
     ]
+    stamp = _consult_stamp()
+    participacoes = [e.display_name for e in orgs]
     graph = ConsultGraph(
-        nodes=[GraphNode("person", raw.strip(), "person", "nome consultado")],
+        nodes=[
+            GraphNode(
+                "person",
+                raw.strip(),
+                "person",
+                "nome consultado",
+                facts=[("data da consulta", stamp), ("participações", f"{len(orgs)} empresa(s)")],
+                participacoes=participacoes,
+            )
+        ],
         edges=[],
         caption="Árvore do sócio: o nome no topo; abaixo, empresas em que esse nome aparece no QSA público.",
+        consulted_at=stamp,
     )
     for idx, org in enumerate(orgs):
         nid = f"org-{idx}"
-        graph.nodes.append(GraphNode(nid, org.display_name, "org", only_digits(org.value)))
+        graph.nodes.append(
+            GraphNode(
+                nid,
+                org.display_name,
+                "org",
+                only_digits(org.value),
+                facts=_org_card_facts(org.attrs, consulted_at=stamp),
+                participacoes=[org.display_name],
+            )
+        )
         graph.edges.append(
             GraphEdge("person", nid, "sócio no QSA", "Nome encontrado no quadro societário público desta empresa.")
         )
@@ -1127,17 +1302,47 @@ def _format_cnpj(digits: str) -> str:
     return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
 
 
-def _graph_from_cnpj(root_digits: str, root_label: str, partners: list[Any]) -> ConsultGraph:
+def _graph_from_cnpj(root_digits: str, root_label: str, partners: list[Any], attrs: dict[str, Any] | None = None) -> ConsultGraph:
+    stamp = _consult_stamp()
+    socios = [
+        " · ".join(
+            bit
+            for bit in (p.display_name, str((p.attrs or {}).get("papel") or p.kind))
+            if bit
+        )
+        for p in partners
+    ]
+    participacoes = [p.display_name for p in partners if p.kind == "CNPJ"]
     graph = ConsultGraph(
-        nodes=[GraphNode(f"cnpj-{root_digits}", root_label, "org", _format_cnpj(root_digits))],
+        nodes=[
+            GraphNode(
+                f"cnpj-{root_digits}",
+                root_label,
+                "org",
+                _format_cnpj(root_digits),
+                facts=_org_card_facts(attrs, consulted_at=stamp),
+                socios=socios,
+                participacoes=participacoes,
+            )
+        ],
         edges=[],
         caption="Árvore societária: a empresa consultada na raiz; sócios PF/PJ no primeiro nível; outras firmas dos mesmos sócios mais abaixo.",
+        consulted_at=stamp,
     )
     for idx, partner in enumerate(partners):
         kind = "org" if partner.kind == "CNPJ" else "person"
         nid = f"p-{idx}-{only_digits(str(partner.value)) or idx}"
         papel = str(partner.attrs.get("papel") or "sócio")
-        graph.nodes.append(GraphNode(nid, partner.display_name, kind, papel))
+        graph.nodes.append(
+            GraphNode(
+                nid,
+                partner.display_name,
+                kind,
+                papel,
+                facts=[("data da consulta", stamp), ("papel no QSA", papel)],
+                participacoes=[root_label],
+            )
+        )
         graph.edges.append(
             GraphEdge(nid, f"cnpj-{root_digits}", papel, f"{papel} no QSA oficial da Receita (Minha Receita / BrasilAPI).")
         )
@@ -1343,4 +1548,6 @@ __all__ = [
     "run_consult",
     "resolve_kind",
     "result_to_save_payload",
+    "public_ficha",
+    "ficha_from_cnpj_result",
 ]

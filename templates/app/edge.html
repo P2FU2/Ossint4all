@@ -1,0 +1,39 @@
+{% extends "app/base.html" %}
+{% block title %}Ligação{% endblock %}
+{% block content %}
+<a class="crumb" href="/app/casos/{{ inv.id }}" data-tip="Volta ao grafo deste caso">← Grafo · {{ inv.title }}</a>
+<header class="page-head">
+  <div>
+    <p class="type-tag">ligação</p>
+    <h1>{{ edge.rel_type }}</h1>
+    <p class="lede">{% if src %}{{ src.display_name }}{% endif %} → {% if dst %}{{ dst.display_name }}{% endif %}</p>
+  </div>
+</header>
+
+<section class="panel">
+  <h2>Editar ligação</h2>
+  <p class="lede">Mudar o tipo ou a nota não apaga os nós. Apagar a ligação só solta o vínculo.</p>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}/editar">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Tipo
+      <select name="rel_type">
+        {% for rel in rel_types %}
+        <option value="{{ rel }}" {% if edge.rel_type == rel %}selected{% endif %}>{{ rel }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Nota desta ligação
+      <textarea name="note" rows="4" placeholder="Por que estes nós se ligam">{{ edge.attrs.get("nota") or "" }}</textarea>
+    </label>
+    <div class="graph-actions">
+      <button class="btn primary" type="submit">Salvar ligação</button>
+      {% if src %}<a class="btn" href="/app/casos/{{ inv.id }}/entidades/{{ src.id }}">{{ src.display_name }}</a>{% endif %}
+      {% if dst %}<a class="btn" href="/app/casos/{{ inv.id }}/entidades/{{ dst.id }}">{{ dst.display_name }}</a>{% endif %}
+    </div>
+  </form>
+  <form method="post" action="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}/apagar" onsubmit="return confirm('Remover só esta ligação?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="btn danger" type="submit">Apagar ligação</button>
+  </form>
+</section>
+{% endblock %}

@@ -43,6 +43,30 @@ def is_unconfirmed(obj: FoundEntity | Entity | dict[str, Any] | None) -> bool:
     return entity_status(obj) == "unconfirmed"
 
 
+_EXPAND_PREFIXES = ("cnpj:", "cpf:", "email:", "phone:", "username:", "plate:", "cnj:")
+_EXPAND_KINDS = frozenset({"CNPJ", "CPF", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ"})
+
+
+def has_expandable_anchor(obj: FoundEntity | Entity | dict[str, Any] | None) -> bool:
+    """CNPJ/CPF e outros IDs fortes podem expandir mesmo se o nó chegou como candidato."""
+    if obj is None:
+        return False
+    kind = getattr(obj, "kind", None)
+    if kind in _EXPAND_KINDS:
+        return True
+    key = str(getattr(obj, "canonical_key", "") or "")
+    if key.startswith(_EXPAND_PREFIXES):
+        return True
+    attrs = obj if isinstance(obj, dict) else getattr(obj, "attrs", None) or {}
+    return str(attrs.get("kind") or "") in _EXPAND_KINDS
+
+
+def should_enqueue_child(found: FoundEntity, entity: Entity) -> bool:
+    if has_expandable_anchor(found) or has_expandable_anchor(entity):
+        return True
+    return not (is_unconfirmed(found) or is_unconfirmed(entity))
+
+
 def found_canonical_key(found: FoundEntity) -> str:
     key = canonical_key(found.kind, found.value)
     if found.kind == "NAME" and is_unconfirmed(found):

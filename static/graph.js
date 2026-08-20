@@ -10,6 +10,7 @@
     ASSET: "#4f7a68",
     VEHICLE: "#4f7a68",
     PUBLICATION: "#6a7a70",
+    NOTE: "#b8a15a",
   };
 
   const UF_CENTER = {
@@ -30,7 +31,7 @@
       data: { id: n.id, label: n.label, type: n.type, seed: n.seed, status: n.status || "confirmed", attrs: n.attrs || {} },
     }));
     const edges = (data.edges || []).map((e) => ({
-      data: { id: e.id, source: e.source, target: e.target, label: e.type },
+      data: { id: e.id, source: e.source, target: e.target, label: e.type, note: e.note || "" },
     }));
     return nodes.concat(edges);
   }
@@ -66,6 +67,7 @@
       { selector: 'node[type = "VEHICLE"]', style: { "border-color": colors.VEHICLE } },
       { selector: 'node[type = "PUBLICATION"]', style: { "border-color": colors.PUBLICATION } },
       { selector: 'node[type = "PERSON"]', style: { "border-color": colors.PERSON } },
+      { selector: 'node[type = "NOTE"]', style: { "border-color": colors.NOTE, "background-color": "#1c1a10" } },
       { selector: "node[?seed]", style: { width: 148, height: 40, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
       { selector: 'node[status = "unconfirmed"]', style: { "border-style": "dashed", "border-color": "#c4a35a", "opacity": 0.85 } },
       {
@@ -91,7 +93,14 @@
 
   function applyLayout(view) {
     if (view === "arvore") {
-      cy.layout({ name: "breadthfirst", directed: true, spacingFactor: 1.15, animate: false }).run();
+      const seeds = cy.nodes().filter((node) => node.data("seed"));
+      cy.layout({
+        name: "breadthfirst",
+        directed: true,
+        roots: seeds.length ? seeds : undefined,
+        spacingFactor: 1.2,
+        animate: false,
+      }).run();
       return;
     }
     cy.layout({ name: "cose", animate: false, nodeRepulsion: 12000 }).run();
@@ -111,7 +120,8 @@
         .map((n) => {
           const a = n.attrs || {};
           const loc = [a.municipio, a.uf].filter(Boolean).join(" / ");
-          return `<tr data-id="${n.id}"><td>${n.label}</td><td>${a.situacao || "—"}</td><td>${loc || "—"}</td></tr>`;
+          const note = a.nota ? " · nota" : "";
+          return `<tr data-id="${n.id}"><td>${n.label}${note}</td><td>${a.situacao || "—"}</td><td>${loc || "—"}</td></tr>`;
         })
         .join("") +
       "</tbody></table>";
@@ -154,7 +164,7 @@
       const a = node.attrs || {};
       const marker = L.marker(latlng).addTo(map);
       marker.bindPopup(
-        `<strong>${node.label}</strong><br>${a.situacao || ""}<br>${[a.municipio, a.uf].filter(Boolean).join(" / ")}`
+        `<strong>${node.label}</strong><br>${a.situacao || ""}<br>${[a.municipio, a.uf].filter(Boolean).join(" / ")}${a.nota ? "<br>" + a.nota : ""}`
       );
       marker.on("click", () => {
         window.location.href = root.dataset.entityBase + node.id;
@@ -192,13 +202,20 @@
   cy.on("tap", "node", (evt) => {
     window.location.href = root.dataset.entityBase + evt.target.id();
   });
+  cy.on("tap", "edge", (evt) => {
+    const id = evt.target.id();
+    if (root.dataset.edgeBase && id) {
+      window.location.href = root.dataset.edgeBase + id;
+    }
+  });
 
   cy.on("mouseover", "node", (evt) => {
     const node = evt.target;
     const orig = evt.originalEvent || {};
     if (window.showAppTip) {
-      const hint = node.data("status") === "unconfirmed" ? "candidato — confirme ou desligue na ficha" : "clique para a ficha";
-      window.showAppTip(`${node.data("type")} · ${node.data("label")} — ${hint}`, orig.clientX || 0, orig.clientY || 0);
+      const hint = node.data("status") === "unconfirmed" ? "candidato — confirme ou desligue na ficha" : "clique para a ficha · desligar impede o retorno";
+      const note = (node.data("attrs") || {}).nota ? " · tem anotação" : "";
+      window.showAppTip(`${node.data("type")} · ${node.data("label")} — ${hint}${note}`, orig.clientX || 0, orig.clientY || 0);
     }
   });
   cy.on("mousemove", (evt) => {
@@ -212,7 +229,8 @@
   });
   cy.on("mouseover", "edge", (evt) => {
     const orig = evt.originalEvent || {};
-    if (window.showAppTip) window.showAppTip(evt.target.data("label") || "vínculo", orig.clientX || 0, orig.clientY || 0);
+    const note = evt.target.data("note") ? " · " + evt.target.data("note") : "";
+    if (window.showAppTip) window.showAppTip((evt.target.data("label") || "vínculo") + " — clique para editar" + note, orig.clientX || 0, orig.clientY || 0);
   });
   cy.on("mouseout", "edge", () => {
     if (window.hideAppTip) window.hideAppTip();
