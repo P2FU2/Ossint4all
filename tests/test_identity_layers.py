@@ -11,6 +11,7 @@ from osint4all.graph.identity import (
     is_unconfirmed,
     name_search_blocked,
     names_match,
+    names_same_person,
     profile_from_fields,
     seed_fits_profile,
     should_enqueue_child,
@@ -99,6 +100,9 @@ def test_qsa_name_only_is_unconfirmed() -> None:
 def test_names_match_is_exact() -> None:
     assert names_match("Maria Silva Souza", "MARIA  SILVA   SOUZA")
     assert not names_match("Maria Silva", "Maria Silva Souza")
+    assert names_same_person("Pedro Milani Neves", "PEDRO MILANI MARINHO QUEIROZ NEVES")
+    assert not names_same_person("Pedro Neves", "Pedro Milani Marinho Queiroz Neves")
+    assert not names_same_person("Joao Pereira", "Empresa Aleatoria LTDA")
 
 
 def test_qsa_partner_with_full_name_is_enqueued() -> None:
@@ -120,6 +124,25 @@ def test_qsa_partner_with_full_name_is_enqueued() -> None:
     assert should_enqueue_child(found, parent) is True
     anchored = TargetProfile(name="Maria Silva Souza", cpf="52998224725")
     assert should_enqueue_child(found, parent, anchored) is False
+
+
+def test_unconfirmed_company_is_not_enqueued() -> None:
+    found = FoundEntity(
+        entity_type="ORG",
+        kind="CNPJ",
+        value="33000167000101",
+        display_name="Empresa solta",
+        attrs={"status": "unconfirmed"},
+        confidence=0.45,
+    )
+    parent = Entity(
+        entity_type="PERSON",
+        canonical_key="name:pedro milani",
+        display_name="Pedro Milani",
+        attrs={},
+        depth=0,
+    )
+    assert should_enqueue_child(found, parent) is False
 
 
 def test_profile_child_is_not_enqueued() -> None:
@@ -289,7 +312,7 @@ def test_unconfirmed_cnpj_child_is_enqueued(settings, db) -> None:
         max_attempts=3,
     )
     jobs = [j for j in inv.jobs if j.entity_id != origin.id]
-    assert len(jobs) == 1
+    assert jobs == []
     assert has_expandable_anchor(found)
 
 
@@ -352,7 +375,7 @@ def test_enqueue_qsa_network_raises_depth_and_queues_cnpj(settings, db) -> None:
         entity_type="ORG",
         canonical_key="cnpj:33000167000101",
         display_name="Empresa",
-        attrs={"status": "unconfirmed"},
+        attrs={"status": "confirmed"},
         depth=1,
     )
     db.add(company)

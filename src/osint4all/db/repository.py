@@ -41,6 +41,7 @@ from osint4all.graph.identity import (
     entity_status,
     has_expandable_anchor,
     is_active_node,
+    is_unconfirmed,
     is_weak_name,
     names_match,
     profile_from_fields,
@@ -508,6 +509,8 @@ def enqueue_qsa_network(session: Session, investigation: Investigation, *, max_a
             continue
         if not is_active_node(entity):
             continue
+        if entity.entity_type == "ORG" and is_unconfirmed(entity):
+            continue
         if not has_expandable_anchor(entity):
             continue
         force = entity.entity_type == "ORG" or entity.canonical_key.startswith(("cnpj:", "cpf:"))
@@ -876,8 +879,19 @@ def _purge_entity_ids(session: Session, investigation_id: str, entity_ids: list[
     if not real_ids:
         return 0
     if block:
-        for row in rows:
-            block_key(session, investigation_id, row.canonical_key)
+        ident_keys = list(session.scalars(select(Identifier.canonical_key).where(Identifier.entity_id.in_(real_ids))))
+        to_block: set[str] = {str(row.canonical_key or "") for row in rows}
+        to_block.update(str(item) for item in ident_keys if item)
+        extra: set[str] = set()
+        for key in to_block:
+            digits = only_digits(key.split(":", 1)[-1] if ":" in key else key)
+            if len(digits) == 14:
+                extra.add(f"cnpj:{digits}")
+            if len(digits) == 11:
+                extra.add(f"cpf:{digits}")
+        for key in to_block | extra:
+            if key:
+                block_key(session, investigation_id, key)
     ev_ids = list(session.scalars(select(Evidence.id).where(Evidence.entity_id.in_(real_ids))))
     if ev_ids:
         session.execute(delete(HypothesisStance).where(HypothesisStance.evidence_id.in_(ev_ids)))

@@ -98,6 +98,17 @@ def names_match(left: str, right: str) -> bool:
     return bool(a) and a == b
 
 
+def names_same_person(left: str, right: str) -> bool:
+    """Nome completo igual, ou o mais curto (3+ tokens) cabe no mais longo."""
+    if names_match(left, right):
+        return True
+    a, b = name_tokens(left), name_tokens(right)
+    if len(a) < 3 or len(b) < 3:
+        return False
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return all(token in long for token in short)
+
+
 def name_search_blocked(name: str, profile: TargetProfile | None) -> bool:
     """Só bloqueia busca por nome do próprio alvo quando o caso já tem âncora."""
     if not profile or not profile.has_person_anchor or not profile.name:
@@ -168,6 +179,8 @@ def should_enqueue_child(found: FoundEntity, entity: Entity, profile: TargetProf
     if entity_status(found) in {"false", "rejected", "contested"}:
         return False
     if entity_status(entity) in {"false", "rejected", "contested"}:
+        return False
+    if found_type == "ORG" and is_unconfirmed(found):
         return False
     if profile and profile.has_person_anchor and not has_expandable_anchor(found):
         return False

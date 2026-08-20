@@ -1,5 +1,12 @@
 from osint4all.config import Settings
-from osint4all.connectors.socio_search import SocioSearchConnector, cpf_from_entity, extract_cnpjs, parse_socio_hits
+from osint4all.connectors.socio_search import (
+    SocioSearchConnector,
+    confirm_company_rows,
+    cpf_from_entity,
+    extract_cnpjs,
+    parse_socio_hits,
+    partner_link_verdict,
+)
 from osint4all.connectors.plate_public import (
     extract_owner_mentions,
     extract_vehicle_card,
@@ -169,6 +176,38 @@ def test_socio_search_hits() -> None:
     )
     assert any(e.entity_type == "ORG" for e in result.entities)
     assert any(e.rel_type == "SOCIO" for e in result.edges)
+
+
+def test_company_needs_qsa_before_linking() -> None:
+    from osint4all.connectors.base import ConnectorResult, FoundEntity
+
+    parsed = ConnectorResult(
+        entities=[
+            FoundEntity(entity_type="ORG", kind="CNPJ", value="07810004000184", display_name="MMONOECO"),
+            FoundEntity(entity_type="PERSON", kind="NAME", value="THEOFILOS RIFIOTIS", display_name="THEOFILOS RIFIOTIS"),
+        ]
+    )
+    assert partner_link_verdict(parsed, name="Theofilos Rifiotis") == "name"
+    assert partner_link_verdict(parsed, name="Pedro Milani Marinho Queiroz Neves") == ""
+    rows = [
+        {"cnpj": "07.810.004/0001-84", "razao_social": "MMONOECO AGB"},
+        {"cnpj": "33.000.167/0001-01", "razao_social": "OUTRA"},
+    ]
+    payloads = {
+        "07810004000184": {
+            "cnpj": "07810004000184",
+            "razao_social": "MMONOECO",
+            "qsa": [{"nome_socio": "THEOFILOS RIFIOTIS", "qualificacao_socio": "Sócio"}],
+        },
+        "33000167000101": {
+            "cnpj": "33000167000101",
+            "razao_social": "PETRO",
+            "qsa": [{"nome_socio": "OUTRA PESSOA", "qualificacao_socio": "Sócio"}],
+        },
+    }
+    kept = confirm_company_rows(rows, name="Theofilos Rifiotis", payloads=payloads)
+    assert len(kept) == 1
+    assert kept[0][1] == "name"
 
 
 def test_web_hits_extract_plate_owner() -> None:

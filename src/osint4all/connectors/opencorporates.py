@@ -71,7 +71,8 @@ class OpenCorporatesConnector:
         }
 
     def accepts(self, entity: Entity) -> bool:
-        return entity.entity_type in {"ORG", "PERSON"} and bool(entity.display_name)
+        key = str(entity.canonical_key or "")
+        return entity.entity_type == "ORG" or key.startswith("cnpj:")
 
     def collect(self, entity: Entity, ctx: ExpandContext) -> ConnectorResult:
         if not self.settings.opencorporates_enable:

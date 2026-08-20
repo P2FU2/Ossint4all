@@ -218,6 +218,12 @@ def apply_result(
             dst = find_entity_by_key(session, investigation.id, edge.to_ref)
         if not src or not dst:
             continue
+        if (
+            edge.rel_type == "MENCAO"
+            and src.entity_type == "PERSON"
+            and dst.entity_type == "ORG"
+        ):
+            continue
         attrs = dict(edge.attrs or {})
         hop = max(int(src.depth or 0), int(dst.depth or 0))
         if src.is_seed or dst.is_seed:

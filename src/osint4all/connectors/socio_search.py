@@ -12,7 +12,7 @@ from osint4all.exceptions import SkippedDisabled
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
-from osint4all.graph.identity import name_search_blocked
+from osint4all.graph.identity import name_search_blocked, names_match, names_same_person
 from osint4all.validators import socio_doc_matches_cpf, validate_cnpj, validate_cpf
 
 _CNPJ_RE = re.compile(r"\b(\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})\b")
@@ -150,6 +150,70 @@ def parse_socio_hits(
     return out
 
 
+def partner_link_verdict(parsed: ConnectorResult, *, name: str, cpf: str = "") -> str:
+    """cpf | name | partial | '' — só liga empresa se o QSA oficial confirmar a pessoa."""
+    target = (name or "").strip()
+    digits = only_digits(cpf) if cpf else ""
+    if digits and validate_cpf(digits):
+        for found in parsed.entities:
+            if found.kind == "CPF" and only_digits(found.value) == digits:
+                return "cpf"
+    exact = False
+    partial = False
+    if target:
+        for found in parsed.entities:
+            if found.entity_type != "PERSON":
+                continue
+            if names_match(found.display_name, target):
+                exact = True
+            elif names_same_person(found.display_name, target):
+                partial = True
+    if exact:
+        return "name"
+    if partial:
+        return "partial"
+    return ""
+
+
+def confirm_company_rows(
+    rows: list[dict[str, Any]],
+    *,
+    name: str,
+    cpf: str = "",
+    payloads: dict[str, dict[str, Any]] | None = None,
+    fetch=None,
+    limit: int = 8,
+) -> list[tuple[dict[str, Any], str]]:
+    """Índice por nome → CNPJ → QSA oficial. Sem confirmação, a empresa não entra."""
+    from osint4all.connectors.cnpj_receita import parse_cnpj_payload
+
+    kept: list[tuple[dict[str, Any], str]] = []
+    seen: set[str] = set()
+    bag = payloads or {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cnpj = only_digits(str(row.get("cnpj") or row.get("cnpj_cpf") or row.get("taxId") or ""))
+        if not validate_cnpj(cnpj) or cnpj in seen:
+            continue
+        data = bag.get(cnpj)
+        if data is None and fetch is not None:
+            try:
+                data = fetch(cnpj)
+            except Exception:
+                continue
+        if not isinstance(data, dict):
+            continue
+        verdict = partner_link_verdict(parse_cnpj_payload(data), name=name, cpf=cpf)
+        if not verdict:
+            continue
+        seen.add(cnpj)
+        kept.append((row, verdict))
+        if len(kept) >= limit:
+            break
+    return kept
+
+
 class SocioSearchConnector:
     name = "socio_search"
 
@@ -206,10 +270,52 @@ class SocioSearchConnector:
             result.merge(self._brasil_io(name, origin, name_only=True))
         if not result.entities:
             result.merge(self._web_mentions(name, origin, ctx, name_only=True))
+        if not result.entities:
+            result.notes.append("Nenhuma empresa com QSA que confirme este nome. Nada foi ligado ao alvo.")
         return result
 
     def _hit_flags(self, name_only: bool) -> dict[str, Any]:
         return {"rel_type": "CANDIDATO" if name_only else "SOCIO", "unconfirmed": name_only}
+
+    def _qsa_payload(self, cnpj: str) -> dict[str, Any]:
+        from osint4all.connectors.cnpj_receita import CnpjReceitaConnector
+
+        return CnpjReceitaConnector(self.settings)._fetch(cnpj)
+
+    def _emit_verified(
+        self,
+        pairs: list[tuple[dict[str, Any], str]],
+        *,
+        origin: str,
+        source_label: str,
+        source_url: str | None = None,
+    ) -> ConnectorResult:
+        strong = [row for row, verdict in pairs if verdict in {"cpf", "name"}]
+        weak = [row for row, verdict in pairs if verdict == "partial"]
+        out = ConnectorResult()
+        if strong:
+            out.merge(
+                parse_socio_hits(
+                    strong,
+                    origin_key=origin,
+                    source_label=source_label,
+                    source_url=source_url,
+                    rel_type="SOCIO",
+                    unconfirmed=False,
+                )
+            )
+        if weak:
+            out.merge(
+                parse_socio_hits(
+                    weak,
+                    origin_key=origin,
+                    source_label=source_label,
+                    source_url=source_url,
+                    rel_type="CANDIDATO",
+                    unconfirmed=True,
+                )
+            )
+        return out
 
     def _casadosdados(self, name: str, origin: str, *, name_only: bool = True) -> ConnectorResult:
         payload = {
@@ -222,7 +328,7 @@ class SocioSearchConnector:
                     "nome_socio": True,
                 }
             ],
-            "limite": 20,
+            "limite": 8,
             "pagina": 1,
         }
         try:
@@ -240,12 +346,14 @@ class SocioSearchConnector:
         except Exception:
             return ConnectorResult()
         rows = _walk_cnpj_rows(data)
-        return parse_socio_hits(
-            rows,
-            origin_key=origin,
-            source_label="Receita Federal (índice público Casa dos Dados)",
+        pairs = confirm_company_rows(rows, name=name, fetch=self._qsa_payload)
+        if not pairs:
+            return ConnectorResult(notes=["Casa dos Dados achou CNPJ, mas o QSA oficial não lista este nome."])
+        return self._emit_verified(
+            pairs,
+            origin=origin,
+            source_label="Receita Federal (QSA confirmado · Casa dos Dados)",
             source_url="https://casadosdados.com.br/",
-            **self._hit_flags(name_only),
         )
 
     def _brasil_io_cpf(self, digits: str, origin: str) -> ConnectorResult:
@@ -290,18 +398,19 @@ class SocioSearchConnector:
         rows = data.get("results") if isinstance(data, dict) else data
         if not isinstance(rows, list):
             rows = []
-        return parse_socio_hits(
-            rows,
-            origin_key=origin,
-            source_label="Receita Federal (Brasil.IO / dados abertos)",
+        pairs = confirm_company_rows(rows if isinstance(rows, list) else [], name=name, fetch=self._qsa_payload)
+        if not pairs:
+            return ConnectorResult(notes=["Brasil.IO achou CNPJ, mas o QSA oficial não lista este nome."])
+        return self._emit_verified(
+            pairs,
+            origin=origin,
+            source_label="Receita Federal (QSA confirmado · Brasil.IO)",
             source_url="https://brasil.io/dataset/socios-brasil/socios/",
-            **self._hit_flags(name_only),
         )
 
     def _web_mentions(self, name: str, origin: str, ctx: ExpandContext, *, name_only: bool = True) -> ConnectorResult:
         from osint4all.connectors.cnpj_receita import CnpjReceitaConnector, parse_cnpj_payload
         from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
-        from osint4all.graph.identity import names_match
 
         search = WebSearchConnector(self.settings)
         if not web_search_ready(self.settings):
@@ -319,7 +428,7 @@ class SocioSearchConnector:
                 parsed = parse_cnpj_payload(receita._fetch(cnpj))
             except Exception:
                 continue
-            if any(e.entity_type == "PERSON" and names_match(e.display_name, name) for e in parsed.entities):
+            if partner_link_verdict(parsed, name=name):
                 org = next((e for e in parsed.entities if e.kind == "CNPJ"), None)
                 verified.append({"cnpj": cnpj, "razao_social": (org.display_name if org else cnpj)})
         if not verified:

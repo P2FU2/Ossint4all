@@ -1603,7 +1603,7 @@
           const chosen = [...menu.querySelectorAll("input[name=probe_kind]:checked")].map((box) => box.value);
           probeKinds(node.id(), chosen, chosen.map(kindLabel).join(", "));
         }));
-        menu.appendChild(menuButton("Buscar empresas deste alvo", () => probeKinds(node.id(), ["COMPANIES", "NAME"], "empresas")));
+        menu.appendChild(menuButton("Buscar empresas deste alvo", () => probeKinds(node.id(), ["COMPANIES"], "empresas")));
         menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: node.id() })));
       }
       menu.appendChild(menuButton("Abrir ficha", () => {
