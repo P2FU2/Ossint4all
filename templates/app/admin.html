@@ -4,25 +4,75 @@
 <header class="page-head">
   <div>
     <p class="eyebrow">Operação</p>
-    <h1>Fontes e auditoria</h1>
-    <p class="lede">Saúde dos conectores, fila recente e quem buscou o quê (LGPD / redação).</p>
+    <h1>Fontes</h1>
+    <p class="lede">Cada conector roda no Explodir / Processar só se o nó tiver o tipo certo. São APIs e portais públicos — a fonte some ou fica “precisa chave”, o painel não inventa o dado. Open source cobre interface e coleta; o banco privado de Shodan/Maltego/Censys só entra com API oficial.</p>
   </div>
   <a class="btn" href="/app" data-tip="Volta à consulta avulsa">Consultar</a>
 </header>
 
 <section class="panel">
-  <h2>Conectores</h2>
+  <h2>Como cada fonte funciona</h2>
+  <div class="source-grid">
+    {% for s in sources %}
+    <article class="source-card is-{{ s.status_slug }}">
+      <header>
+        <p class="type-tag">{{ s.group }}</p>
+        <h3>{{ s.label }}</h3>
+        <span class="pill">{{ s.status }}</span>
+      </header>
+      <p>{{ s.how }}</p>
+      <dl class="fact-grid source-facts">
+        <div><dt>Dispara em</dt><dd>{{ s.accepts }}</dd></div>
+        <div><dt>Devolve</dt><dd>{{ s.returns }}</dd></div>
+        {% if s.key %}<div><dt>Chave</dt><dd><code>{{ s.key }}</code></dd></div>{% endif %}
+      </dl>
+      {% if s.url %}<p class="muted"><code>{{ s.id }}</code></p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Open source × base privada</h2>
+  <p class="lede">Dá para substituir interface, automação e correlação de Shodan / Maltego / Babel X com software aberto. Não dá para copiar de graça o banco que essas empresas acumularam. O painel embute o fluxo; a base continua sendo a API oficial ou o índice público pontual.</p>
+  <div class="source-grid">
+    {% for t in oss_tools %}
+    <article class="source-card is-{{ t.status }}">
+      <header>
+        <p class="type-tag">{{ t.status }}</p>
+        <h3>{{ t.name }}</h3>
+      </header>
+      <p>{{ t.role }}</p>
+      <p>{{ t.in_app }}</p>
+      {% if t.github %}<p class="muted"><a href="{{ t.github }}">{{ t.github }}</a></p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Saúde das fontes</h2>
+  <form method="post" action="/app/admin/saude">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="btn" type="submit">Checar agora</button>
+  </form>
+  {% if source_health %}
   <table class="table">
-    <thead><tr><th>Fonte</th><th>Detalhe</th></tr></thead>
+    <thead><tr><th>Fonte</th><th>Ok</th><th>ms</th><th>Alerta</th></tr></thead>
     <tbody>
-      {% for h in health %}
+      {% for name, row in source_health.items() %}
       <tr>
-        <td>{{ h.source }}</td>
-        <td>{% for k, v in h.items() if k != 'source' %}{{ k }}={{ v }} {% endfor %}</td>
+        <td>{{ name }}</td>
+        <td>{{ "sim" if row.ok else "não" }}</td>
+        <td>{{ row.latency_ms }}</td>
+        <td>{{ row.error or "—" }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p class="muted">Ainda sem sonda. Clique em Checar agora — é health() da fonte, sem scan.</p>
+  {% endif %}
 </section>
 
 <section class="panel">

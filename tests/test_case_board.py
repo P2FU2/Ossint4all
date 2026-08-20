@@ -8,7 +8,9 @@ from osint4all.db.repository import (
     delete_case_note,
     delete_edge,
     detach_entity,
+    graph_payload,
     purge_investigation,
+    save_graph_layout,
     update_edge,
 )
 from osint4all.graph.resolve import apply_result
@@ -219,3 +221,25 @@ def test_purge_investigation_removes_children(settings, db) -> None:
     assert db.scalars(select(CaseNote).where(CaseNote.investigation_id == case_id)).all() == []
     assert db.scalars(select(BlockedKey).where(BlockedKey.investigation_id == case_id)).all() == []
     assert db.scalars(select(Identifier).where(Identifier.entity_id == person.id)).all() == []
+
+
+def test_graph_layout_persists_on_case(settings, db) -> None:
+    inv = _case(db)
+    entity = inv.entities[0]
+    saved = save_graph_layout(
+        db,
+        inv.id,
+        {
+            "view": "rede",
+            "zoom": 1.35,
+            "pan": {"x": 40, "y": -12},
+            "nodes": {entity.id: {"x": 111.4, "y": 222.8}, "ghost": {"x": 1, "y": 2}},
+        },
+    )
+    assert saved is not None
+    assert saved["zoom"] == 1.35
+    assert saved["nodes"][entity.id] == {"x": 111.4, "y": 222.8}
+    assert "ghost" not in saved["nodes"]
+    payload = graph_payload(db, inv.id)
+    assert payload["layout"]["pan"]["x"] == 40
+    assert payload["layout"]["nodes"][entity.id]["y"] == 222.8

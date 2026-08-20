@@ -24,11 +24,14 @@ def test_phone_email_cpf() -> None:
     phone = run_consult("11987654321", mode="PHONE")
     assert phone.ok
     assert any("wa.me" in (h.url or "") for h in phone.hits)
+    assert any(label == "DDD" and value == "11" for label, value in phone.facts)
+    assert any(label == "Cidade" and value == "São Paulo" for label, value in phone.facts)
     email = run_consult("ana@exemplo.com", mode="EMAIL")
     assert email.ok
     assert email.kind == "EMAIL"
     assert email.timeline
     assert any("ana" in ev.meta or "ana" in ev.title for ev in email.timeline)
+    assert any("Keybase" in (h.title or "") for h in email.hits)
     assert email.graph_payload
     assert run_consult("111.111.111-11", mode="CPF").ok is False
     cpf = run_consult("529.982.247-25", mode="CPF")

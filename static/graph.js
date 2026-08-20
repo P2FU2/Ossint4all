@@ -50,6 +50,9 @@
         label: e.grau ? e.type + " · g" + e.grau : e.type,
         note: e.note || "",
         grau: e.grau || "",
+        strength: e.strength || "",
+        period: e.period || "",
+        year: e.year || 0,
       },
     }));
     return nodes.concat(edges);
@@ -95,6 +98,9 @@
       { selector: 'node[kind = "diagram"]', style: { width: 210, height: 64, "border-color": "#d4b45a", "background-color": "#1c1810", "text-wrap": "wrap", "text-max-width": 190 } },
       { selector: "node[?seed]", style: { width: 188, height: 50, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
       { selector: 'node[status = "unconfirmed"]', style: { "border-style": "dashed", "border-color": "#c4a35a", "opacity": 0.85 } },
+      { selector: 'node[status = "probable"]', style: { "border-style": "dotted", "border-color": "#5eead4" } },
+      { selector: 'node[status = "contested"]', style: { "border-color": "#ffe14a" } },
+      { selector: 'node[status = "false"]', style: { "border-color": "#ff5c7a", "opacity": 0.45 } },
       { selector: "node:selected", style: { "border-color": "#00ff9c", "border-width": 2.4, "background-color": "#163024" } },
       {
         selector: "edge",
@@ -127,27 +133,179 @@
 
   function networkLayoutOpts() {
     const n = Math.max(1, cy.nodes(":visible").length);
-    const repulsion = Math.min(72000, 18000 + n * 220);
-    const edgeLen = Math.min(260, 110 + Math.sqrt(n) * 16);
+    const repulsion = Math.min(140000, 28000 + n * 380);
+    const edgeLen = Math.min(340, 150 + Math.sqrt(n) * 22);
     return {
       name: "cose",
       animate: false,
       randomize: !laidOnce && n > 24,
       fit: true,
-      padding: 56,
+      padding: 72,
       nodeDimensionsIncludeLabels: true,
-      nodeOverlap: 40,
+      nodeOverlap: 80,
       nodeRepulsion: () => repulsion,
       idealEdgeLength: () => edgeLen,
-      edgeElasticity: () => 0.35,
-      gravity: 0.12,
-      numIter: n > 80 ? 900 : 1400,
-      componentSpacing: 140,
+      edgeElasticity: () => 0.28,
+      gravity: 0.08,
+      numIter: n > 80 ? 1100 : 1600,
+      componentSpacing: 200,
       nestingFactor: 1.2,
     };
   }
 
+  function unoverlapNodes() {
+    const nodes = cy.nodes(":visible").toArray();
+    if (nodes.length < 2) return false;
+    const pad = 22;
+    let moved = false;
+    for (let iter = 0; iter < 14; iter += 1) {
+      let hit = false;
+      for (let i = 0; i < nodes.length; i += 1) {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const a = nodes[i];
+          const b = nodes[j];
+          const pa = a.position();
+          const pb = b.position();
+          const ox = (a.width() + b.width()) / 2 + pad - Math.abs(pb.x - pa.x);
+          const oy = (a.height() + b.height()) / 2 + pad - Math.abs(pb.y - pa.y);
+          if (ox <= 0 || oy <= 0) continue;
+          if (ox < oy) {
+            const step = ((pb.x === pa.x ? 1 : Math.sign(pb.x - pa.x)) * (ox / 2 + 1));
+            a.position({ x: pa.x - step, y: pa.y });
+            b.position({ x: pb.x + step, y: pb.y });
+          } else {
+            const step = ((pb.y === pa.y ? 1 : Math.sign(pb.y - pa.y)) * (oy / 2 + 1));
+            a.position({ x: pa.x, y: pa.y - step });
+            b.position({ x: pb.x, y: pb.y + step });
+          }
+          hit = true;
+          moved = true;
+        }
+      }
+      if (!hit) break;
+    }
+    return moved;
+  }
+
   let laidOnce = false;
+  let layoutLocked = false;
+  let layoutDirty = false;
+  let layoutTimer = 0;
+
+  function savedNodeMap() {
+    return ((payload.layout || {}).nodes) || {};
+  }
+
+  function hasLockedLayout() {
+    return layoutLocked || Object.keys(savedNodeMap()).length > 0;
+  }
+
+  function capturePositions() {
+    const nodes = {};
+    cy.nodes().forEach((node) => {
+      const pos = node.position();
+      nodes[node.id()] = { x: pos.x, y: pos.y };
+    });
+    return nodes;
+  }
+
+  function applySavedPositions(nodes) {
+    let applied = 0;
+    Object.entries(nodes || {}).forEach(([id, pos]) => {
+      const node = cy.getElementById(id);
+      if (!node.nonempty() || !pos) return;
+      const x = Number(pos.x);
+      const y = Number(pos.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      node.position({ x, y });
+      applied += 1;
+    });
+    return applied;
+  }
+
+  function idHash(id) {
+    let hash = 0;
+    const text = String(id || "");
+    for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+    return Math.abs(hash);
+  }
+
+  function placeNewNodes(knownIds) {
+    const fresh = cy.nodes().filter((node) => !knownIds.has(node.id()));
+    if (!fresh.length) return;
+    const old = cy.nodes().filter((node) => knownIds.has(node.id()));
+    const box = old.length ? old.boundingBox() : { x2: 0, y1: 0, h: 240 };
+    let slot = 0;
+    fresh.forEach((node) => {
+      const neighbors = node.neighborhood("node").filter((other) => knownIds.has(other.id()));
+      if (neighbors.length) {
+        let x = 0;
+        let y = 0;
+        neighbors.forEach((other) => {
+          const pos = other.position();
+          x += pos.x;
+          y += pos.y;
+        });
+        const angle = ((idHash(node.id()) % 360) * Math.PI) / 180;
+        const radius = 190 + neighbors.length * 14;
+        node.position({
+          x: x / neighbors.length + Math.cos(angle) * radius,
+          y: y / neighbors.length + Math.sin(angle) * radius,
+        });
+      } else {
+        node.position({
+          x: (box.x2 || 0) + 220,
+          y: (box.y1 || 0) + (slot % 8) * 72 + Math.floor(slot / 8) * 24,
+        });
+        slot += 1;
+      }
+    });
+  }
+
+  function collectLayout() {
+    const view = activeView();
+    const pan = cy.pan();
+    const prev = payload.layout || {};
+    const nodes = view === "arvore" ? { ...savedNodeMap(), ...((prev.nodes) || {}) } : capturePositions();
+    const snap = {
+      view,
+      zoom: cy.zoom(),
+      pan: { x: pan.x, y: pan.y },
+      nodes,
+      locked: true,
+    };
+    if (map) {
+      const center = map.getCenter();
+      snap.map = { zoom: map.getZoom(), lat: center.lat, lng: center.lng };
+    } else if (prev.map) {
+      snap.map = prev.map;
+    }
+    return snap;
+  }
+
+  function scheduleSaveLayout() {
+    layoutDirty = true;
+    window.clearTimeout(layoutTimer);
+    layoutTimer = window.setTimeout(saveLayoutNow, 700);
+  }
+
+  async function saveLayoutNow() {
+    if (!layoutDirty || !root.dataset.layoutUrl) return;
+    layoutDirty = false;
+    const snap = collectLayout();
+    payload.layout = snap;
+    layoutLocked = true;
+    try {
+      await fetch(root.dataset.layoutUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf_token: csrfToken(), ...snap }),
+      });
+    } catch (_) {
+      layoutDirty = true;
+    }
+  }
 
   function applyLayout(view) {
     const eles = visibleElements();
@@ -158,7 +316,7 @@
         name: "breadthfirst",
         directed: true,
         roots: seeds.length ? seeds : undefined,
-        spacingFactor: 1.9,
+        spacingFactor: 2.3,
         avoidOverlap: true,
         nodeDimensionsIncludeLabels: true,
         padding: 48,
@@ -166,10 +324,12 @@
         fit: true,
       }).run();
       laidOnce = true;
+      unoverlapNodes();
       return;
     }
     eles.layout(networkLayoutOpts()).run();
     laidOnce = true;
+    unoverlapNodes();
   }
 
   function renderSplit() {
@@ -235,7 +395,9 @@
       attributionControl: true,
       fadeAnimation: false,
     }).setView([-14.2, -51.9], 4);
-    L.control.zoom({ position: "bottomright" }).addTo(map);
+    map.on("moveend zoomend", () => {
+      if (typeof schedulePushView === "function") schedulePushView();
+    });
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: "OSM · CARTO · scan_geo",
       subdomains: "abcd",
@@ -278,11 +440,20 @@
       el.appendChild(hud);
     }
     hud.innerHTML =
-      `<p class="eyebrow">scan_geo</p>` +
       `<strong>${plotted}</strong>` +
-      `<span>empresa(s) no grid · ${orgs.length - plotted} sem coordenada</span>`;
-    if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 11 });
+      `<span>${orgs.length - plotted ? (orgs.length - plotted) + " sem pin" : "grid"}</span>`;
+    const savedMap = (payload.layout || {}).map;
+    if (savedMap && savedMap.lat != null && savedMap.lng != null) {
+      map.setView([Number(savedMap.lat), Number(savedMap.lng)], Number(savedMap.zoom) || 4);
+    } else if (bounds.length) {
+      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 11 });
+    }
     setTimeout(() => map.invalidateSize(), 80);
+  }
+
+  function activeView() {
+    const active = document.querySelector(".view-tab.is-active");
+    return (active && active.dataset.view) || "rede";
   }
 
   function setView(view) {
@@ -292,23 +463,62 @@
     const split = document.getElementById("split-list");
     const mapEl = document.getElementById("org-map");
     const stage = document.querySelector(".graph-stage");
+    const wrap = document.querySelector(".graph-canvas");
     if (split) split.hidden = view !== "split";
     if (mapEl) mapEl.hidden = view !== "mapa";
+    if (wrap) wrap.hidden = view === "mapa";
     root.hidden = view === "mapa";
-    if (stage) stage.classList.toggle("is-split", view === "split");
+    if (stage) {
+      stage.classList.toggle("is-split", view === "split");
+      stage.classList.toggle("is-map", view === "mapa");
+    }
     if (view === "split") renderSplit();
     if (view === "mapa") renderMap();
-    if (view !== "mapa") applyLayout(view);
+    if (view === "arvore") applyLayout("arvore");
+    else if (view !== "mapa" && hasLockedLayout()) applySavedPositions(savedNodeMap());
+    else if (view !== "mapa") applyLayout(view);
   }
 
   async function load() {
+    const live = capturePositions();
+    const camera = snapshotView();
+    const hadNodes = cy.nodes().length > 0;
     const res = await fetch(root.dataset.graphUrl, { credentials: "same-origin" });
     payload = await res.json();
+    if (yearInput && (payload.years || []).length && !yearInput.dataset.ready) {
+      yearInput.min = String(payload.years[0]);
+      yearInput.max = String(payload.years[payload.years.length - 1]);
+      yearInput.value = yearInput.max;
+      if (yearOut) yearOut.textContent = yearInput.value;
+      yearInput.dataset.ready = "1";
+    }
     cy.elements().remove();
     cy.add(toElements(payload));
-    laidOnce = false;
+    const serverNodes = savedNodeMap();
+    const merged = { ...serverNodes, ...live };
+    const applied = applySavedPositions(merged);
+    placeNewNodes(new Set(Object.keys(merged)));
+    if (unoverlapNodes()) payload.layout = { ...(payload.layout || {}), nodes: capturePositions() };
+    layoutLocked = applied > 0 || Object.keys(serverNodes).length > 0;
+    payload.layout = { ...(payload.layout || {}), nodes: { ...merged, ...capturePositions() } };
     const active = document.querySelector(".view-tab.is-active");
-    setView((active && active.dataset.view) || "rede");
+    const nextView = (!hadNodes && payload.layout.view) || (active && active.dataset.view) || "rede";
+    setView(nextView);
+    if (hadNodes) {
+      applySnapshot(camera);
+      laidOnce = true;
+    } else if (layoutLocked && nextView !== "arvore") {
+      const layout = payload.layout || {};
+      if (layout.zoom) {
+        applySnapshot({ kind: "cy", zoom: layout.zoom, x: (layout.pan || {}).x || 0, y: (layout.pan || {}).y || 0 });
+      } else {
+        cy.fit(undefined, 48);
+      }
+      laidOnce = true;
+    } else if (!layoutLocked) {
+      scheduleSaveLayout();
+    }
+    applyFilters();
   }
 
   const TYPE_LABEL = {
@@ -376,6 +586,8 @@
       if (full) {
         gbFacts.appendChild(factRow("tipo", String(el.data("label") || "—").split(" · ")[0]));
         if (el.data("grau")) gbFacts.appendChild(factRow("grau com o alvo", String(el.data("grau"))));
+        if (el.data("strength")) gbFacts.appendChild(factRow("força", el.data("strength")));
+        if (el.data("period")) gbFacts.appendChild(factRow("período", el.data("period")));
         if (el.data("note")) gbFacts.appendChild(factRow("nota", el.data("note")));
         gbFacts.appendChild(factRow("de", from));
         gbFacts.appendChild(factRow("para", to));
@@ -403,15 +615,14 @@
     const neighbors = el.neighborhood("node").map((n) => n.data("name") || n.data("label")).filter(Boolean);
     gbKind.textContent = TYPE_LABEL[type] || type || "nó";
     gbTitle.textContent = el.data("name") || rec.label || "nó";
-    gbLead.textContent = status === "unconfirmed"
-      ? "Candidato — clique para a ficha e confirme ou desligue."
-      : (full ? "Ficha rápida deste nó. Abrir a ficha completa para expandir ou desligar." : "Passe o cursor para ler · clique para mais detalhes");
+    const labels = { unconfirmed: "Candidato", probable: "Provável", contested: "Contestado", false: "Falso", confirmed: "" };
+    gbLead.textContent = labels[status] || "";
     gbFacts.replaceChildren();
     gbFacts.hidden = !full;
     if (full) {
       if (rec.key || el.data("key")) gbFacts.appendChild(factRow("chave", rec.key || el.data("key")));
       gbFacts.appendChild(factRow("tipo", TYPE_LABEL[type] || type));
-      gbFacts.appendChild(factRow("estado", status === "unconfirmed" ? "candidato" : "confirmado"));
+      gbFacts.appendChild(factRow("estado", labels[status] || status));
       gbFacts.appendChild(factRow("grau com o alvo", el.data("seed") ? "0 · alvo" : String(rec.depth ?? el.data("depth") ?? 0)));
       if (rec.confidence != null) gbFacts.appendChild(factRow("confiança", Math.round(Number(rec.confidence) * 100) + "%"));
       Object.keys(ATTR_LABEL).forEach((key) => {
@@ -541,28 +752,255 @@
     if (event.key === "Escape" && balloonLocked) closeBalloon();
   });
 
-  const filter = document.getElementById("type-filter");
+  const layerBox = document.getElementById("ct-layers-panel");
   const search = document.getElementById("graph-search");
+  const yearInput = document.getElementById("graph-year");
+  const yearOut = document.getElementById("graph-year-out");
   let filterTimer = 0;
+  function hiddenTypes() {
+    const off = new Set();
+    if (!layerBox) return off;
+    layerBox.querySelectorAll("input[data-type]").forEach((input) => {
+      if (!input.checked) off.add(input.dataset.type);
+    });
+    return off;
+  }
+  function filterType() {
+    const on = document.querySelector("[data-filter-type].is-on");
+    return (on && on.dataset.filterType) || "all";
+  }
+  function filterDegrees() {
+    const degrees = new Set();
+    document.querySelectorAll("[data-filter-degree]").forEach((input) => {
+      if (input.checked) degrees.add(Number(input.dataset.filterDegree));
+    });
+    return degrees;
+  }
   function applyFilters() {
-    const type = filter ? filter.value : "";
+    const blocked = hiddenTypes();
+    const typeMode = filterType();
+    const degrees = filterDegrees();
     const q = search ? search.value.trim().toLowerCase() : "";
     cy.nodes().forEach((node) => {
-      const typeOk = !type || node.data("type") === type;
+      const type = node.data("type");
+      const depth = Number(node.data("depth") || 0);
+      const seed = !!node.data("seed");
       const text = String(node.data("name") || node.data("label") || "").toLowerCase();
       const key = String(node.data("key") || "").toLowerCase();
       const searchOk = !q || text.includes(q) || key.includes(q);
-      node.style("display", typeOk && searchOk ? "element" : "none");
+      const layerOk = typeMode === "all" ? !blocked.has(type) : type === typeMode || seed;
+      const degreeOk = seed ? degrees.has(0) : degrees.has(Math.min(depth, 4));
+      node.style("display", searchOk && layerOk && degreeOk ? "element" : "none");
+    });
+    const yearLimit = yearInput ? Number(yearInput.value) : 9999;
+    cy.edges().forEach((edge) => {
+      const year = Number(edge.data("year") || 0);
+      const endsOn = edge.source().style("display") !== "none" && edge.target().style("display") !== "none";
+      edge.style("display", endsOn && (!year || year <= yearLimit) ? "element" : "none");
     });
     closeBalloon();
     window.clearTimeout(filterTimer);
     filterTimer = window.setTimeout(() => {
-      const active = document.querySelector(".view-tab.is-active");
-      applyLayout((active && active.dataset.view) || "rede");
+      if (activeView() === "arvore" || !hasLockedLayout()) applyLayout(activeView());
     }, 160);
   }
-  if (filter) filter.addEventListener("change", applyFilters);
+  const filterBox = document.getElementById("graph-filters");
+  if (filterBox) {
+    filterBox.querySelectorAll("[data-filter-type]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        filterBox.querySelectorAll("[data-filter-type]").forEach((other) => other.classList.toggle("is-on", other === btn));
+        applyFilters();
+      });
+    });
+    filterBox.addEventListener("change", applyFilters);
+  }
+  if (layerBox) layerBox.addEventListener("change", applyFilters);
   if (search) search.addEventListener("input", applyFilters);
+  if (yearInput) {
+    yearInput.addEventListener("input", () => {
+      if (yearOut) yearOut.textContent = yearInput.value;
+      applyFilters();
+    });
+  }
+
+  const DOTS_KEY = "osint4all.canvasDots";
+  const viewStack = [];
+  let viewIdx = -1;
+  let ignoreView = false;
+  let viewTimer = 0;
+
+  function snapshotView() {
+    if (activeView() === "mapa" && map) {
+      const center = map.getCenter();
+      return { kind: "map", zoom: map.getZoom(), lat: center.lat, lng: center.lng };
+    }
+    const pan = cy.pan();
+    return { kind: "cy", zoom: cy.zoom(), x: pan.x, y: pan.y };
+  }
+
+  function applySnapshot(snap) {
+    ignoreView = true;
+    if (snap.kind === "map" && map) {
+      map.setView([snap.lat, snap.lng], snap.zoom);
+    } else {
+      cy.zoom(snap.zoom);
+      cy.pan({ x: snap.x, y: snap.y });
+    }
+    window.setTimeout(() => {
+      ignoreView = false;
+    }, 80);
+  }
+
+  function syncUndoBtns() {
+    const undo = document.getElementById("ct-undo");
+    const redo = document.getElementById("ct-redo");
+    if (undo) undo.disabled = viewIdx <= 0;
+    if (redo) redo.disabled = viewIdx < 0 || viewIdx >= viewStack.length - 1;
+  }
+
+  function pushView() {
+    if (ignoreView) return;
+    const snap = snapshotView();
+    const last = viewStack[viewIdx];
+    if (
+      last &&
+      last.kind === snap.kind &&
+      last.zoom === snap.zoom &&
+      last.x === snap.x &&
+      last.y === snap.y &&
+      last.lat === snap.lat &&
+      last.lng === snap.lng
+    ) {
+      return;
+    }
+    viewStack.splice(viewIdx + 1);
+    viewStack.push(snap);
+    if (viewStack.length > 40) viewStack.shift();
+    viewIdx = viewStack.length - 1;
+    syncUndoBtns();
+  }
+
+  function schedulePushView() {
+    if (ignoreView) return;
+    window.clearTimeout(viewTimer);
+    viewTimer = window.setTimeout(pushView, 280);
+  }
+
+  function setDots(on) {
+    const stageEl = document.querySelector(".graph-stage");
+    const btn = document.getElementById("ct-dots");
+    if (stageEl) stageEl.classList.toggle("is-dots", on);
+    root.classList.toggle("is-dots", on);
+    if (btn) btn.setAttribute("aria-pressed", on ? "true" : "false");
+    try {
+      localStorage.setItem(DOTS_KEY, on ? "1" : "0");
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function zoomStep(dir) {
+    if (activeView() === "mapa" && map) {
+      map.setZoom(map.getZoom() + dir);
+      return;
+    }
+    cy.zoom({
+      level: cy.zoom() * (dir > 0 ? 1.2 : 1 / 1.2),
+      renderedPosition: { x: root.clientWidth / 2, y: root.clientHeight / 2 },
+    });
+  }
+
+  function fitCanvas() {
+    if (activeView() === "mapa" && map) {
+      map.invalidateSize();
+      const pts = [];
+      (payload.nodes || []).forEach((node) => {
+        const latlng = markerLatLng(node);
+        if (latlng) pts.push(latlng);
+      });
+      if (pts.length) map.fitBounds(pts, { padding: [36, 36], maxZoom: 11 });
+      return;
+    }
+    const eles = visibleElements();
+    cy.fit(eles.nodes().length ? eles : undefined, 48);
+  }
+
+  (function bindCanvasTools() {
+    const stageEl = document.querySelector(".graph-stage");
+    const dotsBtn = document.getElementById("ct-dots");
+    const layerBtn = document.getElementById("ct-layers");
+    let stored = "1";
+    try {
+      stored = localStorage.getItem(DOTS_KEY);
+    } catch (_) {
+      stored = "1";
+    }
+    setDots(stored !== "0");
+    if (dotsBtn) {
+      dotsBtn.addEventListener("click", () => setDots(!(stageEl && stageEl.classList.contains("is-dots"))));
+    }
+    const zoomIn = document.getElementById("ct-zoom-in");
+    const zoomOut = document.getElementById("ct-zoom-out");
+    const fitBtn = document.getElementById("ct-fit");
+    const undoBtn = document.getElementById("ct-undo");
+    const redoBtn = document.getElementById("ct-redo");
+    if (zoomIn) zoomIn.addEventListener("click", () => zoomStep(1));
+    if (zoomOut) zoomOut.addEventListener("click", () => zoomStep(-1));
+    if (fitBtn) fitBtn.addEventListener("click", fitCanvas);
+    if (undoBtn) {
+      undoBtn.addEventListener("click", () => {
+        if (viewIdx <= 0) return;
+        viewIdx -= 1;
+        applySnapshot(viewStack[viewIdx]);
+        syncUndoBtns();
+      });
+    }
+    if (redoBtn) {
+      redoBtn.addEventListener("click", () => {
+        if (viewIdx >= viewStack.length - 1) return;
+        viewIdx += 1;
+        applySnapshot(viewStack[viewIdx]);
+        syncUndoBtns();
+      });
+    }
+    if (layerBtn && layerBox) {
+      layerBtn.addEventListener("click", () => {
+        const open = layerBox.hidden;
+        layerBox.hidden = !open;
+        layerBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      document.addEventListener("click", (event) => {
+        if (layerBox.hidden) return;
+        if (event.target.closest("#ct-layers, #ct-layers-panel")) return;
+        layerBox.hidden = true;
+        layerBtn.setAttribute("aria-expanded", "false");
+      });
+    }
+    cy.on("pan zoom", () => {
+      schedulePushView();
+      scheduleSaveLayout();
+    });
+    cy.on("dragfree", "node", () => {
+      layoutLocked = true;
+      scheduleSaveLayout();
+    });
+    window.addEventListener("pagehide", () => {
+      if (layoutDirty) saveLayoutNow();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.target && /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          if (redoBtn) redoBtn.click();
+        } else if (undoBtn) undoBtn.click();
+      }
+      if (event.key === "+" || event.key === "=") zoomStep(1);
+      if (event.key === "-" || event.key === "_") zoomStep(-1);
+      if (event.key === "0") fitCanvas();
+    });
+    window.setTimeout(pushView, 400);
+  })();
 
   document.querySelectorAll(".view-tab").forEach((btn) => {
     btn.addEventListener("click", () => setView(btn.dataset.view));
@@ -679,19 +1117,19 @@
     if (mode === "note") {
       gcKind.textContent = "anotação";
       gcTitle.textContent = preset && preset.entityId ? "Anotação neste nó" : "Adicionar anotação";
-      gcLead.textContent = "Fica no quadro do caso e, se quiser, vira um cartão na rede/árvore/split.";
+      gcLead.textContent = "";
       gcFields.appendChild(field("Título", "title", "text", "", { required: true, placeholder: "Hipótese, alerta, fonte…" }));
       gcFields.appendChild(field("Texto", "body", "textarea", "", { placeholder: "O que você quer lembrar" }));
     } else if (mode === "diagram") {
       gcKind.textContent = "diagrama";
       gcTitle.textContent = "Adicionar diagrama";
-      gcLead.textContent = "Quadro no grafo, no estilo Miro/Mermaid: um bloco para desenhar a hipótese.";
+      gcLead.textContent = "";
       gcFields.appendChild(field("Título", "title", "text", "", { required: true, placeholder: "Fluxo, hipótese, mapa mental…" }));
       gcFields.appendChild(field("Conteúdo", "body", "textarea", "alvo --> empresa\nempresa --> socio", { rows: 6, placeholder: "alvo --> empresa\nempresa --> socio" }));
     } else {
       gcKind.textContent = "seta";
       gcTitle.textContent = "Adicionar ligação";
-      gcLead.textContent = "Cria uma seta persistente entre dois nós do caso.";
+      gcLead.textContent = "";
       const names = (payload.nodes || []).map((n) => [n.id, n.label]);
       const from = document.createElement("label");
       from.textContent = "De";

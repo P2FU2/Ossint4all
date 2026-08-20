@@ -8,6 +8,16 @@ def test_suite_search_and_internal_urls() -> None:
     assert get_tool("pdf").upload
     names = [t.id for t in list_tools("sherlock")]
     assert "username" in names
+    assert any(t.id == "hosts" for t in list_tools("amass"))
+    assert any(t.id == "hosts" for t in list_tools("theharvester"))
+    assert any(t.id == "username" for t in list_tools("maigret"))
+    assert any(t.id == "email" for t in list_tools("holehe"))
+    assert any(t.id == "phone" for t in list_tools("phoneinfoga"))
+    assert any(t.id == "pdf" for t in list_tools("exiftool"))
+    assert any(t.id == "name" for t in list_tools("aleph"))
+    assert any(t.id == "hostficha" for t in list_tools("httpx"))
+    assert any(t.id == "hostficha" for t in list_tools("ivre"))
+    assert any(t.id == "hostficha" for t in list_tools("photon"))
     plates = list_tools("placa")
     assert any(t.id == "plate" for t in plates)
     assert all("/app/ferramentas?tool=" in f"/app/ferramentas?tool={t.id}" for t in list_tools())

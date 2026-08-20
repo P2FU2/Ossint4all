@@ -37,11 +37,11 @@ MODES = (
     ("auto", "Detectar", "Reconhece placa, CNPJ, CPF, e-mail, telefone, @user, processo ou nome.", "ABC1D23, @user, e-mail, CPF…"),
     ("PLATE", "Placa", "Série, portais oficiais e menções públicas do veículo/dono. Sem DETRAN de cadastro.", "ABC1D23 ou ABC-1234"),
     ("USERNAME", "Rede social", "URLs públicas (GitHub, X, Telegram…). Sem login.", "@usuario"),
-    ("PHONE", "Telefone", "Normaliza e aponta menções públicas. Sem operadora.", "11 99999-0000"),
+    ("PHONE", "Telefone", "DDD, cidade e menções públicas. Sem operadora.", "11 99999-0000"),
     ("NAME", "Sócio / nome", "Empresas do quadro societário na base aberta da Receita.", "Nome e sobrenome"),
     ("CNPJ", "CNPJ", "Ficha, QSA e mapa de empresas relacionadas (sócios PJ e outras firmas dos sócios).", "00.000.000/0001-00"),
     ("CPF", "CPF", "Valida, cruza QSA público, sanções e menções. A Receita não devolve o nome por API.", "000.000.000-00"),
-    ("EMAIL", "E-mail", "Perfis públicos do local-part em linha do tempo. Sem caixa nem vazamento.", "nome@dominio.com"),
+    ("EMAIL", "E-mail", "Local-part, Keybase, Gravatar e redes públicas. Sem caixa nem leak.", "nome@dominio.com"),
     ("PROCESSOS", "Processo", "CNJ ou nome da parte. DataJud, DJEN, PJe e menções públicas. Sem tribunal fechado.", "0000123-45.2024.8.26.0100 ou nome"),
     ("NEGATIVA", "Negativa", "CEIS, CNEP, TCU, CVM, TSE e menções de condenação em fonte oficial.", "Nome, CPF ou CNPJ"),
     ("IMOVEL", "Imóvel", "Leilão Caixa, SNCR, DOU. Sem matrícula de cartório nem IPTU autenticado.", "Nome, CPF, CNPJ ou endereço"),
@@ -346,7 +346,7 @@ def run_consult(raw: str, *, mode: str = "auto", settings: Settings | None = Non
         if kind == "USERNAME":
             return _consult_username(text, settings, quick=quick)
         if kind == "PHONE":
-            return _consult_phone(text)
+            return _consult_phone(text, settings, quick=quick)
         if kind == "CNPJ":
             return _consult_cnpj(text, settings, quick=quick)
         if kind == "CPF":
@@ -497,22 +497,40 @@ def _consult_username(raw: str, settings: Settings, *, quick: bool = False, core
     )
 
 
-def _consult_phone(raw: str) -> ConsultResult:
+def _consult_phone(raw: str, settings: Settings | None = None, *, quick: bool = False) -> ConsultResult:
+    from osint4all.connectors.phone_public import describe_phone, facts_from_phone
+
+    settings = settings or get_settings()
     digits = only_digits(raw)
     if len(digits) < 10:
         return ConsultResult(kind="PHONE", query=raw, title=raw, summary="", ok=False, error="Telefone curto demais.")
+    info = describe_phone(digits)
     wa = f"https://wa.me/{digits}" if digits.startswith("55") or len(digits) >= 12 else f"https://wa.me/55{digits}"
+    hits = [
+        ConsultHit("WhatsApp (link público)", "Abre conversa se o número existir no app", wa, "link"),
+        ConsultHit("Truecaller web", "Busca pública de menção — sem login", f"https://www.truecaller.com/search/br/{digits}", "link"),
+    ]
+    notes = [
+        "DDD e cidade vêm da tabela pública da ANATEL (estilo PhoneInfoga). Sem operadora, sem IMEI, sem cadastro de assinante.",
+        "Use só números que já apareceram em fonte pública. Guardar no grafo liga o telefone a um caso.",
+    ]
+    if _live_ok(settings, quick):
+        quoted = info.get("digits") or digits
+        hits.extend(_safe_web_search(settings, f'"{quoted}" telefone OR whatsapp', f"phone:{quoted}")[:5])
+    place = " / ".join(part for part in (info.get("cidade"), info.get("uf")) if part)
+    summary = (
+        f"Número normalizado. {info.get('tipo') or 'tipo indefinido'}"
+        + (f" · DDD {info['ddd']} ({place})" if info.get("ddd") and place else ".")
+        + " Sem operadora."
+    )
     return ConsultResult(
         kind="PHONE",
         query=digits,
         title=digits,
-        summary="Número normalizado. Não consultamos operadora nem cadastro de assinante.",
-        facts=[("Dígitos", digits), ("Tamanho", str(len(digits)))],
-        hits=[
-            ConsultHit("WhatsApp (link público)", "Abre conversa se o número existir no app", wa, "link"),
-            ConsultHit("Truecaller web", "Busca pública de menção", f"https://www.truecaller.com/search/br/{digits}", "link"),
-        ],
-        notes=["Use só números que já apareceram em fonte pública. Guardar no grafo liga o telefone a um caso."],
+        summary=summary,
+        facts=facts_from_phone(info),
+        hits=hits,
+        notes=notes,
     )
 
 
@@ -788,6 +806,7 @@ def _consult_email(raw: str, settings: Settings | None = None, *, quick: bool = 
 
     gravatar_url = f"https://www.gravatar.com/{hashlib.md5(email.encode('utf-8'), usedforsecurity=False).hexdigest()}"
     hits.append(ConsultHit("Gravatar (hash público)", "Perfil se o dono cadastrou foto/bio", gravatar_url, "perfil"))
+    hits.append(ConsultHit("Keybase lookup", "Conta pública ligada a este e-mail, se existir", f"https://keybase.io/_/api/1.0/user/lookup.json?email={quote(email)}", "link"))
 
     profiles = 0
     if _live_ok(settings, quick) and settings.username_public_enable:
@@ -816,11 +835,32 @@ def _consult_email(raw: str, settings: Settings | None = None, *, quick: bool = 
         hits.extend(web[:6])
         for ev in web[:5]:
             timeline.append(TimelineEvent(ev.title, ev.meta, ev.url, when="menção web", kind="web"))
+        if settings.email_public_enable:
+            from osint4all.connectors.email_public import EmailPublicConnector
+
+            fake = SimpleNamespace(
+                canonical_key=f"email:{email}",
+                display_name=email,
+                entity_type="PERSON",
+                identifiers=[],
+                attrs={"email": email},
+            )
+            try:
+                extra = EmailPublicConnector(settings).collect(fake, SimpleNamespace(investigation=SimpleNamespace(id="consult"), settings=settings))
+            except Exception:
+                extra = None
+            if extra:
+                for ev in extra.evidence[:4]:
+                    hits.append(ConsultHit(ev.source_label, ev.snippet or "", ev.url, "perfil"))
+                    timeline.append(TimelineEvent(ev.source_label, ev.snippet or "", ev.url, when="serviço público", kind="social"))
+                    nid = f"svc-{ev.source_label.lower()}"
+                    graph.nodes.append(GraphNode(nid, ev.source_label, "profile", ev.snippet or "lookup público"))
+                    graph.edges.append(GraphEdge("email", nid, "serviço público", ev.snippet or "Keybase/Gravatar"))
 
     facts.append(("Perfis públicos", str(profiles)))
     notes = [
-        "Não acessamos caixas, Holehe de vazamento nem bases privadas.",
-        "A linha do tempo junta o @user derivado do e-mail, Gravatar e URLs públicas que responderam 200.",
+        "Keybase e Gravatar são lookup público (estilo Holehe). Não acessamos caixa, HIBP nem lista de contas vazadas.",
+        "A linha do tempo junta o @user derivado do e-mail, serviços públicos e URLs que responderam 200.",
     ]
     return ConsultResult(
         kind="EMAIL",
@@ -904,6 +944,26 @@ def _consult_name(raw: str, settings: Settings, *, quick: bool = False) -> Consu
         graph.edges.append(
             GraphEdge("person", nid, "sócio no QSA", "Nome encontrado no quadro societário público desta empresa.")
         )
+    hits.append(
+        ConsultHit(
+            "Aleph / OCCRP",
+            "Pessoas e documentos em datasets investigativos públicos",
+            f"https://aleph.occrp.org/search?q={quote(raw.strip())}",
+            "fonte",
+        )
+    )
+    if settings.aleph_public_enable:
+        from osint4all.connectors.aleph_public import AlephPublicConnector
+
+        try:
+            aleph = AlephPublicConnector(settings).collect(
+                fake, SimpleNamespace(investigation=SimpleNamespace(id="consult"), settings=settings)
+            )
+        except Exception:
+            aleph = None
+        if aleph:
+            for ev in aleph.evidence[:5]:
+                hits.append(ConsultHit(ev.source_label, ev.snippet or "", ev.url, "mencao"))
     return ConsultResult(
         kind="NAME",
         query=raw.strip(),

@@ -37,17 +37,17 @@ EMBEDDED_TOOLS: tuple[EmbeddedTool, ...] = (
     EmbeddedTool(
         "username",
         "Redes sociais",
-        "Checa URLs públicas canônicas (HTTP 200). Equivalente embutido de Sherlock / WhatsMyName / user-scanner.",
+        "Checa URLs públicas canônicas (HTTP 200). Equivalente embutido de Sherlock / Maigret / WhatsMyName.",
         "USERNAME",
         "@usuario",
-        "Sherlock, WhatsMyName, user-scanner",
+        "Sherlock, Maigret, WhatsMyName, user-scanner",
     ),
     EmbeddedTool("plate", "Placa", "Série, portais e menções públicas do veículo/dono. Sem cadastro DETRAN.", "PLATE", "ABC1D23", "SENATRAN / DENATRAN"),
-    EmbeddedTool("phone", "Telefone", "Normaliza o número e aponta menções públicas. Sem operadora.", "PHONE", "11 99999-0000", "Mr.Holmes"),
-    EmbeddedTool("name", "Sócio / nome", "Empresas do quadro societário na base aberta da Receita.", "NAME", "Nome e sobrenome", "Receita / Casa dos Dados"),
+    EmbeddedTool("phone", "Telefone", "DDD, cidade âncora e menções públicas. Sem operadora.", "PHONE", "11 99999-0000", "PhoneInfoga"),
+    EmbeddedTool("name", "Sócio / nome", "Empresas do QSA aberto e menções no Aleph/OCCRP.", "NAME", "Nome e sobrenome", "Receita / Casa dos Dados / Aleph"),
     EmbeddedTool("cnpj", "CNPJ", "Ficha, QSA e mapa de empresas relacionadas.", "CNPJ", "00.000.000/0001-00", "Minha Receita / BrasilAPI"),
     EmbeddedTool("cpf", "CPF", "Valida e cruza QSA público, sanções e menções. Sem nome pela Receita.", "CPF", "000.000.000-00", "Receita / Transparência"),
-    EmbeddedTool("email", "E-mail", "Linha do tempo: @user, Gravatar e redes públicas. Sem caixa nem vazamento.", "EMAIL", "nome@dominio.com", "user-scanner"),
+    EmbeddedTool("email", "E-mail", "Linha do tempo: @user, Keybase, Gravatar e redes. Sem caixa nem leak.", "EMAIL", "nome@dominio.com", "Holehe, Maigret, user-scanner"),
     EmbeddedTool("cnj", "Processo", "CNJ ou nome da parte. DataJud, DJEN, PJe e menções públicas.", "PROCESSOS", "0000001-23.2024.8.26.0100 ou nome", "DataJud / DJEN"),
     EmbeddedTool("negativa", "Negativa", "CEIS, CNEP, TCU, CVM, TSE e menções de condenação em fonte oficial.", "NEGATIVA", "Nome, CPF ou CNPJ", "Transparência / TCU"),
     EmbeddedTool("imovel", "Imóvel", "Leilão Caixa, SNCR, SIGEF e DOU. Sem matrícula de cartório.", "IMOVEL", "Nome, CPF, CNPJ ou endereço", "Caixa / Incra"),
@@ -61,6 +61,22 @@ EMBEDDED_TOOLS: tuple[EmbeddedTool, ...] = (
         "crt.sh / SpiderFoot",
     ),
     EmbeddedTool(
+        "hosts",
+        "Hosts e subdomínios",
+        "Índices públicos (Wayback, HackerTarget, urlscan). Estilo theHarvester / Amass / Subfinder, sem varrer porta.",
+        "URL",
+        "exemplo.com",
+        "theHarvester, Amass, Subfinder",
+    ),
+    EmbeddedTool(
+        "hostficha",
+        "Ficha de host",
+        "Status, título, tecnologia e páginas do domínio já conhecido. Indexa no histórico do caso. Sem varrer porta.",
+        "URL",
+        "exemplo.com",
+        "httpx, Photon, Nuclei informativo, IVRE",
+    ),
+    EmbeddedTool(
         "web",
         "Menções web",
         "SearXNG público (sem chave), Brave ou Google CSE.",
@@ -70,11 +86,11 @@ EMBEDDED_TOOLS: tuple[EmbeddedTool, ...] = (
     ),
     EmbeddedTool(
         "pdf",
-        "Metadados de PDF",
-        "Lê autor, software e datas do arquivo que você envia. Equivalente embutido da FOCA, sem varrer a web.",
+        "Metadados de arquivo",
+        "Lê autor, software e datas do PDF/JPEG/PNG que você envia. ExifTool / FOCA, sem varrer a web.",
         "FILE",
         "",
-        "FOCA",
+        "ExifTool, FOCA",
         upload=True,
     ),
 )
@@ -153,6 +169,10 @@ def run_embedded_tool(tool_id: str, raw: str, *, settings: Settings | None = Non
         )
     if tool.id == "crtsh":
         return _consult_domain(raw, settings or get_settings(), live=live)
+    if tool.id == "hosts":
+        return _consult_hosts(raw, settings or get_settings(), live=live)
+    if tool.id == "hostficha":
+        return _consult_host_fiche(raw, settings or get_settings(), live=live)
     if tool.id == "web":
         return _consult_web(raw, settings or get_settings(), live=live)
     return run_consult(raw, mode=tool.kind, settings=settings)
@@ -276,14 +296,113 @@ def _consult_domain(raw: str, settings: Settings, *, live: bool) -> ConsultResul
             notes=[str(exc)],
         )
     hits = [ConsultHit(e.display_name, str((e.attrs or {}).get("issuer") or "certificado"), e.value, "host") for e in parsed.entities]
+    extra_notes = list(parsed.notes)
+    if live and settings.host_public_enable:
+        extra = _collect_hosts(host, settings)
+        hits.extend(extra[0])
+        extra_notes.extend(extra[1])
     return ConsultResult(
         kind="URL",
         query=host,
         title=host,
-        summary=f"{len(hits)} nome(s) em certificados públicos." if hits else "Nenhum nome extra neste momento.",
+        summary=f"{len(hits)} nome(s) público(s)." if hits else "Nenhum nome extra neste momento.",
         facts=[("Domínio", host)],
         hits=hits,
-        notes=list(parsed.notes) + ["Fonte: crt.sh JSON, consultado pelo servidor."],
+        notes=extra_notes + ["crt.sh (certificado). Hosts extras: índices passivos, sem probe."],
+    )
+
+
+def _collect_hosts(host: str, settings: Settings) -> tuple[list[ConsultHit], list[str]]:
+    from osint4all.connectors.host_public import HostPublicConnector
+
+    fake = SimpleNamespace(
+        canonical_key=f"url:https://{host}",
+        display_name=host,
+        entity_type="ORG",
+        identifiers=[SimpleNamespace(kind="NAME", value=host)],
+    )
+    try:
+        parsed = HostPublicConnector(settings).collect(fake, SimpleNamespace())
+    except Exception as exc:  # noqa: BLE001
+        return [], [str(exc)]
+    hits = [
+        ConsultHit(e.display_name, str((e.attrs or {}).get("fonte") or "host"), e.value, "host")
+        for e in parsed.entities
+    ]
+    return hits, list(parsed.notes)
+
+
+def _consult_hosts(raw: str, settings: Settings, *, live: bool) -> ConsultResult:
+    host = (raw or "").strip().lower()
+    host = host.replace("https://", "").replace("http://", "").split("/")[0].lstrip("www.")
+    if not _DOMAIN_RE.match(host):
+        return ConsultResult(kind="URL", query=raw, title=raw, summary="", ok=False, error="Informe um domínio (exemplo.com).")
+    if not live or not settings.host_public_enable:
+        return ConsultResult(
+            kind="URL",
+            query=host,
+            title=host,
+            summary="Domínio reconhecido. Índices públicos (Wayback / HackerTarget / urlscan) rodam ao vivo.",
+            facts=[("Domínio", host)],
+            notes=["Estilo theHarvester. Sem brute de DNS e sem varrer porta."],
+        )
+    hits, notes = _collect_hosts(host, settings)
+    return ConsultResult(
+        kind="URL",
+        query=host,
+        title=host,
+        summary=f"{len(hits)} host(s) ou e-mail(s) em índices públicos." if hits else "Nenhum host extra nesta passagem.",
+        facts=[("Domínio", host)],
+        hits=hits,
+        notes=notes + ["Fontes passivas. Complementa crt.sh; não substitui o banco do Shodan."],
+    )
+
+
+def _consult_host_fiche(raw: str, settings: Settings, *, live: bool) -> ConsultResult:
+    from osint4all.intel.hosts import is_public_hostname, normalize_host
+
+    host = normalize_host(raw) or ""
+    if not host or not is_public_hostname(host):
+        return ConsultResult(kind="URL", query=raw, title=raw, summary="", ok=False, error="Informe um domínio público já conhecido (exemplo.com). Sem IP.")
+    notes = [
+        "httpx parcial: um GET HTTPS no host do dossiê (status, título, Server).",
+        "Photon raso: links da homepage, mesmo domínio.",
+        "Nuclei só informativo: security.txt e sitemap.",
+        "IVRE local: o caso indexa e correlaciona essas fichas. Não inicia scan.",
+    ]
+    if not live or not settings.host_observe_enable:
+        return ConsultResult(
+            kind="URL",
+            query=host,
+            title=host,
+            summary="Domínio reconhecido. A ficha HTTP roda ao vivo no host que você já tem.",
+            facts=[("Domínio", host)],
+            notes=notes,
+        )
+    from osint4all.connectors.host_observe import HostObserveConnector
+
+    fake = SimpleNamespace(
+        canonical_key=f"url:https://{host}",
+        display_name=host,
+        entity_type="ORG",
+        identifiers=[SimpleNamespace(kind="URL", value=f"https://{host}")],
+        attrs={"host": host},
+    )
+    try:
+        parsed = HostObserveConnector(settings).collect(fake, SimpleNamespace())
+    except Exception as exc:  # noqa: BLE001
+        return ConsultResult(kind="URL", query=host, title=host, summary="Ficha indisponível neste momento.", facts=[("Domínio", host)], notes=[str(exc), *notes])
+    hits = [ConsultHit(e.display_name, str((e.attrs or {}).get("fonte") or "host"), e.value, "host") for e in parsed.entities]
+    hits.extend(ConsultHit(ev.source_label, ev.snippet or "", ev.url, "ficha") for ev in parsed.evidence[:6])
+    facts = [("Domínio", host)]
+    return ConsultResult(
+        kind="URL",
+        query=host,
+        title=host,
+        summary=f"Ficha do host conhecido: {len(hits)} evidência(s)." if hits else "Host conhecido; a homepage não respondeu nesta passagem.",
+        facts=facts,
+        hits=hits,
+        notes=list(parsed.notes) + notes,
     )
 
 

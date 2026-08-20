@@ -10,10 +10,23 @@ window.escapeHtml = escapeHtml;
 function setActionStatus(phase, message) {
   const bar = document.getElementById("action-status");
   if (!bar || !message) return;
+  const clean = String(message).replace(/[.…]+$/u, "").trim();
+  if (!clean) return;
   bar.hidden = false;
-  bar.textContent = message;
   bar.classList.remove("is-loading", "is-ok", "is-error");
-  bar.classList.add(phase === "error" ? "is-error" : phase === "ok" ? "is-ok" : "is-loading");
+  const kind = phase === "error" ? "is-error" : phase === "ok" ? "is-ok" : "is-loading";
+  bar.classList.add(kind);
+  if (kind === "is-loading") {
+    bar.innerHTML = `${escapeHtml(clean)}<span class="status-dots" aria-hidden="true"><i></i><i></i><i></i></span>`;
+    try {
+      sessionStorage.setItem("osint-status", JSON.stringify({ message: clean, t: Date.now() }));
+    } catch (_) { /* ignore quota */ }
+  } else {
+    bar.textContent = clean;
+    try {
+      sessionStorage.removeItem("osint-status");
+    } catch (_) { /* ignore */ }
+  }
 }
 window.setActionStatus = setActionStatus;
 
@@ -43,6 +56,7 @@ function doneLabel(form, ok) {
   if (!ok) return "Falha. Tente de novo.";
   if (form instanceof HTMLFormElement && form.dataset.done) return form.dataset.done;
   const action = formAction(form);
+  if (action.includes("/nova") || action.includes("/grafo")) return "Caso criado.";
   if (action.includes("/consultar")) return "Consulta concluída.";
   if (action.includes("/ferramentas")) return "Ferramenta concluída.";
   if (action.includes("/alvo")) return "Camada carregada.";
@@ -88,6 +102,22 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
 });
 document.body.addEventListener("htmx:sendError", () => {
   setActionStatus("error", "Falha de rede. Tente de novo.");
+});
+
+window.addEventListener("pageshow", () => {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem("osint-status") || "null");
+  } catch (_) {
+    saved = null;
+  }
+  const cy = document.getElementById("cy");
+  if (cy && cy.dataset.statusInit) {
+    setActionStatus(cy.dataset.statusPhase || "ok", cy.dataset.statusInit);
+    return;
+  }
+  if (!saved || Date.now() - (saved.t || 0) > 30000) return;
+  setActionStatus("ok", "Caso criado.");
 });
 
 (function tips() {
@@ -860,7 +890,7 @@ document.body.addEventListener("htmx:sendError", () => {
       `<p class="tree-caption">${escapeXml(caption)}</p>` +
       `<div class="tree-board"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Árvore de vínculos">${lines}${cards}</svg></div>` +
       `<div class="tree-key-row">${legend}</div>` +
-      (reads ? `<p class="tree-reads-kicker">Como ler esta árvore</p><ul class="tree-reads">${reads}</ul>` : "");
+      (reads ? `<ul class="tree-reads">${reads}</ul>` : "");
   }
 
   function escapeXml(text) {

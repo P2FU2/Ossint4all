@@ -8,7 +8,32 @@ from typing import Any
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from osint4all.db.models import BlockedKey, CaseNote, Edge, Entity, Evidence, ExpansionJob, Identifier, Investigation
+from osint4all.db.models import (
+    BlockedKey,
+    CaseComment,
+    CaseEvent,
+    CaseNote,
+    CaseSnapshot,
+    CaseTask,
+    ChangeLog,
+    Claim,
+    ClaimApproval,
+    Edge,
+    Entity,
+    EntityVersion,
+    Evidence,
+    ExpansionJob,
+    HostIntel,
+    Hypothesis,
+    HypothesisStance,
+    Identifier,
+    Investigation,
+    NegativeFinding,
+    PlaybookItem,
+    QueryLog,
+    ResearchPlan,
+    VerificationRecord,
+)
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, entity_status, has_expandable_anchor
 from osint4all.identifiers import STRONG_ID_KINDS
 
@@ -252,26 +277,107 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
         }
         for e in entities
     ]
-    links = [
-        {
-            "id": edge.id,
-            "source": edge.from_entity_id,
-            "target": edge.to_entity_id,
-            "type": edge.rel_type,
-            "confidence": edge.confidence,
-            "note": (edge.attrs or {}).get("nota") or "",
-            "source_connector": edge.source_connector or "",
-            "grau": (edge.attrs or {}).get("grau"),
-        }
-        for edge in edges
-    ]
-    return {"nodes": nodes, "edges": links, "entity_count": len(nodes), "edge_count": len(links)}
+    from osint4all.engines.knowledge import annotate_edge
+
+    links = []
+    for edge in edges:
+        info = annotate_edge(edge)
+        links.append(
+            {
+                "id": edge.id,
+                "source": edge.from_entity_id,
+                "target": edge.to_entity_id,
+                "type": edge.rel_type,
+                "confidence": edge.confidence,
+                "note": (edge.attrs or {}).get("nota") or "",
+                "source_connector": edge.source_connector or "",
+                "grau": (edge.attrs or {}).get("grau"),
+                "strength": info["strength"],
+                "period": info["period"],
+                "year": info["year"],
+            }
+        )
+    years = sorted({int(link["year"]) for link in links if link.get("year")})
+    inv = session.get(Investigation, investigation_id)
+    return {
+        "nodes": nodes,
+        "edges": links,
+        "entity_count": len(nodes),
+        "edge_count": len(links),
+        "years": years,
+        "layout": dict(inv.graph_layout or {}) if inv else {},
+    }
+
+
+def save_graph_layout(session: Session, investigation_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Guarda posições, zoom e vista da rede no caso — vale em qualquer dispositivo."""
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return None
+    known = set(session.scalars(select(Entity.id).where(Entity.investigation_id == investigation_id)))
+    nodes: dict[str, dict[str, float]] = {}
+    raw_nodes = payload.get("nodes") if isinstance(payload.get("nodes"), dict) else {}
+    for entity_id, pos in raw_nodes.items():
+        if entity_id not in known or not isinstance(pos, dict):
+            continue
+        try:
+            x = float(pos.get("x"))
+            y = float(pos.get("y"))
+        except (TypeError, ValueError):
+            continue
+        if not (-1_000_000 < x < 1_000_000 and -1_000_000 < y < 1_000_000):
+            continue
+        nodes[str(entity_id)] = {"x": round(x, 2), "y": round(y, 2)}
+        if len(nodes) >= 2500:
+            break
+    view = payload.get("view") if payload.get("view") in {"rede", "arvore", "split", "mapa"} else "rede"
+    try:
+        zoom = float(payload.get("zoom"))
+    except (TypeError, ValueError):
+        zoom = 1.0
+    zoom = max(0.15, min(2.4, zoom))
+    pan = payload.get("pan") if isinstance(payload.get("pan"), dict) else {}
+    try:
+        pan_x = float(pan.get("x") or 0)
+        pan_y = float(pan.get("y") or 0)
+    except (TypeError, ValueError):
+        pan_x, pan_y = 0.0, 0.0
+    raw_map = payload.get("map") if isinstance(payload.get("map"), dict) else {}
+    map_view: dict[str, float] = {}
+    try:
+        if raw_map:
+            map_view = {
+                "zoom": float(raw_map.get("zoom") or 4),
+                "lat": float(raw_map.get("lat")),
+                "lng": float(raw_map.get("lng")),
+            }
+    except (TypeError, ValueError):
+        map_view = {}
+    layout = {
+        "view": view,
+        "zoom": round(zoom, 4),
+        "pan": {"x": round(pan_x, 2), "y": round(pan_y, 2)},
+        "nodes": nodes,
+        "locked": True,
+    }
+    if map_view:
+        layout["map"] = map_view
+    inv.graph_layout = layout
+    return layout
 
 
 def _delete_entity_local(session: Session, investigation_id: str, entity: Entity, *, block: bool = True) -> None:
     if block:
         block_key(session, investigation_id, entity.canonical_key)
     entity_id = entity.id
+    ev_ids = list(session.scalars(select(Evidence.id).where(Evidence.entity_id == entity_id)))
+    if ev_ids:
+        session.execute(delete(HypothesisStance).where(HypothesisStance.evidence_id.in_(ev_ids)))
+    session.execute(delete(CaseEvent).where(CaseEvent.entity_id == entity_id))
+    session.execute(delete(EntityVersion).where(EntityVersion.entity_id == entity_id))
+    session.execute(delete(QueryLog).where(QueryLog.entity_id == entity_id))
+    session.execute(delete(NegativeFinding).where(NegativeFinding.entity_id == entity_id))
+    session.execute(delete(CaseComment).where(CaseComment.entity_id == entity_id))
     session.execute(delete(ExpansionJob).where(ExpansionJob.entity_id == entity_id))
     session.execute(
         delete(Edge).where(
@@ -331,6 +437,8 @@ def update_edge(
     *,
     rel_type: str,
     note: str = "",
+    period: str = "",
+    strength: str = "",
 ) -> Edge | None:
     edge = session.scalar(select(Edge).where(Edge.id == edge_id, Edge.investigation_id == investigation_id))
     if not edge:
@@ -353,6 +461,10 @@ def update_edge(
         attrs["nota"] = note.strip()[:2000]
     else:
         attrs.pop("nota", None)
+    if period.strip():
+        attrs["periodo"] = period.strip()[:64]
+    if strength.strip().upper() in {"HIGH", "MEDIUM", "LOW"}:
+        attrs["strength"] = strength.strip().upper()
     edge.attrs = attrs
     session.flush()
     return edge
@@ -466,6 +578,26 @@ def purge_investigation(session: Session, investigation_id: str) -> bool:
     if not inv:
         return False
     entity_ids = list(session.scalars(select(Entity.id).where(Entity.investigation_id == investigation_id)))
+    hyp_ids = list(session.scalars(select(Hypothesis.id).where(Hypothesis.investigation_id == investigation_id)))
+    if hyp_ids:
+        session.execute(delete(HypothesisStance).where(HypothesisStance.hypothesis_id.in_(hyp_ids)))
+    claim_ids = list(session.scalars(select(Claim.id).where(Claim.investigation_id == investigation_id)))
+    if claim_ids:
+        session.execute(delete(ClaimApproval).where(ClaimApproval.claim_id.in_(claim_ids)))
+    session.execute(delete(Hypothesis).where(Hypothesis.investigation_id == investigation_id))
+    session.execute(delete(Claim).where(Claim.investigation_id == investigation_id))
+    session.execute(delete(PlaybookItem).where(PlaybookItem.investigation_id == investigation_id))
+    session.execute(delete(EntityVersion).where(EntityVersion.investigation_id == investigation_id))
+    session.execute(delete(QueryLog).where(QueryLog.investigation_id == investigation_id))
+    session.execute(delete(NegativeFinding).where(NegativeFinding.investigation_id == investigation_id))
+    session.execute(delete(CaseComment).where(CaseComment.investigation_id == investigation_id))
+    session.execute(delete(ResearchPlan).where(ResearchPlan.investigation_id == investigation_id))
+    session.execute(delete(CaseSnapshot).where(CaseSnapshot.investigation_id == investigation_id))
+    session.execute(delete(CaseEvent).where(CaseEvent.investigation_id == investigation_id))
+    session.execute(delete(CaseTask).where(CaseTask.investigation_id == investigation_id))
+    session.execute(delete(VerificationRecord).where(VerificationRecord.investigation_id == investigation_id))
+    session.execute(delete(ChangeLog).where(ChangeLog.investigation_id == investigation_id))
+    session.execute(delete(HostIntel).where(HostIntel.investigation_id == investigation_id))
     session.execute(delete(Evidence).where(Evidence.investigation_id == investigation_id))
     session.execute(delete(ExpansionJob).where(ExpansionJob.investigation_id == investigation_id))
     session.execute(delete(Edge).where(Edge.investigation_id == investigation_id))
@@ -518,6 +650,12 @@ def note_tree(notes: list[CaseNote]) -> list[dict[str, Any]]:
 
 
 def confirm_entity(session: Session, entity: Entity, *, reason: str) -> Entity:
+    inv = session.get(Investigation, entity.investigation_id)
+    if inv:
+        from osint4all.quality.verification import apply_verdict
+
+        apply_verdict(session, inv, entity, verdict="confirmed", reason=reason, created_by=None)
+        return entity
     attrs = dict(entity.attrs or {})
     attrs["status"] = "confirmed"
     attrs["motivo"] = reason

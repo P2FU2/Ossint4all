@@ -1,0 +1,282 @@
+{% extends "app/base.html" %}
+{% block title %}Investigar · {{ inv.title }}{% endblock %}
+{% block content %}
+<a class="crumb" href="/app/casos/{{ inv.id }}">← Grafo · {{ inv.title }}</a>
+<header class="page-head">
+  <div>
+    <p class="type-tag">{{ inv.playbook_key or "playbook" }} · {{ inv.workflow or inv.status }}</p>
+    <h1>Motor de investigação</h1>
+    <p class="lede">Hipóteses, lacunas, playbook e padrões. A IA não afirma o que a evidência não mostra.</p>
+  </div>
+  <div class="graph-actions">
+    <a class="btn" href="/app/casos/{{ inv.id }}">Grafo</a>
+    <a class="btn" href="/app/casos/{{ inv.id }}/relatorio">Relatório</a>
+  </div>
+</header>
+
+<section class="panel">
+  <h2>Qualidade do dossiê · {{ quality.overall }}/100</h2>
+  <p>{% if quality.ready %}Pronto para revisão.{% else %}Ainda preliminar.{% endif %} Origens independentes: {{ quality.independent_origins }} · Contradições abertas: {{ quality.contradictions_open }}</p>
+  <ul class="plain">
+    <li>Cobertura de fontes {{ quality.source_coverage }}%</li>
+    <li>Fontes primárias {{ quality.primary_sources }}%</li>
+    <li>Entidades verificadas {{ quality.claims_verified }}%</li>
+    <li>Evidência velha {{ quality.stale_evidence }}%</li>
+    <li>Confiança média {{ quality.entity_confidence }}%</li>
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Playbook {{ inv.playbook_key }} · {{ playbook_progress.done }}/{{ playbook_progress.total }}</h2>
+  <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/playbook">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <select name="playbook_key">
+      {% for key in playbooks %}
+      <option value="{{ key }}" {% if inv.playbook_key == key %}selected{% endif %}>{{ key }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn" type="submit">Aplicar modelo</button>
+  </form>
+  <ol class="plain">
+    {% for item in playbook_items %}
+    <li>
+      <strong>{{ item.title }}</strong>
+      <span class="muted">{{ item.status }}</span>
+      <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/playbook/{{ item.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <select name="status">
+          <option value="todo" {% if item.status == "todo" %}selected{% endif %}>a fazer</option>
+          <option value="doing" {% if item.status == "doing" %}selected{% endif %}>em curso</option>
+          <option value="done" {% if item.status == "done" %}selected{% endif %}>feito</option>
+          <option value="na" {% if item.status == "na" %}selected{% endif %}>não se aplica</option>
+        </select>
+        <input name="note" value="{{ item.note }}" placeholder="nota" />
+        <button class="btn" type="submit">Atualizar</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ol>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/playbook-passo">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Passo próprio <input name="title" required placeholder="Ex.: checar cartório da filial" /></label>
+    <button class="btn" type="submit">Acrescentar ao playbook</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Hipóteses</h2>
+  {% for hyp in hypotheses %}
+  <article class="source-card">
+    <p class="type-tag">{{ hyp.kind }} · {{ hyp.status }}</p>
+    <h3>{{ hyp.title }}</h3>
+    <p>A favor: {{ hyp.for|length }} · Contra: {{ hyp.against|length }} · Inconclusivo: {{ hyp.inconclusive|length }}</p>
+    <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/hipoteses/{{ hyp.id }}/evidencia">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <select name="evidence_id">
+        {% for ev in evidence %}
+        <option value="{{ ev.id }}">{{ ev.source_label }}</option>
+        {% endfor %}
+      </select>
+      <select name="stance">
+        <option value="for">a favor</option>
+        <option value="against">contra</option>
+        <option value="inconclusive">inconclusivo</option>
+      </select>
+      <button class="btn" type="submit">Classificar evidência</button>
+    </form>
+  </article>
+  {% else %}
+  <p class="muted">Nenhuma hipótese operacionalizada ainda.</p>
+  {% endfor %}
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/hipoteses">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Nova hipótese <input name="title" required /></label>
+    <label>Tipo
+      <select name="kind">
+        <option value="primary">central</option>
+        <option value="alternative">explicação concorrente</option>
+      </select>
+    </label>
+    <button class="btn primary" type="submit">Registrar</button>
+  </form>
+  <h3>Explicações concorrentes sugeridas</h3>
+  <ul class="plain">{% for alt in alternatives %}<li>{{ alt }}</li>{% endfor %}</ul>
+</section>
+
+<section class="panel">
+  <h2>O que falta (gap analysis)</h2>
+  <ul class="plain">
+    {% for gap in gaps %}
+    <li><strong>{{ gap.title }}</strong> — {{ gap.detail }}</li>
+    {% else %}
+    <li class="muted">Nenhuma lacuna automática agora. Continue o playbook.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Research planner</h2>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/plano">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Questão central
+      <textarea name="question" rows="2" placeholder="Quero descobrir a relação entre João, Empresa A e Empresa B.">{{ plan_question or inv.hypothesis or "" }}</textarea>
+    </label>
+    <button class="btn primary" type="submit">Gerar plano auditável</button>
+  </form>
+  <ol>
+    {% for step in plan_steps %}
+    <li><strong>{{ step.title }}</strong> — {{ step.body }}</li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="panel">
+  <h2>Encontrar conexão</h2>
+  <form class="inline-plate" method="get" action="/app/casos/{{ inv.id }}/caminho">
+    <select name="from">
+      {% for e in entities %}<option value="{{ e.id }}">{{ e.display_name }}</option>{% endfor %}
+    </select>
+    <select name="to">
+      {% for e in entities %}<option value="{{ e.id }}">{{ e.display_name }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Caminho mais curto</button>
+  </form>
+  {% if path %}
+  <p>{{ path.message }}</p>
+  <ol>
+    {% for node in path.nodes %}<li>{{ node.name }}</li>{% endfor %}
+  </ol>
+  {% if path.edges %}
+  <ul class="plain">
+    {% for edge in path.edges %}
+    <li>{{ edge.type }} · {{ edge.strength }} · {{ edge.period }} · {{ edge.source }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+  <form class="stack" method="get" action="/app/casos/{{ inv.id }}/caminho">
+    <label>Busca no caso
+      <input name="q" placeholder="empresas relacionadas a pessoas em contratos municipais" />
+    </label>
+    <button class="btn" type="submit">Buscar</button>
+  </form>
+  {% if search_hits %}
+  <ul class="plain">
+    {% for hit in search_hits %}
+    <li><a href="/app/casos/{{ inv.id }}/entidades/{{ hit.id }}">{{ hit.name }}</a> · {{ hit.type }} · score {{ hit.score }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Inteligência entre casos e padrões</h2>
+  {% if cross_hits %}
+  <h3>Esta chave também aparece em outros casos</h3>
+  <ul class="plain">
+    {% for hit in cross_hits %}
+    <li>{{ hit.name }} · <a href="/app/casos/{{ hit.case_id }}">{{ hit.case_title }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if anomalies %}
+  <h3>Clusters incomuns</h3>
+  <ul class="plain">
+    {% for hit in anomalies %}
+    <li><strong>{{ hit.title }}</strong> — {{ hit.detail }} · {{ hit.note }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if communities %}
+  <h3>Comunidades</h3>
+  <ul class="plain">
+    {% for c in communities %}
+    <li>Grupo {{ c.id }} ({{ c.size }}): {{ c.names|join(", ") }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if alerts %}
+  <h3>Alertas</h3>
+  <ul class="plain">{% for line in alerts %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Independência de fonte</h2>
+  <p>Dez sites copiando a mesma matéria contam como uma origem.</p>
+  <ul class="plain">
+    {% for cl in clusters[:12] %}
+    <li>{{ cl.labels|join(", ") }} · {{ cl.count }} cópia(s) · {% if cl.independent %}independente{% else %}eco{% endif %}</li>
+    {% else %}
+    <li class="muted">Ainda sem evidências para agrupar.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Claims de alto impacto</h2>
+  <ul class="plain">
+    {% for claim in claims %}
+    <li>
+      {{ claim.text }} · {{ claim.impact }} · {{ claim.status }} · {{ claim.approvals|length }} parecer(es)
+      <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/claims/{{ claim.id }}/aprovar">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn" type="submit">Aprovar</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/claims">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Afirmação <textarea name="text" rows="2" required></textarea></label>
+    <label>Impacto
+      <select name="impact">
+        <option value="low">baixo</option>
+        <option value="medium" selected>médio</option>
+        <option value="high">alto (pede dois pareceres)</option>
+      </select>
+    </label>
+    <button class="btn" type="submit">Abrir claim</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Colaboração e o que mudou</h2>
+  {% if comments %}
+  <ul class="plain">
+    {% for c in comments %}
+    <li><strong>{{ c.created_by or "—" }}</strong> {{ c.body }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/comentarios">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>Comentário <textarea name="body" rows="2" placeholder="@Pedro verificar esta relação"></textarea></label>
+    <button class="btn" type="submit">Comentar</button>
+  </form>
+  <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/snapshot">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input name="label" placeholder="dossiê 20/08" />
+    <button class="btn" type="submit">Snapshot</button>
+  </form>
+  <a class="btn" href="/app/casos/{{ inv.id }}/diff">Comparar últimos dois</a>
+  {% if diff_lines %}
+  <ul class="plain">{% for line in diff_lines %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Reprodutibilidade das consultas</h2>
+  <table class="table">
+    <thead><tr><th>Fonte</th><th>N</th><th>Vazio</th><th>Versão</th></tr></thead>
+    <tbody>
+      {% for q in queries %}
+      <tr><td>{{ q.connector }}</td><td>{{ q.result_count }}</td><td>{{ "sim" if q.empty else "não" }}</td><td>{{ q.connector_version }}</td></tr>
+      {% else %}
+      <tr><td colspan="4">Nenhuma consulta registrada ainda. Processe a fila.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Consulta vazia vira evidência negativa: não encontrado nesta fonte, não «não existe».</p>
+</section>
+{% endblock %}

@@ -1,4 +1,4 @@
-"""Metadados de PDF enviado pelo usuário — sem varrer a web."""
+"""Metadados de arquivo enviado pelo usuário (PDF/JPEG/PNG) — sem varrer a web."""
 
 from __future__ import annotations
 
@@ -57,6 +57,86 @@ def _upload_dir(investigation_id: str) -> Path:
     return path
 
 
+def extract_png_text(data: bytes) -> dict[str, str]:
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return {}
+    out: dict[str, str] = {}
+    i = 8
+    aliases = {"author": "author", "title": "title", "software": "software", "comment": "comment", "description": "title"}
+    while i + 12 <= len(data):
+        length = int.from_bytes(data[i : i + 4], "big")
+        kind = data[i + 4 : i + 8]
+        chunk = data[i + 8 : i + 8 + length]
+        i += 12 + length
+        if kind == b"IEND":
+            break
+        if kind not in {b"tEXt", b"iTXt"} or b"\x00" not in chunk:
+            continue
+        key, _, raw = chunk.partition(b"\x00")
+        label = aliases.get(key.decode("latin-1", errors="ignore").lower())
+        text = raw.decode("utf-8", errors="replace").strip("\x00 ").strip()
+        if label and text and label not in out:
+            out[label] = text[:200]
+    return out
+
+
+def extract_jpeg_exif(data: bytes) -> dict[str, str]:
+    if not data.startswith(b"\xff\xd8"):
+        return {}
+    i = 2
+    while i + 4 < len(data) and data[i] == 0xFF:
+        marker = data[i + 1]
+        seglen = int.from_bytes(data[i + 2 : i + 4], "big")
+        if marker == 0xDA or seglen < 2:
+            break
+        payload = data[i + 4 : i + 2 + seglen]
+        i += 2 + seglen
+        if marker == 0xE1 and payload.startswith(b"Exif\x00\x00"):
+            return _parse_tiff_ascii(payload[6:])
+    return {}
+
+
+def _parse_tiff_ascii(blob: bytes) -> dict[str, str]:
+    if len(blob) < 8:
+        return {}
+    endian = "<" if blob[:2] == b"II" else ">"
+    import struct
+
+    try:
+        offset = struct.unpack(endian + "I", blob[4:8])[0]
+        count = struct.unpack(endian + "H", blob[offset : offset + 2])[0]
+    except struct.error:
+        return {}
+    wanted = {0x010F: "make", 0x0110: "model", 0x0131: "software", 0x0132: "datetime", 0x013B: "author"}
+    out: dict[str, str] = {}
+    pos = offset + 2
+    for _ in range(min(count, 64)):
+        if pos + 12 > len(blob):
+            break
+        tag, typ, n = struct.unpack(endian + "HHI", blob[pos : pos + 8])
+        val = blob[pos + 8 : pos + 12]
+        pos += 12
+        if tag not in wanted or typ != 2 or n < 2:
+            continue
+        start = struct.unpack(endian + "I", val)[0] if n > 4 else pos - 4
+        raw = blob[start : start + n]
+        text = raw.split(b"\x00", 1)[0].decode("latin-1", errors="replace").strip()
+        if text:
+            out[wanted[tag]] = text[:200]
+    return out
+
+
+def extract_file_metadata(filename: str, data: bytes) -> dict[str, str]:
+    name = (filename or "").lower()
+    if name.endswith(".pdf") or data.startswith(b"%PDF"):
+        return extract_pdf_metadata(data)
+    if name.endswith(".png") or data.startswith(b"\x89PNG"):
+        return extract_png_text(data)
+    if name.endswith((".jpg", ".jpeg")) or data.startswith(b"\xff\xd8"):
+        return extract_jpeg_exif(data)
+    return {}
+
+
 def ingest_local_pdf(
     session: Session,
     investigation: Investigation,
@@ -64,10 +144,21 @@ def ingest_local_pdf(
     filename: str,
     data: bytes,
 ) -> Entity:
+    return ingest_local_file(session, investigation, filename=filename, data=data)
+
+
+def ingest_local_file(
+    session: Session,
+    investigation: Investigation,
+    *,
+    filename: str,
+    data: bytes,
+) -> Entity:
     digest = hashlib.sha256(data).hexdigest()
-    dest = _upload_dir(investigation.id) / f"{digest}.pdf"
+    suffix = Path(filename).suffix.lower() or ".bin"
+    dest = _upload_dir(investigation.id) / f"{digest}{suffix}"
     dest.write_bytes(data)
-    meta = extract_pdf_metadata(data)
+    meta = extract_file_metadata(filename, data)
     display = meta.get("title") or filename
     found = FoundEntity(
         entity_type="PUBLICATION",
@@ -84,19 +175,34 @@ def ingest_local_pdf(
     )
     entity = upsert_found_entity(session, investigation, found, depth=0, is_seed=False)
     snippet_bits = [f"Arquivo {filename}"]
-    for key in ("title", "author", "creator", "producer"):
+    for key in ("title", "author", "creator", "producer", "software", "make", "model", "datetime"):
         if meta.get(key):
             snippet_bits.append(f"{key}: {meta[key]}")
     _add_evidence(
         session,
         investigation,
         entity,
-        "foca_local",
-        "Metadados do PDF anexado",
+        "exif_local",
+        "Metadados do arquivo anexado",
         None,
         " · ".join(snippet_bits),
         {"sha256": digest, "metadata": meta, "path": str(dest)},
     )
+    from osint4all.engines.discovery import extract_document_facts, extract_pdf_text
+
+    facts = extract_document_facts(extract_pdf_text(data))
+    if any(facts.values()):
+        entity.attrs = {**(entity.attrs or {}), "extracted": facts}
+        _add_evidence(
+            session,
+            investigation,
+            entity,
+            "doc_extract",
+            "Extração do documento anexado",
+            None,
+            " · ".join(f"{k}: {', '.join(v[:4])}" for k, v in facts.items() if v) or "estrutura lida",
+            {"extracted": facts, "sha256": digest},
+        )
     author = meta.get("author")
     if author and " " in author:
         person = upsert_found_entity(
@@ -107,7 +213,7 @@ def ingest_local_pdf(
                 kind="NAME",
                 value=author,
                 display_name=author,
-                attrs={"from_pdf_author": True},
+                attrs={"from_file_author": True},
                 confidence=0.4,
             ),
             depth=1,
@@ -120,7 +226,7 @@ def ingest_local_pdf(
             "MENCAO",
             0.4,
             {"field": "Author"},
-            "foca_local",
+            "exif_local",
         )
     return entity
 

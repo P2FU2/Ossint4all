@@ -16,6 +16,8 @@
       <p class="section-kicker">índice</p>
       <ol>
         <li><a href="#ideia">O que é</a></li>
+        <li><a href="#motores">Cinco motores</a></li>
+        <li><a href="#qualidade">12 camadas</a></li>
         <li><a href="#limites">O que não entra</a></li>
         <li><a href="#entrar">Entrar e sair</a></li>
         <li><a href="#menus">Menus da barra</a></li>
@@ -30,9 +32,16 @@
         <li><a href="#casos">Lista de casos</a></li>
         <li><a href="#grafo">Grafo</a></li>
         <li><a href="#ficha">Ficha e ligação</a></li>
+        <li><a href="#investigar">Investigar</a></li>
+        <li><a href="#playbooks">Playbooks</a></li>
+        <li><a href="#hipoteses">Hipóteses e claims</a></li>
+        <li><a href="#inteligencia">Caminho e padrões</a></li>
+        <li><a href="#documentos">Documentos</a></li>
         <li><a href="#ferramentas">Ferramentas</a></li>
         <li><a href="#fontes">Fontes (admin)</a></li>
         <li><a href="#relatorio">Relatório e monitor</a></li>
+        <li><a href="#governanca">Colaboração e retenção</a></li>
+        <li><a href="#api">API</a></li>
         <li><a href="#atalhos">Atalhos e avisos</a></li>
       </ol>
     </nav>
@@ -41,13 +50,57 @@
       <section id="ideia" class="manual-section">
         <p class="type-tag">visão</p>
         <h2>O que é a plataforma</h2>
-        <p>O OSINT4ALL é um painel de investigação em grafo. Você entra com um identificador público (CPF, CNPJ, nome, e-mail, telefone, @user, placa ou processo). Fontes oficiais e públicas devolvem fatos, menções e vínculos. O que você guarda vira um <strong>caso</strong>: nós, arestas, anotações e relatório com citação de origem.</p>
+        <p>O OSINT4ALL é um painel de investigação em grafo. Você entra com um identificador público (CPF, CNPJ, nome, e-mail, telefone, @user, placa ou processo). Fontes oficiais e públicas devolvem fatos, menções e vínculos. O que você guarda vira um <strong>caso</strong>: nós, arestas, evidências com origem, playbook, hipóteses e relatório citável.</p>
         <p>Há dois ritmos de trabalho:</p>
         <ol>
           <li><strong>Consulta avulsa</strong> — responde agora, sem gravar. Serve para triagem.</li>
-          <li><strong>Caso</strong> — persiste o dossiê. Expande sócios, processos e menções até o grau que você definiu.</li>
+          <li><strong>Caso</strong> — persiste o dossiê. Expande sócios, processos e menções até o grau que você definiu. Depois o motor de investigação testa se a conclusão se sustenta.</li>
         </ol>
-        <p>Uso previsto: jornalismo investigativo e apuração lícita. Cada hit abre uma ficha <em>dentro</em> do painel. O endereço da fonte fica para copiar; o painel não te empurra para outro site.</p>
+        <p>O que diferencia um dossiê profissional de uma lista de conectores é responder: de onde veio o dado, quando foi coletado, qual a confiança, o que contradiz e como reproduzir a conclusão. Uso previsto: jornalismo investigativo e apuração lícita. Cada hit abre uma ficha <em>dentro</em> do painel. O endereço da fonte fica para copiar; o painel não te empurra para outro site.</p>
+      </section>
+
+      <section id="motores" class="manual-section">
+        <p class="type-tag">arquitetura</p>
+        <h2>Cinco motores</h2>
+        <p>Tudo o que o caso faz cabe nestes cinco. Você não escolhe o motor na tela — escolhe a ação. O motor é o que roda por baixo.</p>
+        <table class="manual-table">
+          <thead>
+            <tr><th>Motor</th><th>O que faz</th><th>Onde aparece</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Discovery</td><td>Encontra evidências e registra a consulta (fonte, parâmetros, versão, vazio).</td><td>Processar, Fontes, Reprodutibilidade em Investigar</td></tr>
+            <tr><td>Knowledge</td><td>Entende entidades, versões no tempo, força da aresta e decay.</td><td>Ficha do nó, ligação, slider de ano</td></tr>
+            <tr><td>Verification</td><td>Testa se a conclusão é sustentável (veredito, independência, qualidade, RAG com <code>[n]</code>).</td><td>Verificar, hipóteses, relatório</td></tr>
+            <tr><td>Investigation</td><td>Organiza playbook, hipóteses, planner, tarefas e workflow.</td><td>Investigar, Quadro, Montar caso</td></tr>
+            <tr><td>Intelligence</td><td>Mostra padrões: caminho, cluster, comunidade, memória entre casos.</td><td>Investigar, alerta no Quadro</td></tr>
+          </tbody>
+        </table>
+        <p>A IA, se estiver ligada, só resume o que as evidências numeradas mostram. Sem citação <code>[n]</code>, o texto cai no aviso seguro. Ela não pesquisa “o mundo”: pesquisa o caso.</p>
+      </section>
+
+      <section id="qualidade" class="manual-section">
+        <p class="type-tag">dossiê</p>
+        <h2>As 12 camadas de qualidade</h2>
+        <p>Não é “mais fontes”. É a qualidade da evidência. Cada camada tem tela ou campo próprio.</p>
+        <table class="manual-table">
+          <thead>
+            <tr><th>Camada</th><th>O que você vê</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Provenance</td><td>Na ficha: fonte, URL, método, HTTP, data, hash. Link <strong>captura</strong> se a homepage do host foi preservada.</td></tr>
+            <tr><td>Entity resolution</td><td>Score na ficha: âncora forte (CPF/CNPJ/e-mail) vs nome/menção.</td></tr>
+            <tr><td>Evidence graph</td><td>Nós + vínculos + evidências. Borda muda com o veredito (candidato, provável, contestado, falso).</td></tr>
+            <tr><td>Timeline</td><td>Quadro e ficha: evidência, veredito, tarefa, monitor.</td></tr>
+            <tr><td>Case management</td><td>Título, hipótese, responsável, tarefas, notas, estado do caso.</td></tr>
+            <tr><td>Verification</td><td>Confirmado / provável / não confirmado / contestado / falso, com motivo. Falso e contestado não expandem.</td></tr>
+            <tr><td>Snapshot</td><td>HTML do host já conhecido em <code>data/captures/</code>. Snapshot do dossiê em Investigar (o que mudou).</td></tr>
+            <tr><td>Change detection</td><td>Quadro → O que mudou. Monitor registra o digest.</td></tr>
+            <tr><td>AI analyst</td><td>Síntese do relatório só com citações <code>[n]</code>.</td></tr>
+            <tr><td>Source health</td><td>Fontes → Checar agora. É <code>health()</code> da fonte, sem scan.</td></tr>
+            <tr><td>Legal / privacy</td><td>Finalidade, classificação (interno / restrito / publicável), reter até, classe PII na ficha. Não apaga sozinho.</td></tr>
+            <tr><td>Reports</td><td>HTML/PDF com capa, qualidade /100, veredito, evidências, tarefas e anexos.</td></tr>
+          </tbody>
+        </table>
       </section>
 
       <section id="limites" class="manual-section">
@@ -60,6 +113,9 @@
           <li>Não usa Instagram com <code>sessionid</code>, dark web, leaks, IntelX nem Hudson Rock.</li>
           <li>Não faz força bruta de CPF nem scraping de bases restritas.</li>
           <li>Não inventa empresas para um CPF. Sem índice oficial de sócios (Brasil.IO), o CPF valida o número e aponta portais — não monta QSA falso.</li>
+          <li>Não dispara scan (ZMap, Masscan, Nuclei DAST, lista de portas). Host só é observado se já está no caso.</li>
+          <li>Não afirma fraude porque um cluster é “incomum”. Inteligência mostra o padrão; o veredito é seu.</li>
+          <li>Consulta vazia não significa “não existe”. Vira evidência negativa: não encontrado <em>nesta fonte</em>.</li>
         </ul>
       </section>
 
@@ -68,7 +124,8 @@
         <h2>Entrar e sair</h2>
         <ol>
           <li>Abra <code>/login</code>. Use o usuário e a senha do administrador (variáveis <code>UI_ADMIN_USER</code> / <code>UI_ADMIN_PASSWORD</code>).</li>
-          <li>Há dois papéis: <strong>admin</strong> (vê Fontes, pode ligar o monitor) e <strong>viewer</strong> (consulta e monta casos).</li>
+          <li>Há dois papéis de conta: <strong>admin</strong> (vê Fontes, liga o monitor, o segundo parecer de claim alto conta como reviewer) e <strong>viewer</strong> (consulta, monta casos, investiga).</li>
+          <li>No caso, o <strong>responsável</strong> é quem conduz — não precisa ser admin. Comentários aceitam <code>@nome</code> como texto; não enviam e-mail.</li>
           <li>Todo formulário leva um token CSRF. Se a sessão expirar, recarregue a página e tente de novo — o aviso aparece no topo.</li>
           <li>Ação de administrador sem permissão não te desloga: volta ao painel com aviso.</li>
           <li><strong>Sair</strong> está no rodapé da barra esquerda.</li>
@@ -87,14 +144,14 @@
             <tr><td>Consultar</td><td><code>/app</code></td><td>Consulta pontual. Não cria caso até você guardar.</td></tr>
             <tr><td>Alvo</td><td><code>/app/alvo</code></td><td>Dossiê da pessoa em camadas. Um campo por vez.</td></tr>
             <tr><td>Casos</td><td><code>/app/casos</code></td><td>Lista o que você já gravou. Abre o grafo.</td></tr>
-            <tr><td>Montar caso</td><td><code>/app/nova</code></td><td>Vários identificadores de uma vez, profundidade e fontes.</td></tr>
+            <tr><td>Montar caso</td><td><code>/app/nova</code></td><td>Vários identificadores, playbook, finalidade e responsável.</td></tr>
             <tr><td>Ferramentas</td><td><code>/app/ferramentas</code></td><td>Suíte embutida + mapa estilo OSINT Framework.</td></tr>
             <tr><td>Manual</td><td><code>/app/manual</code></td><td>Esta página.</td></tr>
-            <tr><td>Fontes</td><td><code>/app/admin</code></td><td>Só admin: saúde das APIs e auditoria.</td></tr>
+            <tr><td>Fontes</td><td><code>/app/admin</code></td><td>Só admin: conectores, saúde, chave, fila e auditoria.</td></tr>
             <tr><td>Caso corrente</td><td>atalho no rodapé</td><td>Caso que recebe “Adicionar ao caso” e o alvo.</td></tr>
           </tbody>
         </table>
-        <p>O logo no topo da barra volta para Consultar, sem abrir caso.</p>
+        <p>Dentro do grafo: <strong>Investigar</strong> abre o motor do caso; <strong>Relatório</strong> abre o dossiê citável. O logo no topo da barra volta para Consultar, sem abrir caso.</p>
       </section>
 
       <section id="conceitos" class="manual-section">
@@ -104,9 +161,13 @@
           <div><dt>Consulta</dt><dd>Um identificador, um modo, um resultado. Fica no histórico da sua conta. Não mistura pessoas só porque o nome parece.</dd></div>
           <div><dt>Cadeia</dt><dd>Fio das suas últimas consultas. Se o próximo valor cruza um e-mail, @user ou telefone que já saiu, o painel mostra o ponto em comum. Dá para abrir um caso a partir da cadeia inteira.</dd></div>
           <div><dt>Alvo</dt><dd>Dossiê de <em>uma</em> pessoa. Você acrescenta campos (nome, CPF, e-mail…). Nome sozinho não confirma. Âncora forte ou QSA com o nome igual confirma.</dd></div>
-          <div><dt>Caso</dt><dd>Investigação persistida: sementes, grafo, fila de expansão, notas, ligações manuais, PDF anexado, relatório. Pode ser o “caso corrente”.</dd></div>
+          <div><dt>Caso</dt><dd>Investigação persistida: sementes, grafo, fila, evidências, playbook, hipóteses, notas, tarefas, PDF anexado, relatório. Pode ser o “caso corrente”.</dd></div>
           <div><dt>Semente</dt><dd>Identificador que você plantou. A expansão parte delas.</dd></div>
           <div><dt>Grau</dt><dd>Distância até o alvo no QSA: alvo, sócio (g1), empresa do sócio (g2), e assim por diante, até o máximo 6.</dd></div>
+          <div><dt>Evidência</dt><dd>Fato coletado com fonte, data, método e hash. É o que sustenta o nó e a aresta.</dd></div>
+          <div><dt>Hipótese</dt><dd>Pergunta operacional. Evidências se marcam a favor, contra ou inconclusivas. Explicações concorrentes evitam confirmar no automático.</dd></div>
+          <div><dt>Playbook</dt><dd>Checklist do tipo de caso (pessoa ou empresa). O investigador marca o passo e pode criar os seus.</dd></div>
+          <div><dt>Claim</dt><dd>Afirmação que pode ir ao relatório. Impacto alto pede dois pareceres.</dd></div>
         </dl>
       </section>
 
@@ -118,6 +179,8 @@
           <li><strong>Só o nome</strong> — o nó fica <em>candidato / não confirmado</em>. Empresas que aparecerem pelo nome entram como <code>CANDIDATO</code>, não como sócio fechado.</li>
           <li><strong>Âncora forte</strong> — CPF válido, CNPJ, e-mail, telefone, @user, placa ou CNJ. Aí o grafo pode expandir com confiança.</li>
           <li><strong>CNPJ + nome no QSA</strong> — se o nome do alvo bate com um sócio oficial daquela empresa, o vínculo confirma mesmo sem CPF.</li>
+          <li><strong>Veredito</strong> — na ficha: confirmado, provável, não confirmado, contestado, falso. Sempre com motivo (fonte ou contradição). Falso e contestado não entram na fila.</li>
+          <li><strong>Decay</strong> — cargo ou endereço com ano antigo (ex.: 2019) aparece como <em>reconfirmar</em>. Não trate como atual.</li>
           <li><strong>Desligar nó</strong> — apaga o nó e as arestas e <em>bloqueia</em> a chave. Explodir / processar não recria aquele identificador neste caso.</li>
         </ul>
         <p>CPF precisa dos dígitos verificadores da Receita. Celular de 11 dígitos (DDD + 9) não é lido como CPF. Número inválido no campo CPF é ignorado — não vira semente.</p>
@@ -166,7 +229,7 @@
             <tr>
               <td>Telefone</td>
               <td>11 99999-0000</td>
-              <td>Número normalizado, wa.me e menções públicas. Sem operadora</td>
+              <td>Número normalizado, wa.me, DDD/cidade ANATEL e menções públicas. Sem operadora</td>
               <td>Novo caso / atribuir</td>
             </tr>
             <tr>
@@ -179,7 +242,7 @@
               <td>CNPJ</td>
               <td>00.000.000/0001-00</td>
               <td>Ficha Receita (razão, CNAE, situação, endereço), QSA, mapa de sócios PJ</td>
-              <td>Novo caso e depois <strong>Explodir QSA</strong></td>
+              <td>Novo caso → playbook Empresa → Explodir QSA</td>
             </tr>
             <tr>
               <td>CPF</td>
@@ -190,7 +253,7 @@
             <tr>
               <td>E-mail</td>
               <td>nome@dominio.com</td>
-              <td>Linha do tempo: local-part como @user, Gravatar, domínio, redes públicas. Sem abrir a caixa</td>
+              <td>Linha do tempo: local-part como @user, Gravatar, Keybase, domínio, redes públicas. Sem abrir a caixa</td>
               <td>Novo caso; o @user derivado pode ir ao alvo</td>
             </tr>
             <tr>
@@ -227,12 +290,13 @@
         </table>
         <p class="section-kicker">receitas rápidas</p>
         <ol>
-          <li><strong>Empresa</strong> — Consultar → CNPJ → Novo caso → Explodir QSA → Processar até a fila zerar → vista Mapa.</li>
+          <li><strong>Empresa</strong> — Montar caso (playbook Empresa) → CNPJ → Abrir grafo → Explodir QSA → Processar → Investigar (checklist + lacunas) → Relatório.</li>
           <li><strong>Pessoa com CPF</strong> — Alvo: nome + CPF → Buscar nesta camada → Abrir no grafo. Não use só o nome.</li>
           <li><strong>Pessoa sem CPF</strong> — Alvo: nome + e-mail ou @user ou telefone. Ou CNPJ da empresa dela; se o QSA trouxer o nome, confirma.</li>
           <li><strong>Veículo</strong> — Placa na consulta. Dono só se você já souber (campo no caso ou em Montar caso).</li>
           <li><strong>Processo</strong> — Cole o CNJ no modo Processo. Nome da parte busca menções, não inventa número.</li>
           <li><strong>Sanção</strong> — Negativa com CPF/CNPJ. Nome sozinho é menção, não lista oficial.</li>
+          <li><strong>Relação entre A e B</strong> — caso com as duas sementes → Processar → Investigar → Encontrar conexão. Cada salto tem tipo, força e evidência.</li>
         </ol>
       </section>
 
@@ -245,7 +309,7 @@
           <li><strong>Nova cadeia</strong> — corta o fio e começa outro.</li>
           <li><strong>Guardar cadeia no grafo</strong> — cria um caso com todos os identificadores fortes do fio.</li>
         </ul>
-        <p>Cadeia não mistura homônimos. Só cruza chave canônica (e-mail normalizado, CPF com dígitos, etc.).</p>
+        <p>Cadeia não mistura homônimos. Só cruza chave canônica (e-mail normalizado, CPF com dígitos, etc.). A memória <em>entre casos</em> é outra coisa: na ficha do nó, “esta chave também aparece no Caso X”.</p>
       </section>
 
       <section id="alvo" class="manual-section">
@@ -286,6 +350,7 @@
           <li>Nome da empresa no grafo entra como termo de firma; CPF <em>nunca</em> vai ao buscador web.</li>
           <li>O servidor não baixa nem guarda as fotos — só exibe a URL da miniatura.</li>
           <li>Título e imagem <em>não</em> confirmam que a pessoa da foto é o alvo. Homônimo vale aqui também.</li>
+          <li>Dez matérias iguais não são dez confirmações. Em Investigar, independência de fonte agrupa o eco.</li>
           <li>Instâncias SearXNG caem; se vier vazio, tente de novo ou configure <code>SEARXNG_URL</code> / Brave / CSE.</li>
         </ul>
       </section>
@@ -294,10 +359,13 @@
         <p class="type-tag">página</p>
         <h2>Montar caso</h2>
         <ol>
-          <li><strong>Título</strong> e <strong>hipótese</strong> — a pergunta que o grafo deve ajudar a responder.</li>
+          <li><strong>Título</strong> e <strong>hipótese</strong> — a pergunta que o grafo deve ajudar a responder. A hipótese vira a hipótese central no motor.</li>
+          <li><strong>Finalidade</strong> — por que este dossiê existe (reportagem, checagem, pauta). Aparece na capa do relatório.</li>
+          <li><strong>Responsável</strong> — quem conduz. Aparece na lista de casos e nas tarefas.</li>
+          <li><strong>Playbook</strong> — automático (CNPJ → Empresa, senão Pessoa), ou force Pessoa / Empresa. Vira o checklist em Investigar.</li>
           <li><strong>Identificadores</strong> — CPF, CNPJ, nome, e-mail, telefone, @user, CNJ, placa e dono da placa (se já souber).</li>
           <li><strong>Lista</strong> — um identificador por linha; o tipo é detectado.</li>
-          <li><strong>Profundidade e fontes</strong> — grau 0 = só a semente; 6 = sócios e as outras empresas deles até o último salto útil. Desmarque conectores que não quer neste caso.</li>
+          <li><strong>Profundidade e fontes</strong> — grau 0 = só a semente; 6 = sócios e as outras empresas deles até o último salto útil. Desmarque conectores que não quer neste caso. Fontes pagas só entram se as gratuitas não cobrirem o tipo.</li>
           <li><strong>Monitorar</strong> — reconsulta as sementes no cron (admin liga/desliga depois no grafo).</li>
           <li><strong>Abrir grafo</strong> — cria o caso, vira caso corrente e começa a expansão.</li>
         </ol>
@@ -307,17 +375,18 @@
       <section id="casos" class="manual-section">
         <p class="type-tag">página</p>
         <h2>Lista de casos</h2>
-        <p>Em <strong>Casos</strong> cada cartão mostra título, data e um id curto — dois casos com o mesmo nome da pessoa não se misturam.</p>
+        <p>Em <strong>Casos</strong> cada cartão mostra título, estado, responsável, data e um id curto — dois casos com o mesmo nome da pessoa não se misturam.</p>
         <ul>
           <li>Clique no cartão para abrir o grafo (ele vira caso corrente).</li>
           <li><strong>Usar</strong> marca o caso corrente sem obrigar a abrir o grafo (útil antes de Consultar → Adicionar).</li>
-          <li>Contagens de nós e vínculos aparecem no cartão.</li>
+          <li>Contagens de nós e vínculos aparecem no cartão. O estado (ACTIVE, REVIEW, VERIFIED…) vem de Editar no grafo.</li>
         </ul>
       </section>
 
       <section id="grafo" class="manual-section">
         <p class="type-tag">página</p>
         <h2>Grafo do caso — todas as funções</h2>
+        <p>O cabeçalho mostra estado, responsável, playbook, <strong>qualidade /100</strong> e progresso do playbook. Qualidade baixa = dossiê preliminar.</p>
         <p class="section-kicker">botões do topo</p>
         <table class="manual-table">
           <thead>
@@ -325,15 +394,16 @@
           </thead>
           <tbody>
             <tr><td>Explodir QSA</td><td>Enfileira CNPJ/CPF e sócios. Cada sócio puxa as outras empresas até o grau máximo. A linha mostra o grau até o alvo.</td></tr>
-            <tr><td>Processar</td><td>Roda o próximo lote da fila. Repita se ainda houver pendências no kpi “fila”.</td></tr>
-            <tr><td>Notícias e galeria</td><td>Painel no grafo: cruza os identificadores do caso em consultas especializadas (sem repetir o mesmo termo). Ver capítulo próprio.</td></tr>
-            <tr><td>Relatório</td><td>Narrativa HTML com fontes citadas.</td></tr>
-            <tr><td>Editar</td><td>Dossiê do alvo: o que já está no grafo + campos vazios para acrescentar. <strong>Salvar e atualizar caso</strong> só semeia o que é novo e reprocessa.</td></tr>
+            <tr><td>Processar</td><td>Roda o próximo lote da fila. Repita se ainda houver pendências no kpi “fila”. Cada consulta grava log (reprodutibilidade).</td></tr>
+            <tr><td>Investigar</td><td>Playbook, hipóteses, lacunas, planner, caminho, clusters, qualidade e snapshots.</td></tr>
+            <tr><td>Relatório</td><td>Dossiê HTML com capa, qualidade, veredito e citações <code>[n]</code>.</td></tr>
+            <tr><td>Editar</td><td>Dossiê do alvo + finalidade, responsável, classificação, estado, reter até. <strong>Salvar e atualizar caso</strong> só semeia o que é novo e reprocessa.</td></tr>
             <tr><td>Ligar placa</td><td>Acrescenta veículo (e dono, se você já tiver).</td></tr>
-            <tr><td>Anexar PDF</td><td>Lê metadados do arquivo que você envia (autor, software, datas). Máx. 8 MB. Estilo FOCA, sem varrer a web.</td></tr>
+            <tr><td>Anexar arquivo</td><td>Metadados + extração de CNPJ/e-mail/datas/valores do PDF. Máx. 8 MB. Sem varrer a web.</td></tr>
+            <tr><td>Importar hosts</td><td>JSON com hostname obrigatório. Indexa no estilo IVRE. Sem scan.</td></tr>
             <tr><td>Baixar PDF</td><td>Relatório em arquivo.</td></tr>
-            <tr><td>Monitorar</td><td>Admin: reconsulta sementes no cron, sem empilhar a mesma fila.</td></tr>
-            <tr><td>Apagar caso</td><td>Remove nós, vínculos, notas, jobs e uploads. Irreversível.</td></tr>
+            <tr><td>Monitorar</td><td>Admin: reconsulta sementes no cron e registra o evento na timeline.</td></tr>
+            <tr><td>Apagar caso</td><td>Remove nós, vínculos, notas, jobs, hipóteses e uploads. Irreversível.</td></tr>
           </tbody>
         </table>
         <p class="section-kicker">vistas</p>
@@ -341,38 +411,149 @@
           <li><strong>Rede</strong> — layout de força (quem se liga a quem).</li>
           <li><strong>Árvore</strong> — hierarquia a partir das sementes.</li>
           <li><strong>Split</strong> — grafo + lista de empresas.</li>
-          <li><strong>Mapa</strong> — empresas com município/UF (pin pela cidade ou pela UF).</li>
+          <li><strong>Mapa</strong> — empresas com município/UF (pin pela cidade ou pela UF). Endereço do QSA vira ponto geográfico.</li>
         </ul>
-        <p><strong>Buscar</strong> filtra pelo rótulo. <strong>Filtro</strong> esconde tipos (PERSON, ORG, CASE, PROFILE, VEHICLE, PUBLICATION, NOTE…) sem apagar o caso. A busca relança o layout só nos nós visíveis.</p>
+        <p><strong>Buscar</strong> filtra pelo rótulo. <strong>Ano</strong> (slider) esconde arestas com ano posterior ao ponto — relações sem ano permanecem. Use para ver o grafo “como em 2021”. As <strong>camadas</strong> (ícone de pilha) ligam ou desligam tipos sem apagar o caso.</p>
+        <p class="section-kicker">barra do canvas</p>
+        <p>Vale na Rede, Árvore, Split e Mapa. Ícones, sem texto:</p>
+        <ul>
+          <li><strong>Grade</strong> (9 pontos) — fundo pontilhado tipo canvas, ou liso. A escolha fica gravada no navegador.</li>
+          <li><strong>+</strong> / <strong>−</strong> — zoom. No mapa, o mesmo controle.</li>
+          <li><strong>Enquadrar</strong> (setas para os cantos) — cabe o grafo (ou os pins) na tela. Atalho <code>0</code>.</li>
+          <li><strong>Desfazer / refazer</strong> — histórico da vista (pan e zoom). Atalhos <code>Ctrl+Z</code> e <code>Ctrl+Shift+Z</code>.</li>
+          <li><strong>Camadas</strong> — mostra ou esconde tipos de nó.</li>
+        </ul>
         <p class="section-kicker">interação no canvas</p>
         <ul>
-          <li><strong>Hover</strong> — balão rápido.</li>
+          <li><strong>Hover</strong> — balão rápido. Nó candidato / provável / contestado / falso muda a borda.</li>
           <li><strong>Clique no nó</strong> — ficha maior no painel. Não navega sozinho.</li>
+          <li><strong>Clique na aresta</strong> — tipo, força, período. <strong>Editar ligação</strong> abre o “por quê”.</li>
           <li><strong>Esc</strong> ou clique no fundo — fecha o balão.</li>
           <li><strong>Botão direito</strong> (Rede / Árvore / Split): anotação, diagrama, seta (origem depois destino), abrir ficha, expandir, desligar, editar/apagar aresta.</li>
           <li>Modo seta: clique origem, depois destino. Tipos <code>SETA</code> ou <code>HIPOTESE</code>.</li>
+          <li><strong>+</strong> / <strong>−</strong> no teclado também dão zoom, se o foco não estiver num campo.</li>
         </ul>
         <p class="section-kicker">quadro do caso</p>
-        <p>Abaixo do grafo:</p>
+        <p>Abaixo do grafo, o <strong>Quadro</strong> junta:</p>
         <ul>
-          <li><strong>Anotações</strong> — título, texto, ligar a um nó, responder a outra nota, opcionalmente <em>colocar no grafo</em> (vira nó NOTE + aresta ANOTACAO). Diagrama usa o mesmo formulário com tipo diagrama no menu de contexto.</li>
-          <li><strong>Nova ligação</strong> — escolhe dois nós, tipo (SOCIO, ADMIN, MENCAO, RELACIONADO, SETA, HIPOTESE, PROPRIETARIO…) e uma nota. Não cria aresta de um nó para ele mesmo. Tipo duplicado entre os mesmos nós é recusado.</li>
+          <li><strong>Linha do tempo</strong> — evidências, vereditos, tarefas e reconsultas do monitor, persistidas.</li>
+          <li><strong>O que mudou</strong> — nome novo, entidade nova, campo alterado.</li>
+          <li><strong>Fontes com falha</strong> — jobs que voltaram erro (API quebrada, bloqueio, vazio).</li>
+          <li><strong>Tarefas</strong> — abrir, concluir, reabrir, com responsável.</li>
+          <li><strong>Anotações</strong> — título, texto, ligar a um nó, responder a outra nota, opcionalmente <em>colocar no grafo</em> (vira nó NOTE + aresta ANOTACAO).</li>
+          <li><strong>Nova ligação</strong> — dois nós, tipo (SOCIO, ADMIN, MENCAO, RELACIONADO, SETA, HIPOTESE, PROPRIETARIO…) e uma nota. Não cria aresta de um nó para ele mesmo. Tipo duplicado entre os mesmos nós é recusado.</li>
         </ul>
-        <p>Apagar a anotação remove também o nó NOTE do grafo, se ela tinha sido pinada.</p>
+        <p>Apagar a anotação remove também o nó NOTE do grafo, se ela tinha sido pinada. Hipóteses, playbook e caminho ficam em <strong>Investigar</strong>, não no Quadro.</p>
       </section>
 
       <section id="ficha" class="manual-section">
         <p class="type-tag">páginas</p>
         <h2>Ficha da entidade e da ligação</h2>
-        <p>A ficha do nó (<code>/app/casos/…/entidades/…</code>) mostra identificadores, evidências, sócios (pessoa → empresas, empresa → sócios), grau e nota livre.</p>
+        <p>A ficha do nó (<code>/app/casos/…/entidades/…</code>) mostra tipo, classe PII (PUBLIC / INTERNAL / PERSONAL / SENSITIVE), score de resolução, identificadores, evidências, sócios, timeline e versões.</p>
         <ul>
+          <li><strong>Verificar</strong> — escolhe o veredito e o motivo. É o motor de verificação. Confirmar antigo ainda existe e marca confirmado.</li>
           <li><strong>Expandir</strong> — reconsulta as fontes deste nó (mesmo se já rodou).</li>
-          <li><strong>Confirmar</strong> — marca o candidato como o alvo e libera a próxima camada.</li>
           <li><strong>Desligar</strong> — tira o nó e bloqueia a chave neste caso.</li>
-          <li><strong>Editar</strong> — nome de exibição e nota da ficha.</li>
+          <li><strong>Editar</strong> — nome de exibição e nota da ficha. Mudança de nome, cargo ou endereço vira versão no tempo.</li>
           <li><strong>Mapa de ferramentas</strong> — abre a suíte já no tipo deste identificador.</li>
+          <li><strong>Captura</strong> — abre o HTML preservado da evidência, se houver.</li>
+          <li><strong>Memória institucional</strong> — a mesma chave em outro caso. Não mistura os grafos; só avisa.</li>
+          <li><strong>Reconfirmar</strong> — cargo/endereço velho. Decay: não publique como atual.</li>
         </ul>
-        <p>A página da ligação permite mudar o tipo e a nota, ou apagar só a aresta (os nós ficam).</p>
+        <p>A página da ligação é o “why is this connected?”:</p>
+        <ul>
+          <li>Tipo da relação, força (HIGH / MEDIUM / LOW), período (ex.: 2020–2023), confiança e fonte.</li>
+          <li>Evidências dos dois nós (registro, diário, site).</li>
+          <li>Dá para editar tipo, força, período e nota, ou apagar só a aresta (os nós ficam).</li>
+        </ul>
+      </section>
+
+      <section id="investigar" class="manual-section">
+        <p class="type-tag">página</p>
+        <h2>Investigar — o motor do caso</h2>
+        <p>No grafo, clique <strong>Investigar</strong> (<code>/app/casos/…/investigar</code>). É aqui que o dossiê deixa de ser só rede e vira investigação.</p>
+        <ol>
+          <li>Leia a <strong>qualidade /100</strong>. Abaixo de 70, ou com contradição aberta, o dossiê é preliminar.</li>
+          <li>Ande o <strong>playbook</strong> (a fazer / em curso / feito / não se aplica). Acrescente passo próprio se o modelo não cobrir.</li>
+          <li>Registre <strong>hipóteses</strong>. Classifique cada evidência: a favor, contra, inconclusivo. Leia as explicações concorrentes antes de cravar.</li>
+          <li>Feche as <strong>lacunas</strong> que o sistema listou (ex.: “há vínculo empresarial provável, mas falta QSA primário”).</li>
+          <li>Se a pergunta for ampla, <strong>gerar plano</strong>: questão → hipóteses → o que falta → fontes → coleta → verificação → conclusão. Cada etapa fica gravada.</li>
+          <li>Use <strong>encontrar conexão</strong> entre dois nós e a <strong>busca no caso</strong> (“empresas em contratos municipais…”).</li>
+          <li>Olhe clusters, comunidades e cruzamento com outros casos. O sistema destaca padrão; você decide o que isso significa.</li>
+          <li>Claims de alto impacto: abra, peça o segundo parecer, só então leve ao relatório.</li>
+          <li>Grave um <strong>snapshot</strong> do dossiê. Depois compare os dois últimos (“+3 empresas, +1 vínculo”).</li>
+        </ol>
+      </section>
+
+      <section id="playbooks" class="manual-section">
+        <p class="type-tag">checklist</p>
+        <h2>Playbooks</h2>
+        <p>O playbook não pesquisa sozinho. Ele diz o que ainda falta para o dossiê ser publicável.</p>
+        <p class="section-kicker">Empresa (COMPANY)</p>
+        <ol>
+          <li>Identidade legal</li>
+          <li>Registro societário</li>
+          <li>Administradores</li>
+          <li>Sócios</li>
+          <li>Beneficiários relacionados</li>
+          <li>Endereços</li>
+          <li>Telefones</li>
+          <li>E-mails</li>
+          <li>Websites</li>
+          <li>Domínios</li>
+          <li>Infraestrutura pública associada</li>
+          <li>Empresas relacionadas</li>
+          <li>Contratos públicos</li>
+          <li>Processos</li>
+          <li>Sanções</li>
+          <li>Notícias</li>
+          <li>Documentos</li>
+          <li>Pessoas-chave</li>
+          <li>Mudanças históricas</li>
+          <li>Verificação final</li>
+        </ol>
+        <p class="section-kicker">Pessoa (PERSON)</p>
+        <p>Identidade → aliases → usernames → e-mails públicos → telefone público → empresas → cargos → endereços históricos → domínios → documentos → processos → notícias → relações → timeline.</p>
+        <p>CNPJ na semente escolhe Empresa. Nome/CPF escolhe Pessoa. Dá para trocar o modelo e acrescentar passo (“checar cartório da filial”). Marque <em>não se aplica</em> quando o passo não cabe — isso sobe o progresso sem fingir que você checou.</p>
+      </section>
+
+      <section id="hipoteses" class="manual-section">
+        <p class="type-tag">verificação</p>
+        <h2>Hipóteses, independência e claims</h2>
+        <p><strong>Hipótese central</strong> nasce do campo hipótese ao montar o caso. <strong>Explicação concorrente</strong> é hipótese alternativa (homônimo, eco de matéria, motivo lícito). Sem isso o sistema confirma o que você já acreditava.</p>
+        <ol>
+          <li>Crie ou use a hipótese.</li>
+          <li>Escolha uma evidência e marque a favor / contra / inconclusivo.</li>
+          <li>Leia o placar. Uma hipótese com só “a favor” e zero contra ainda pode ser fraca se as fontes forem a mesma matéria.</li>
+        </ol>
+        <p><strong>Independência de fonte</strong> agrupa evidências pelo host + trecho. Dez portais copiando o mesmo texto = uma origem, não dez confirmações.</p>
+        <p><strong>Claim</strong> é a frase que você quer publicar. Impacto baixo/médio: um parecer. Impacto alto: dois (analista + reviewer/admin). Sem isso a afirmação não está pronta para o relatório final.</p>
+      </section>
+
+      <section id="inteligencia" class="manual-section">
+        <p class="type-tag">padrões</p>
+        <h2>Caminho, clusters e memória entre casos</h2>
+        <p><strong>Encontrar conexão</strong> — escolha dois nós. O sistema devolve o caminho mais curto e, em cada salto: tipo, força, período e fonte. Sem caminho, a relação ainda não está no grafo (não “não existe”).</p>
+        <p><strong>Busca no caso</strong> — linguagem natural vira filtro sobre o que já foi coletado (“empresas relacionadas a pessoas em contratos municipais”). Não chama fonte nova. Não é OpenSearch: é o grafo + o texto das fichas.</p>
+        <p><strong>Clusters incomuns</strong> — mesmo endereço em várias empresas, mesmo telefone em várias pessoas, mesmo e-mail. O texto diz “padrão incomum. Não afirma irregularidade.”</p>
+        <p><strong>Comunidades</strong> — grupos ligados entre si (componentes do grafo). Útil em rede societária.</p>
+        <p><strong>Memória institucional</strong> — a mesma chave canônica em outro caso. Abre o outro dossiê; não funde os dois.</p>
+        <p><strong>Alertas</strong> — o que mudou de verdade: nova entidade, nome alterado, cluster novo. Não é alerta por palavra-chave.</p>
+        <p><strong>Slider de ano</strong> no grafo — mostra só relações com ano até aquele ponto. Serve para “como era em 2021”.</p>
+      </section>
+
+      <section id="documentos" class="manual-section">
+        <p class="type-tag">anexo</p>
+        <h2>Documentos e extração</h2>
+        <p>Em Mais → <strong>Anexar arquivo</strong> (PDF, JPEG, PNG, até 8 MB):</p>
+        <ol>
+          <li>O arquivo fica em <code>data/uploads/…</code> com hash.</li>
+          <li>Metadados (autor, software, datas) viram evidência — estilo ExifTool / FOCA, sem varrer a web.</li>
+          <li>No PDF com texto embutido, a extração puxa CNPJ, e-mails, datas e valores em R$ e liga ao nó do documento.</li>
+          <li>Autor com nome e sobrenome pode virar pessoa candidata (menção, não identidade).</li>
+        </ol>
+        <p>Não há OCR de imagem nem leitura de PST/EML nesta versão. Tabela de balanço não vira planilha automática: se o texto estiver no PDF, os padrões acima saem; o resto você anota.</p>
+        <p><strong>Importar hosts</strong> — JSON com hostname. Indexa histórico local (estilo IVRE). Linha só com IP, sem hostname, é ignorada. Sem porta, sem scan.</p>
       </section>
 
       <section id="ferramentas" class="manual-section">
@@ -380,9 +561,9 @@
         <h2>Ferramentas</h2>
         <p>É a mesma família de buscas de Consultar, organizada como suíte + árvore do OSINT Framework (ramo Brasil / oficiais). A busca <em>roda no painel</em>; não abre GitHub nem o site da ferramenta.</p>
         <ul>
-          <li>Escolha o card (Massa, Redes sociais, Placa, Telefone, Sócio, CNPJ, CPF, E-mail, Processo, Negativa, Imóvel, Diário, Certificados, Menções web, PDF).</li>
+          <li>Escolha o card (Massa, Redes sociais, Placa, Telefone, Sócio, CNPJ, CPF, E-mail, Processo, Negativa, Imóvel, Diário, Certificados, Hosts, Menções web, metadados, ficha de host).</li>
           <li><strong>Executar</strong> grava no histórico e na cadeia, como a consulta avulsa.</li>
-          <li><strong>PDF</strong> exige um caso: anexe o arquivo no grafo (Mais → Anexar PDF), não faça upload solto sem caso.</li>
+          <li><strong>Metadados</strong> exigem um caso: anexe PDF/JPEG/PNG no grafo (Mais → Anexar arquivo).</li>
           <li>A árvore JSON lista portais públicos. Pastas de leak, dark web e exploit ficam de fora.</li>
         </ul>
       </section>
@@ -390,15 +571,68 @@
       <section id="fontes" class="manual-section">
         <p class="type-tag">admin</p>
         <h2>Fontes</h2>
-        <p>Só administrador. Mostra se cada conector está ligado (CNPJ/Receita, DataJud, DJEN, TSE, Transparência, OpenCorporates, Wikidata, busca web, username, crt.sh, socio_search) e as últimas auditorias / jobs da fila.</p>
-        <p>Chaves opcionais no ambiente: <code>DATAJUD_API_KEY</code>, <code>TRANSPARENCIA_API_KEY</code>, <code>BRASIL_IO_API_TOKEN</code> (sócios por CPF de verdade), <code>SEARXNG_URL</code>, Brave / Google CSE. Sem elas, a fonte some ou fica offline — o painel não completa com chute.</p>
+        <p>Só administrador. Cada card diz <em>quando dispara</em>, <em>o que devolve</em> e se está pronta, parcial (sócio sem Brasil.IO), precisa chave ou desligada. A fila e a auditoria ficam abaixo.</p>
+        <p class="section-kicker">saúde das fontes</p>
+        <p><strong>Checar agora</strong> sonda o <code>health()</code> de cada conector (chave ausente, desligado, erro). Sem scan, sem lista de hosts. Alerta no Quadro do caso também aparece quando um job daquele caso falhou.</p>
+        <ul>
+          <li><strong>Receita / sócios</strong> — QSA oficial e outras empresas do sócio. CPF sem Brasil.IO não inventa firma.</li>
+          <li><strong>DataJud / DJEN</strong> — capa e diário de justiça. DataJud exige chave do CNJ. DJEN costuma falhar fora do Brasil.</li>
+          <li><strong>TSE / Transparência</strong> — candidatura pública e CEIS/CNEP.</li>
+          <li><strong>Wikidata / OpenCorporates / busca web</strong> — ficha, firma no exterior, menções. CPF não vai ao buscador.</li>
+          <li><strong>@user / e-mail / telefone</strong> — URL canônica (Sherlock/Maigret), Keybase+Gravatar (Holehe sem leak) e DDD ANATEL (PhoneInfoga sem operadora). Sem GHunt, sem HIBP.</li>
+          <li><strong>crt.sh / RDAP / Shodan / Censys / Hosts / Aleph</strong> — certificado, titular, APIs oficiais, índices passivos e OCCRP. Open source cobre automação; o banco privado só entra com API.</li>
+          <li><strong>Ficha de host (IVRE local)</strong> — enriquece um hostname já no dossiê: status/título/tech (httpx), links da homepage (Photon raso), security.txt/sitemap (Nuclei informativo). Importa JSON com hostname. Sem ZMap, sem porta, sem CVE.</li>
+          <li><strong>Google público</strong> — Scholar, News, Maps, YouTube. Sem cookie GHunt.</li>
+          <li><strong>Placa</strong> — série histórica e dono só se o texto público citar. Sem DETRAN.</li>
+          <li><strong>Diários oficiais</strong> — Querido Diário (município/estado). Complementa DJEN (justiça) e a busca web (jornal). Sem CPF.</li>
+          <li><strong>Geo</strong> — ViaCEP + Nominatim no endereço já publicado no QSA, para o Mapa deixar o centro da UF.</li>
+        </ul>
+        <p>Chaves opcionais: <code>DATAJUD_API_KEY</code>, <code>TRANSPARENCIA_API_KEY</code>, <code>BRASIL_IO_API_TOKEN</code>, <code>SHODAN_API_KEY</code>, <code>CENSYS_API_ID</code> / <code>CENSYS_API_SECRET</code>, <code>SEARXNG_URL</code>, Brave / Google CSE. Sem elas a fonte some ou fica parcial — o painel não completa com chute.</p>
+        <p>Consulta vazia grava evidência negativa e aparece em Investigar → Reprodutibilidade (fonte, N, vazio, versão). Isso permite repetir o resultado depois.</p>
       </section>
 
       <section id="relatorio" class="manual-section">
         <p class="type-tag">saída</p>
-        <h2>Relatório e monitoramento</h2>
-        <p>O relatório lista entidades, vínculos e evidências com rótulo da fonte. Use no HTML para ler e no PDF para arquivo. Nome sozinho continua sem confirmar identidade no texto.</p>
-        <p>Com <strong>Monitorar</strong> ligado, o agendador reconsulta só as sementes. Se a expansão daquela semente ainda está pendente, não empilha job novo. Só admin liga o interruptor.</p>
+        <h2>Relatório, qualidade e monitoramento</h2>
+        <p>O relatório é o dossiê profissional:</p>
+        <ul>
+          <li>Capa: id do caso, responsável, hipótese, finalidade, classificação, estado, retenção.</li>
+          <li>Nota de qualidade /100 (cobertura, fontes primárias, verificadas, contradições, evidência velha, origens independentes).</li>
+          <li>Síntese (IA só com <code>[n]</code>, ou texto seguro).</li>
+          <li>Entidades com veredito e citações.</li>
+          <li>Vínculos, evidências numeradas (data, método, hash), anotações, tarefas e anexos.</li>
+        </ul>
+        <p>Use o HTML para ler e o PDF para arquivo. Nome sozinho continua sem confirmar identidade no texto. Reproduza a conclusão pelas citações <code>[n]</code>.</p>
+        <p>Com <strong>Monitorar</strong> ligado, o agendador reconsulta só as sementes e registra o evento. Se a expansão daquela semente ainda está pendente, não empilha job novo. Só admin liga o interruptor.</p>
+      </section>
+
+      <section id="governanca" class="manual-section">
+        <p class="type-tag">governança</p>
+        <h2>Colaboração, PII e retenção</h2>
+        <p><strong>Estado do caso</strong> (Editar): DRAFT → INVESTIGATING → REVIEW → VERIFIED → PUBLISHED (além de ACTIVE / CLOSED / ARCHIVED). Não trava a edição; sinaliza o workflow.</p>
+        <p><strong>Classificação</strong>: interno, restrito, publicável. Vai para a capa. <strong>PII</strong> na ficha: CPF é SENSITIVE, e-mail/telefone PERSONAL, CNPJ PUBLIC. O relatório mascara identificadores fortes.</p>
+        <p><strong>Reter até</strong> é data de política. O sistema <em>não apaga sozinho</em> quando vence. Apagar o caso é ação explícita, irreversível.</p>
+        <p><strong>Comentários</strong> em Investigar: texto livre, inclusive <code>@Pedro verificar esta relação</code>. Não há menção por e-mail nesta versão.</p>
+        <p><strong>Double-review</strong>: claim HIGH IMPACT precisa de dois pareceres antes de você tratar como verificada.</p>
+      </section>
+
+      <section id="api" class="manual-section">
+        <p class="type-tag">integração</p>
+        <h2>API</h2>
+        <p>Tudo o que o painel lê no caso também existe em JSON, com a mesma sessão. Prefixo <code>/api/v1</code>. Sem documentação Swagger aberta de propósito.</p>
+        <ul>
+          <li><code>/api/v1/cases</code> — lista</li>
+          <li><code>/api/v1/cases/{id}</code> — capa, qualidade, lacunas</li>
+          <li><code>/api/v1/cases/{id}/entities</code> · <code>/evidence</code> · <code>/graph</code> · <code>/timeline</code></li>
+          <li><code>/api/v1/cases/{id}/quality</code> · <code>/gaps</code> · <code>/hypotheses</code> · <code>/playbook</code></li>
+          <li><code>/api/v1/cases/{id}/path?src=&amp;dst=</code> — caminho mais curto</li>
+          <li><code>/api/v1/cases/{id}/anomalies</code> · <code>/communities</code> · <code>/cross</code> · <code>/alerts</code></li>
+          <li><code>/api/v1/cases/{id}/search?q=</code> — busca no caso</li>
+          <li><code>/api/v1/cases/{id}/sources</code> — log de consultas</li>
+          <li><code>/api/v1/sources</code> — registro de capacidade (FREE/PAID, passivo)</li>
+          <li><code>/api/v1/playbooks</code> — modelos Pessoa / Empresa</li>
+        </ul>
+        <p>Um conector novo implementa o contrato já existente: <code>accepts</code>, <code>collect</code>, <code>health</code>, e devolve entidades / arestas / evidências. O orquestrador lê o registro de capacidade (tipo aceito, chave, custo) e prefere fonte gratuita.</p>
       </section>
 
       <section id="atalhos" class="manual-section">
@@ -413,8 +647,11 @@
           <li>Grafo vazio depois de nome — falta âncora; volte ao Alvo.</li>
           <li>CPF sem empresas — esperado sem Brasil.IO, ou o documento não está no QSA público.</li>
           <li>Nó que volta depois de apagar — você precisa <strong>Desligar</strong> (bloqueia a chave). Só apagar a nota não bloqueia pessoa/empresa.</li>
+          <li>Qualidade baixa / lacuna de QSA — Explodir QSA e Processar, depois volte a Investigar.</li>
+          <li>Sem caminho entre dois nós — a relação ainda não foi coletada ou ligada à mão.</li>
+          <li>Consulta vazia no log — não encontrado nesta fonte; não apague a hipótese por isso.</li>
         </ul>
-        <p>Fluxo completo típico: <strong>Consultar</strong> (triagem) → <strong>Alvo</strong> (fechar identidade) → <strong>Montar caso</strong> ou guardar → <strong>Explodir QSA</strong> → <strong>Processar</strong> → anotar no quadro → <strong>Relatório</strong>.</p>
+        <p>Fluxo completo típico: <strong>Consultar</strong> (triagem) → <strong>Alvo</strong> (fechar identidade) → <strong>Montar caso</strong> (finalidade, responsável, playbook) → <strong>Explodir QSA</strong> → <strong>Processar</strong> → anotar no Quadro → <strong>Investigar</strong> (hipótese, lacunas, caminho, claims) → <strong>Relatório</strong>.</p>
       </section>
     </article>
   </div>

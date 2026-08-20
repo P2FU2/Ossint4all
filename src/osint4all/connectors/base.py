@@ -35,6 +35,9 @@ class FoundEvidence:
     snippet: str | None = None
     payload: dict[str, Any] | None = None
     entity_ref: str | None = None
+    method: str = "GET"
+    http_status: int | None = None
+    raw_path: str | None = None
 
 
 @dataclass

@@ -104,6 +104,24 @@ def test_profile_child_is_not_enqueued() -> None:
     assert should_enqueue_child(found, parent) is False
 
 
+def test_publication_child_is_not_enqueued() -> None:
+    found = FoundEntity(
+        entity_type="PUBLICATION",
+        kind="URL",
+        value="https://scholar.google.com/citations?view_op=search_authors&mauthors=ana",
+        display_name="Google Scholar",
+        confidence=0.35,
+    )
+    parent = Entity(
+        entity_type="PERSON",
+        canonical_key="email:ana@exemplo.com",
+        display_name="Ana",
+        attrs={},
+        depth=0,
+    )
+    assert should_enqueue_child(found, parent) is False
+
+
 def test_alvo_layer_plate_offline() -> None:
     layer = run_alvo_layer({}, kind="PLATE", value="ABC1D23", live=False)
     assert layer.ok

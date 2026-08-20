@@ -5,8 +5,7 @@
   <header class="page-head">
     <div>
       <p class="eyebrow">Dossiê em camadas</p>
-      <h1>O que você já sabe desta pessoa?</h1>
-      <p class="lede">Preencha um campo e busque. Nome sozinho vira candidato. CPF, e-mail, telefone, @user, placa ou CNPJ (com o nome no QSA) confirmam o vínculo.</p>
+      <h1>Alvo desta pessoa</h1>
     </div>
     {% if current_case %}
     <span class="kpi" data-tip="O grafo deste caso recebe o que for confirmado">Caso: {{ current_case.title }}</span>
@@ -31,9 +30,8 @@
     {% endfor %}
   </div>
 
-  <details class="case-board media-board" open>
-    <summary data-tip="A plataforma cruza nome, empresa, @user, placa, e-mail e processo — sem repetir a mesma busca genérica">Notícias e galeria do alvo</summary>
-    <p class="muted">Usa nome, CNPJ, @user, placa, e-mail ou CNJ já preenchidos. CPF não é enviado à busca web.</p>
+  <details class="case-board media-board">
+    <summary data-tip="Cruza os campos do alvo em consultas especializadas">Notícias</summary>
     <button
       class="btn primary"
       type="button"
@@ -142,7 +140,7 @@
   </article>
   {% endif %}
 
-  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px" data-busy="Criando caso…">
+  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px" data-busy="Criando caso" data-done="Caso criado.">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     {% if cases %}
     <label class="save-extra">Caso

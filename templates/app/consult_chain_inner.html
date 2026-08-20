@@ -5,13 +5,13 @@
       <p class="eyebrow">ponto de cadeia</p>
       <h2>{{ chain.title }}</h2>
       {% if chain.linked %}
-      <p class="lede">{{ chain.steps|length }} consultas ligadas{% if chain.shared %} por {{ chain.shared|join(", ") }}{% endif %}. Tudo que já entrou neste fio aparece abaixo.</p>
+      <p class="lede">{{ chain.steps|length }} consultas ligadas{% if chain.shared %} · {{ chain.shared|join(", ") }}{% endif %}</p>
       {% else %}
-      <p class="lede">Ponto aberto. Se o próximo dado cruzar com este (e-mail, @user, placa, CPF…), entra na mesma cadeia.</p>
+      <p class="lede">Ponto de cadeia.</p>
       {% endif %}
     </div>
     <div class="chain-actions">
-      <form method="post" action="/app/cadeia/grafo" data-busy="Criando caso…">
+      <form method="post" action="/app/cadeia/grafo" data-busy="Criando caso" data-done="Caso criado.">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn primary" type="submit" data-tip="Cria um caso com todos os identificadores desta cadeia">guardar caso</button>
       </form>

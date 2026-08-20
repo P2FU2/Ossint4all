@@ -4,18 +4,22 @@
 <a class="crumb" href="/app/casos/{{ inv.id }}" data-tip="Volta ao grafo deste caso">← Grafo · {{ inv.title }}</a>
 <header class="page-head">
   <div>
-    <p class="type-tag">{{ entity.entity_type }}{% if entity.is_seed %} · semente{% endif %}{% if entity.attrs.get("status") == "unconfirmed" %} · candidato{% endif %}</p>
+    <p class="type-tag">{{ entity.entity_type }}{% if entity.is_seed %} · semente{% endif %}{% if pii_class %} · {{ pii_class }}{% endif %}{% if stale %} · reconfirmar{% endif %}{% if resolution %} · {{ resolution.status }} · score {{ resolution.score }}{% endif %}</p>
     <h1>{{ entity.display_name }}</h1>
     <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · grau {{ entity.depth }} com o alvo{% if entity.attrs.get("motivo") %} · {{ entity.attrs.get("motivo") }}{% endif %}</p>
   </div>
   <div class="graph-actions">
     <a class="btn" href="/app/ferramentas?tool={{ tool_id_for_kind(seed_kind) }}&amp;kind={{ seed_kind }}&amp;q={{ seed_q|urlencode }}" data-tip="Ferramentas públicas para este tipo">Mapa de ferramentas</a>
-    {% if entity.attrs.get("status") == "unconfirmed" %}
-    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/confirmar">
+    <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/verificar">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn primary" type="submit" data-tip="Marca como a mesma pessoa/empresa do alvo e libera expansão">Confirmar vínculo</button>
+      <select name="verdict">
+        {% for key, label in verdicts %}
+        <option value="{{ key }}" {% if resolution and resolution.status == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input name="reason" placeholder="Por quê? fonte, contradição…" />
+      <button class="btn primary" type="submit">Verificar</button>
     </form>
-    {% endif %}
     <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir" data-busy="Expandindo nó…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn primary" type="submit" data-tip="Enfileira fontes a partir deste nó.">Expandir daqui</button>
@@ -37,6 +41,52 @@
     </details>
   </div>
 </header>
+
+{% if resolution %}
+<section class="panel">
+  <h2>Resolução</h2>
+  <p>Score {{ resolution.score }} · {{ resolution.rule }}{% if resolution.strong %} · âncoras {{ resolution.strong|join(", ") }}{% endif %}</p>
+  {% if stale %}<p class="muted">Há cargo/endereço antigo nesta ficha. Decay: não trate como atual sem reconfirmar.</p>{% endif %}
+</section>
+{% endif %}
+
+{% if cross_hits %}
+<section class="panel">
+  <h2>Memória institucional</h2>
+  <p>Esta chave também aparece em outros casos.</p>
+  <ul class="plain">
+    {% for hit in cross_hits %}
+    <li><a href="/app/casos/{{ hit.case_id }}">{{ hit.case_title }}</a> · {{ hit.name }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if versions %}
+<section class="panel">
+  <h2>Versões no tempo</h2>
+  <ul class="plain">
+    {% for v in versions %}
+    <li>{{ v.field }}: {{ v.old_value or "—" }} → {{ v.new_value }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if case_events %}
+<section class="panel">
+  <h2>Linha do tempo</h2>
+  <ol class="timeline">
+    {% for ev in case_events %}
+    <li class="tl-{{ ev.event_type }}">
+      <span class="tl-when">{{ ev.occurred_at.strftime("%d/%m %H:%M") if ev.occurred_at else "" }}</span>
+      <strong>{{ ev.title }}</strong>
+      <span class="muted">{{ ev.meta }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
 
 <section class="panel">
   <h2>Identificadores</h2>
@@ -103,6 +153,34 @@
 </section>
 {% endif %}
 
+{% if host_cards %}
+<section class="panel">
+  <h2>Inteligência de host</h2>
+  <p class="lede">Histórico local (estilo IVRE): fontes permitidas correlacionadas neste hostname. Não é resultado de scan.</p>
+  {% for card in host_cards %}
+  <article class="source-card">
+    <header>
+      <p class="type-tag">{{ card.origins|join(" · ") }}</p>
+      <h3>{{ card.host }}</h3>
+    </header>
+    {% if card.title %}<p>{{ card.title }}</p>{% endif %}
+    <dl class="fact-grid source-facts">
+      <div><dt>Fontes</dt><dd>{{ card.sources|join(", ") or "—" }}</dd></div>
+      {% if card.tech %}<div><dt>Tecnologia</dt><dd>{{ card.tech|join(", ") }}</dd></div>{% endif %}
+      {% if card.ips %}<div><dt>IP (já conhecido)</dt><dd>{{ card.ips|join(", ") }}</dd></div>{% endif %}
+    </dl>
+    {% if card.history %}
+    <ul class="plain">
+      {% for source, snippet in card.history %}
+      <li><strong>{{ source }}</strong> {{ snippet }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
 {% if entity.attrs.get("nota") %}
 <section class="panel">
   <h2>Anotação deste nó</h2>
@@ -157,7 +235,9 @@
       <strong>{{ ev.source_label }}</strong>
       <span class="muted">{{ ev.connector }} · {{ ev.collected_at }}</span>
       <p>{{ ev.snippet or "" }}</p>
+      <span class="muted">{{ ev.method or "GET" }}{% if ev.http_status %} {{ ev.http_status }}{% endif %}{% if ev.content_sha256 %} · {{ ev.content_sha256[:12] }}{% endif %}</span>
       {% if ev.url %}<button type="button" class="inspect-open" data-inspect='{{ {"title": ev.source_label, "kind": "fonte", "meta": ev.snippet or ev.connector or "", "url": ev.url, "when": ev.collected_at.strftime("%d/%m %H:%M") if ev.collected_at else ""}|tojson }}'>fonte</button>{% endif %}
+      {% if ev.raw_path %}<a class="btn" href="/app/casos/{{ inv.id }}/evidencias/{{ ev.id }}/captura">captura</a>{% endif %}
     </li>
     {% else %}
     <li>Nenhuma evidência coletada ainda.</li>

@@ -5,18 +5,31 @@
   <div>
     <p class="eyebrow">Quando a consulta avulsa não basta</p>
     <h1>Montar um caso</h1>
-    <p class="lede">Vários identificadores juntos, profundidade e monitoramento. Para uma placa ou um @user, volte a Consultar.</p>
+    <p class="lede sr-only">Vários identificadores no mesmo caso.</p>
   </div>
   <a class="btn" href="/app" data-tip="Consulta rápida sem criar caso">Consulta avulsa</a>
 </header>
 
-<form class="stack" method="post" action="/app/nova" data-busy="Criando caso…">
+<form class="stack" method="post" action="/app/nova" data-busy="Criando caso" data-done="Caso criado.">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <label data-tip="Nome curto do dossiê. Aparece na lista de casos.">Título
     <input name="title" required placeholder="Ex.: Holding do grupo X" />
   </label>
   <label data-tip="A pergunta que o grafo deve ajudar a responder.">Hipótese
     <textarea name="hypothesis" rows="2" placeholder="O que você está tentando verificar?"></textarea>
+  </label>
+  <label data-tip="Finalidade lícita do dossiê. Aparece no relatório.">Finalidade
+    <textarea name="purpose" rows="2" placeholder="Reportagem, checagem de hipótese, pedido de pauta…"></textarea>
+  </label>
+  <label data-tip="Quem conduz o caso.">Responsável
+    <input name="assignee" placeholder="seu nome ou equipe" />
+  </label>
+  <label data-tip="O playbook vira checklist no motor de investigação. CNPJ escolhe empresa sozinho se deixar em branco.">Playbook
+    <select name="playbook_key">
+      <option value="">Automático (CNPJ → empresa, senão pessoa)</option>
+      <option value="PERSON">Pessoa</option>
+      <option value="COMPANY">Empresa</option>
+    </select>
   </label>
 
   <fieldset class="seed-grid">
@@ -44,9 +57,9 @@
     </label>
     <div class="checks">
       {% for c in connectors %}
-      <label class="check" data-tip="Liga ou desliga esta fonte neste caso.">
+      <label class="check" data-tip="{{ source_catalog[c].how if source_catalog and source_catalog.get(c) else 'Liga ou desliga esta fonte neste caso.' }}">
         <input type="checkbox" name="connectors" value="{{ c }}" {% if c in enabled %}checked{% endif %} />
-        {{ c }}
+        {{ source_catalog[c].label if source_catalog and source_catalog.get(c) else c }}
       </label>
       {% endfor %}
     </div>

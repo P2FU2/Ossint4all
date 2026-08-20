@@ -7,7 +7,7 @@
     <div>
       <p class="eyebrow">Suíte embutida</p>
       <h1>Rodar aqui, sem sair</h1>
-      <p class="lede">Sherlock, WhatsMyName, crt.sh, FOCA e busca em massa rodam neste painel. Não abre GitHub nem outro domínio.</p>
+      <p class="lede sr-only">Suíte embutida.</p>
     </div>
     {% if current_case %}
     <span class="kpi" data-tip="Resultados podem ir para este caso">Caso: {{ current_case.title }}</span>
@@ -41,13 +41,13 @@
     {% if current_case %}
     <form class="stack" method="post" action="/app/casos/{{ current_case.id }}/documento" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <label data-tip="PDF público que você já tem. Sem varrer a web.">Arquivo PDF
-        <input type="file" name="arquivo" accept="application/pdf" required />
+      <label data-tip="PDF, JPEG ou PNG que você já tem. Sem varrer a web.">Arquivo (PDF / JPEG / PNG)
+        <input type="file" name="arquivo" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" required />
       </label>
       <button class="btn primary" type="submit">Ler metadados no caso corrente</button>
     </form>
     {% else %}
-    <p class="lede">Abra ou escolha um caso para anexar o PDF. <a href="/app/casos">Casos</a></p>
+    <p class="lede">Abra ou escolha um caso para anexar o arquivo. <a href="/app/casos">Casos</a></p>
     {% endif %}
     {% else %}
     <form class="consult-form" method="post" action="/app/ferramentas/executar" hx-post="/app/ferramentas/executar" hx-target="#tool-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="closest form" hx-timeout="45000" data-busy="Buscando…" data-done="Ferramenta concluída.">

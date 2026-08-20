@@ -27,6 +27,7 @@ def upsert_found_entity(
     key = found_canonical_key(found)
     existing = find_entity_by_key(session, investigation.id, key)
     if existing:
+        old_name = existing.display_name
         existing.last_seen_at = utcnow()
         existing.confidence = max(existing.confidence, found.confidence)
         if depth < (existing.depth or 0):
@@ -35,12 +36,33 @@ def upsert_found_entity(
             existing.display_name == existing.canonical_key or len(found.display_name) > len(existing.display_name)
         ):
             existing.display_name = found.display_name
-        attrs = dict(existing.attrs or {})
+        prev_attrs = dict(existing.attrs or {})
+        attrs = dict(prev_attrs)
         attrs.update({k: v for k, v in found.attrs.items() if v not in (None, "")})
         attrs["grau"] = existing.depth
         existing.attrs = attrs
         add_identifier(existing, found.kind, found.value, key)
         _merge_same_as(session, investigation, existing, found)
+        if old_name != existing.display_name:
+            from osint4all.engines.knowledge import record_version
+            from osint4all.quality.changes import record_change
+
+            record_change(
+                session,
+                investigation,
+                field="display_name",
+                old_value=old_name,
+                new_value=existing.display_name,
+                entity_id=existing.id,
+            )
+            record_version(session, investigation, existing, "display_name", old_name, existing.display_name)
+        for field in ("papel", "endereco", "cargo", "situacao"):
+            old = str(prev_attrs.get(field) or "")
+            new = str(attrs.get(field) or "")
+            if old and new and old != new:
+                from osint4all.engines.knowledge import record_version
+
+                record_version(session, investigation, existing, field, old, new)
         return existing
 
     attrs = dict(found.attrs or {})
@@ -59,6 +81,16 @@ def upsert_found_entity(
     session.flush()
     add_identifier(entity, found.kind, found.value, key)
     _merge_same_as(session, investigation, entity, found)
+    from osint4all.quality.changes import record_change
+
+    record_change(
+        session,
+        investigation,
+        field="entity",
+        old_value="",
+        new_value=entity.display_name,
+        entity_id=entity.id,
+    )
     return entity
 
 
@@ -162,7 +194,20 @@ def apply_result(
             target = ref_map.get(ev.entity_ref) or find_entity_by_key(
                 session, investigation.id, ev.entity_ref
             ) or origin
-        _add_evidence(session, investigation, target, connector, ev.source_label, ev.url, ev.snippet, ev.payload)
+        _add_evidence(
+            session,
+            investigation,
+            target,
+            connector,
+            ev.source_label,
+            ev.url,
+            ev.snippet,
+            ev.payload,
+            method=getattr(ev, "method", None) or "GET",
+            http_status=getattr(ev, "http_status", None),
+            raw_path=getattr(ev, "raw_path", None),
+        )
+        _index_host_payload(session, investigation, target, connector, ev.payload)
 
     return created
 
@@ -189,15 +234,22 @@ def _ensure_edge(
         existing.confidence = max(existing.confidence, confidence)
         merged = dict(existing.attrs or {})
         merged.update(attrs or {})
+        from osint4all.engines.knowledge import strength_label
+
+        merged.setdefault("strength", strength_label(existing.confidence))
         existing.attrs = merged
         return existing
+    from osint4all.engines.knowledge import strength_label
+
+    payload = dict(attrs or {})
+    payload.setdefault("strength", strength_label(confidence))
     edge = Edge(
         investigation_id=investigation.id,
         from_entity_id=from_id,
         to_entity_id=to_id,
         rel_type=rel_type,
         confidence=confidence,
-        attrs=attrs or {},
+        attrs=payload,
         source_connector=connector,
     )
     session.add(edge)
@@ -214,7 +266,23 @@ def _add_evidence(
     url: str | None,
     snippet: str | None,
     payload: dict[str, Any] | None,
+    *,
+    method: str = "GET",
+    http_status: int | None = None,
+    raw_path: str | None = None,
+    edge_id: str | None = None,
 ) -> Evidence | None:
+    from osint4all.quality.provenance import content_hash
+    from osint4all.quality.timeline import add_event
+
+    extra = payload if isinstance(payload, dict) else {}
+    method = str(extra.get("method") or method or "GET")[:16]
+    if http_status is None and extra.get("http_status") is not None:
+        try:
+            http_status = int(extra.get("http_status"))
+        except (TypeError, ValueError):
+            http_status = None
+    raw_path = str(extra.get("raw_path") or raw_path or "") or None
     raw = json.dumps(
         {"c": connector, "u": url or "", "s": (snippet or "")[:200], "e": entity.id},
         sort_keys=True,
@@ -232,12 +300,44 @@ def _add_evidence(
     ev = Evidence(
         investigation_id=investigation.id,
         entity_id=entity.id,
+        edge_id=edge_id,
         connector=connector,
         source_label=source_label,
         url=url,
         snippet=snippet,
         payload=payload,
         dedup_hash=digest,
+        method=method,
+        http_status=http_status,
+        content_sha256=content_hash(payload, snippet, url),
+        raw_path=raw_path,
     )
     session.add(ev)
+    session.flush()
+    add_event(
+        session,
+        investigation,
+        event_type="evidence",
+        title=source_label,
+        meta=(snippet or connector)[:400],
+        url=url,
+        entity_id=entity.id,
+        evidence_id=ev.id,
+    )
     return ev
+
+
+def _index_host_payload(
+    session: Session,
+    investigation: Investigation,
+    entity: Entity,
+    connector: str,
+    payload: dict[str, Any] | None,
+) -> None:
+    if not payload:
+        return
+    from osint4all.intel.hosts import observation_from_payload, upsert_host_intel
+
+    obs = observation_from_payload(payload, source=connector)
+    if obs:
+        upsert_host_intel(session, investigation, entity.id, obs)

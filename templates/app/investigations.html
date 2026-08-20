@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">Histórico</p>
     <h1>Casos guardados</h1>
-    <p class="lede">Grafos que você decidiu aprofundar. Consultas avulsas não aparecem aqui.</p>
+    <p class="lede sr-only">Casos persistidos.</p>
   </div>
   <div class="graph-actions">
     <label class="save-extra">Buscar
@@ -32,9 +32,10 @@
         <strong>{{ inv.title }}</strong>
         {% if current_case_id == inv.id %}<span class="pill">corrente</span>{% endif %}
         {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
+        <span class="pill">{{ inv.status }}</span>
       </div>
       <p>{{ inv.hypothesis or "Sem hipótese." }}</p>
-      <p class="muted">{{ inv.created_at.strftime("%d/%m/%Y %H:%M") if inv.created_at else "" }} · {{ inv.id[:8] }}</p>
+      <p class="muted">{{ inv.assignee or inv.created_by or "" }} · {{ inv.created_at.strftime("%d/%m/%Y %H:%M") if inv.created_at else "" }} · {{ inv.id[:8] }}</p>
     </a>
     <div class="kpis">
       <span>{{ c.entities }} nós</span>

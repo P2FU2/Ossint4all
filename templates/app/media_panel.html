@@ -1,5 +1,5 @@
 {% if media.queries %}
-<p class="muted">Combinações testadas: {{ media.queries | join(" · ") }}. Cada par especializa; o termo sozinho só entra se ainda não foi cruzado. Miniatura e título não provam identidade.</p>
+<p class="muted">{{ media.queries | join(" · ") }}</p>
 {% endif %}
 {% for note in media.notes %}
 <p class="muted">{{ note }}</p>

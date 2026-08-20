@@ -12,6 +12,8 @@ from osint4all.logging_setup import get_logger
 from osint4all.paths import project_root
 from osint4all.db.session import init_db, session_scope
 from osint4all.web.auth import seed_admin_user
+from osint4all.web.api_v1 import api_router
+from osint4all.web.investigate import investigate_router
 from osint4all.web.router import router
 
 logger = get_logger(__name__)
@@ -43,6 +45,8 @@ def create_app() -> FastAPI:
         https_only=settings.is_production,
     )
     app.include_router(router)
+    app.include_router(investigate_router)
+    app.include_router(api_router)
     static_dir = project_root() / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

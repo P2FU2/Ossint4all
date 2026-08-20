@@ -120,4 +120,16 @@ def create_investigation(
     session.add(inv)
     session.flush()
     add_seed_entities(session, inv, seeds, max_attempts=max_attempts)
+    from osint4all.engines.investigation import ensure_primary_hypothesis
+    from osint4all.engines.playbooks import attach_playbook
+
+    kinds = {seed.kind for seed in seeds}
+    if inv.playbook_key in {"COMPANY", "PERSON"}:
+        key = inv.playbook_key
+    elif "CNPJ" in kinds:
+        key = "COMPANY"
+    else:
+        key = "PERSON"
+    attach_playbook(session, inv, key)
+    ensure_primary_hypothesis(session, inv)
     return inv

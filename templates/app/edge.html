@@ -11,8 +11,26 @@
 </header>
 
 <section class="panel">
+  <h2>Por que esta ligação existe</h2>
+  <dl class="attrs">
+    <dt>Relação</dt><dd>{{ why.type if why else edge.rel_type }}</dd>
+    <dt>Força</dt><dd>{{ why.strength if why else "—" }}</dd>
+    <dt>Período</dt><dd>{{ why.period if why else "—" }}</dd>
+    <dt>Confiança</dt><dd>{{ '%.2f'|format(edge.confidence) }}</dd>
+    <dt>Fonte</dt><dd>{{ why.source if why else (edge.source_connector or "—") }}</dd>
+  </dl>
+  {% if edge_evidence %}
+  <h3>Evidências associadas</h3>
+  <ul class="plain">
+    {% for ev in edge_evidence %}
+    <li><strong>{{ ev.source_label }}</strong> {{ ev.snippet or ev.url or ev.connector }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="panel">
   <h2>Editar ligação</h2>
-  <p class="lede">Mudar o tipo ou a nota não apaga os nós. Apagar a ligação só solta o vínculo.</p>
   <form class="stack" method="post" action="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}/editar">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <label>Tipo
@@ -22,6 +40,14 @@
         {% endfor %}
       </select>
     </label>
+    <label>Força
+      <select name="strength">
+        <option value="HIGH" {% if (edge.attrs.get("strength") or (why.strength if why else "")) == "HIGH" %}selected{% endif %}>HIGH</option>
+        <option value="MEDIUM" {% if (edge.attrs.get("strength") or (why.strength if why else "")) == "MEDIUM" %}selected{% endif %}>MEDIUM</option>
+        <option value="LOW" {% if (edge.attrs.get("strength") or (why.strength if why else "")) == "LOW" %}selected{% endif %}>LOW</option>
+      </select>
+    </label>
+    <label>Período <input name="period" value="{{ edge.attrs.get("periodo") or "" }}" placeholder="2020–2023" /></label>
     <label>Nota desta ligação
       <textarea name="note" rows="4" placeholder="Por que estes nós se ligam">{{ edge.attrs.get("nota") or "" }}</textarea>
     </label>

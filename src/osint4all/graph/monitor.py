@@ -35,6 +35,17 @@ def requeue_monitored_seeds() -> int:
                 )
                 if job is not None and job in session.new:
                     queued += 1
+            from osint4all.quality.changes import case_digest
+            from osint4all.quality.timeline import add_event
+
+            digest = case_digest(session, inv.id)
+            add_event(
+                session,
+                inv,
+                event_type="monitor",
+                title="Reconsulta das sementes",
+                meta=f"{digest['entities']} nós · {digest['evidence']} evidências",
+            )
             inv.last_monitored_at = utcnow()
         logger.info("monitor_requeue investigations=%s jobs=%s", len(investigations), queued)
     return queued

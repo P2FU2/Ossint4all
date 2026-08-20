@@ -5,14 +5,15 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=14" defer></script>
+<script src="/static/graph.js?v=19" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
   <div>
     <a class="crumb" href="/app/casos" data-tip="Volta à lista de casos guardados">Casos</a>
     <h1>{{ inv.title }}</h1>
-    <p class="lede">{{ inv.hypothesis or "Botão direito: anotação, diagrama e seta. Clique no nó para a ficha." }}</p>
+    {% if inv.hypothesis %}<p class="lede">{{ inv.hypothesis }}</p>{% endif %}
+    <p class="muted">{{ inv.status }} · {{ inv.assignee or inv.created_by or "—" }}{% if inv.playbook_key %} · {{ inv.playbook_key }}{% endif %}{% if quality %} · qualidade {{ quality.overall }}/100{% endif %}{% if playbook_progress %} · playbook {{ playbook_progress.done }}/{{ playbook_progress.total }}{% endif %}{% if inv.purpose %} · {{ inv.purpose }}{% endif %}{% if case_digest %} · {{ case_digest.entities }} nós · {{ case_digest.evidence }} evidências{% if case_digest.changes %} · {{ case_digest.changes }} mudança(s){% endif %}{% endif %}</p>
   </div>
   <div class="graph-actions">
     <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>
@@ -26,6 +27,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn" type="submit" data-busy="Processando fila…" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
     </form>
+    <a class="btn" href="/app/casos/{{ inv.id }}/investigar" data-tip="Hipóteses, playbook, lacunas e caminho">Investigar</a>
     <a class="btn" href="/app/casos/{{ inv.id }}/relatorio" data-tip="Relatório narrativo com fontes citadas">Relatório</a>
     <details class="more-menu">
       <summary class="btn" data-tip="Dossiê do alvo: o que já tem e o que falta">Editar</summary>
@@ -35,6 +37,23 @@
           <p class="type-tag">alvo neste caso</p>
           <label>Título <input name="title" value="{{ inv.title }}" required /></label>
           <label>Hipótese <textarea name="hypothesis" rows="2">{{ inv.hypothesis or "" }}</textarea></label>
+          <label>Finalidade <textarea name="purpose" rows="2" placeholder="Por que este dossiê existe">{{ inv.purpose or "" }}</textarea></label>
+          <label>Responsável <input name="assignee" value="{{ inv.assignee or "" }}" placeholder="quem conduz" /></label>
+          <label>Classificação
+            <select name="classification">
+              <option value="interno" {% if inv.classification == "interno" %}selected{% endif %}>interno</option>
+              <option value="restrito" {% if inv.classification == "restrito" %}selected{% endif %}>restrito</option>
+              <option value="publicavel" {% if inv.classification == "publicavel" %}selected{% endif %}>publicável</option>
+            </select>
+          </label>
+          <label>Estado
+            <select name="case_status">
+              {% for st in case_statuses %}
+              <option value="{{ st }}" {% if inv.status == st %}selected{% endif %}>{{ st }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Reter até <input type="date" name="retain_until" value="{{ inv.retain_until.strftime('%Y-%m-%d') if inv.retain_until else '' }}" /></label>
           <label>Grau máximo <input type="number" name="max_depth" min="0" max="6" value="{{ inv.max_depth }}" data-tip="Quantos saltos sócio→empresa a partir do alvo" /></label>
           <p class="section-kicker">já no grafo</p>
           {% if dossier %}
@@ -61,8 +80,7 @@
           <label>Lista extra
             <textarea name="seeds" rows="2" placeholder="Um identificador por linha"></textarea>
           </label>
-          <p class="muted">Ao gravar infos novas o caso reprocessa e procura ligações que só essas âncoras abrem.</p>
-          <button class="btn primary" type="submit" data-tip="Grava o dossiê e reprocessa o grafo com o que entrou agora">Salvar e atualizar caso</button>
+          <button class="btn primary" type="submit" data-tip="Grava o dossiê e reprocessa o grafo">Salvar e atualizar caso</button>
         </form>
       </div>
     </details>
@@ -77,8 +95,14 @@
         </form>
         <form method="post" action="/app/casos/{{ inv.id }}/documento" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <label class="btn" data-tip="Lê metadados do PDF que você envia (estilo FOCA).">Anexar PDF
-            <input type="file" name="arquivo" accept="application/pdf" onchange="this.form.submit()" hidden />
+          <label class="btn" data-tip="Lê metadados do PDF, JPEG ou PNG que você envia (ExifTool / FOCA).">Anexar arquivo
+            <input type="file" name="arquivo" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" onchange="this.form.submit()" hidden />
+          </label>
+        </form>
+        <form method="post" action="/app/casos/{{ inv.id }}/hosts-import" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label class="btn" data-tip="JSON de hosts que você já tem (hostname obrigatório). Indexa no estilo IVRE. Sem scan.">Importar hosts
+            <input type="file" name="arquivo" accept="application/json,.json" onchange="this.form.submit()" hidden />
           </label>
         </form>
         <a class="btn" href="/app/casos/{{ inv.id }}/relatorio.pdf" data-tip="Baixa o relatório em PDF">Baixar PDF</a>
@@ -96,6 +120,7 @@
     </details>
   </div>
 </header>
+<div class="graph-panel">
 <div class="graph-toolbar">
   <div class="view-tabs" role="tablist">
     <button type="button" class="btn view-tab is-active" data-view="rede" data-tip="Layout de rede: quem se liga a quem">Rede</button>
@@ -103,31 +128,30 @@
     <button type="button" class="btn view-tab" data-view="split" data-tip="Grafo + lista de empresas">Split</button>
     <button type="button" class="btn view-tab" data-view="mapa" data-tip="Grid geográfico das empresas — mesmo visual do painel">Mapa</button>
   </div>
-  <label data-tip="Busca pelo nome do nó">Buscar
-    <input id="graph-search" type="search" placeholder="nome, CNPJ, placa…" />
-  </label>
-  <label data-tip="Esconde os outros tipos sem apagar o grafo.">Filtro
-    <select id="type-filter">
-      <option value="">todos os tipos</option>
-      <option>PERSON</option>
-      <option>ORG</option>
-      <option>CASE</option>
-      <option>PROFILE</option>
-      <option>ASSET</option>
-      <option>VEHICLE</option>
-      <option>PUBLICATION</option>
-      <option>NOTE</option>
-    </select>
-  </label>
-  <div class="legend">
-    <span class="dot person"></span> Pessoa
-    <span class="dot org"></span> Empresa
-    <span class="dot case"></span> Processo
-    <span class="dot profile"></span> Perfil
-    <span class="dot asset"></span> Veículo
-    <span class="dot pub"></span> Publicação
-    <span class="dot note"></span> Anotação
+  <div class="graph-filters" id="graph-filters">
+    <div class="filter-group" role="group" aria-label="Tipo">
+      <button type="button" class="chip is-on" data-filter-type="all" data-tip="Mostra todos os tipos">Todos</button>
+      <button type="button" class="chip" data-filter-type="PERSON" data-tip="Só pessoas, no grau marcado">Pessoas</button>
+      <button type="button" class="chip" data-filter-type="ORG" data-tip="Só empresas, no grau marcado">Empresas</button>
+    </div>
+    <div class="filter-group" role="group" aria-label="Grau até o alvo">
+      <span class="filter-kicker">Grau</span>
+      <label class="chip"><input type="checkbox" data-filter-degree="0" checked /> Alvo</label>
+      <label class="chip"><input type="checkbox" data-filter-degree="1" checked /> 1º</label>
+      <label class="chip"><input type="checkbox" data-filter-degree="2" checked /> 2º</label>
+      <label class="chip"><input type="checkbox" data-filter-degree="3" checked /> 3º</label>
+      <label class="chip"><input type="checkbox" data-filter-degree="4" checked /> 4º</label>
+    </div>
   </div>
+    <label class="graph-search">
+      <span class="sr-only">Buscar</span>
+      <input id="graph-search" type="search" placeholder="nome, CNPJ, placa…" data-tip="Filtra pelo nome do nó" />
+    </label>
+    <label class="graph-search year-slider" data-tip="Mostra só relações com ano até este ponto. Sem ano, a aresta permanece.">
+      <span>Ano</span>
+      <input id="graph-year" type="range" min="2010" max="2026" value="2026" />
+      <output id="graph-year-out">2026</output>
+    </label>
 </div>
 
 {% macro note_branch(items) %}
@@ -154,15 +178,129 @@
 </ul>
 {% endmacro %}
 
+<div class="graph-stage">
+  <aside id="split-list" class="split-list" hidden></aside>
+  <div class="graph-canvas">
+    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Carregando fontes… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+  </div>
+  <div class="canvas-tools" aria-label="Canvas">
+    <div class="canvas-tools-group">
+      <button type="button" class="canvas-btn" id="ct-dots" data-tip="Fundo pontilhado" aria-label="Fundo pontilhado" aria-pressed="true">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="5" r="1.15"/><circle cx="10" cy="5" r="1.15"/><circle cx="15" cy="5" r="1.15"/><circle cx="5" cy="10" r="1.15"/><circle cx="10" cy="10" r="1.15"/><circle cx="15" cy="10" r="1.15"/><circle cx="5" cy="15" r="1.15"/><circle cx="10" cy="15" r="1.15"/><circle cx="15" cy="15" r="1.15"/></svg>
+      </button>
+    </div>
+    <div class="canvas-tools-group">
+      <button type="button" class="canvas-btn" id="ct-zoom-in" data-tip="Aproximar" aria-label="Aproximar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M10 4v12"/></svg>
+      </button>
+      <button type="button" class="canvas-btn" id="ct-zoom-out" data-tip="Afastar" aria-label="Afastar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12"/></svg>
+      </button>
+      <button type="button" class="canvas-btn" id="ct-fit" data-tip="Enquadrar" aria-label="Enquadrar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5"/></svg>
+      </button>
+    </div>
+    <div class="canvas-tools-group">
+      <button type="button" class="canvas-btn" id="ct-undo" data-tip="Desfazer vista" aria-label="Desfazer vista" disabled>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 7H4v3"/><path d="M4.6 10A6 6 0 1 0 5 7.2"/></svg>
+      </button>
+      <button type="button" class="canvas-btn" id="ct-redo" data-tip="Refazer vista" aria-label="Refazer vista" disabled>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13 7h3v3"/><path d="M15.4 10A6 6 0 1 1 15 7.2"/></svg>
+      </button>
+    </div>
+    <div class="canvas-tools-group">
+      <button type="button" class="canvas-btn" id="ct-layers" data-tip="Camadas" aria-label="Camadas" aria-expanded="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3 3 7l7 4 7-4-7-4z"/><path d="M3 10l7 4 7-4"/><path d="M3 13l7 4 7-4"/></svg>
+      </button>
+    </div>
+  </div>
+  <div id="ct-layers-panel" class="canvas-layers" hidden>
+    <label><input type="checkbox" data-type="PERSON" checked /> Pessoa</label>
+    <label><input type="checkbox" data-type="ORG" checked /> Empresa</label>
+    <label><input type="checkbox" data-type="CASE" checked /> Processo</label>
+    <label><input type="checkbox" data-type="PROFILE" checked /> Perfil</label>
+    <label><input type="checkbox" data-type="ASSET" checked /> Ativo</label>
+    <label><input type="checkbox" data-type="VEHICLE" checked /> Veículo</label>
+    <label><input type="checkbox" data-type="PUBLICATION" checked /> Publicação</label>
+    <label><input type="checkbox" data-type="NOTE" checked /> Anotação</label>
+  </div>
+  <aside id="graph-balloon" class="graph-balloon" hidden>
+    <p class="type-tag" id="gb-kind"></p>
+    <h2 id="gb-title"></h2>
+    <p class="graph-balloon-lead" id="gb-lead"></p>
+    <dl class="fact-grid" id="gb-facts" hidden></dl>
+    <div class="graph-balloon-actions" id="gb-actions" hidden></div>
+  </aside>
+  <div id="org-map" hidden></div>
+</div>
+</div>
+
 <details class="case-board" open>
-  <summary data-tip="Anotações e ligações manuais ficam gravadas neste caso">Quadro do caso · anotações e ligações</summary>
+  <summary data-tip="Anotações, tarefas, timeline e ligações manuais">Quadro do caso · anotações e ligações</summary>
   <div class="board-grid">
+    <section>
+      <h2>Linha do tempo</h2>
+      {% if case_events %}
+      <ol class="timeline">
+        {% for ev in case_events %}
+        <li class="tl-{{ ev.event_type }}">
+          <span class="tl-when">{{ ev.occurred_at.strftime("%d/%m %H:%M") if ev.occurred_at else "" }}</span>
+          <strong>{{ ev.title }}</strong>
+          <span class="muted">{{ ev.meta }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="muted">Ainda sem eventos persistidos.</p>
+      {% endif %}
+      {% if case_changes %}
+      <h3>O que mudou</h3>
+      <ul class="plain">
+        {% for ch in case_changes %}
+        <li><strong>{{ ch.field }}</strong> {{ ch.old_value or "—" }} → {{ ch.new_value }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if source_errors %}
+      <h3>Fontes com falha</h3>
+      <ul class="plain">
+        {% for job in source_errors %}
+        <li>{{ job.last_error }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+    <section>
+      <h2>Tarefas</h2>
+      <ul class="plain">
+        {% for task in case_tasks %}
+        <li>
+          <strong>{{ task.title }}</strong>
+          <span class="muted">{{ task.status }}{% if task.assignee %} · {{ task.assignee }}{% endif %}</span>
+          <form method="post" action="/app/casos/{{ inv.id }}/tarefas/{{ task.id }}/estado">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <input type="hidden" name="done" value="{{ '0' if task.status == 'DONE' else '1' }}" />
+            <button class="btn" type="submit">{{ "Reabrir" if task.status == "DONE" else "Concluir" }}</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">Nenhuma tarefa.</li>
+        {% endfor %}
+      </ul>
+      <form class="stack" method="post" action="/app/casos/{{ inv.id }}/tarefas">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>Tarefa <input name="title" required placeholder="Checar QSA, pedir certidão…" /></label>
+        <label>Nota <textarea name="body" rows="2"></textarea></label>
+        <label>Responsável <input name="assignee" value="{{ inv.assignee or "" }}" /></label>
+        <button class="btn primary" type="submit">Abrir tarefa</button>
+      </form>
+    </section>
     <section>
       <h2>Anotações</h2>
       {% if board_notes %}
       {{ note_branch(board_notes) }}
       {% else %}
-      <p class="muted">Nenhuma anotação ainda. Elas persistem com o caso e podem virar nó na árvore.</p>
+      <p class="muted">Nenhuma anotação.</p>
       {% endif %}
       <form class="stack" method="post" action="/app/casos/{{ inv.id }}/notas">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -190,7 +328,6 @@
     </section>
     <section>
       <h2>Nova ligação</h2>
-      <p class="muted">Cria um vínculo persistente entre dois nós que já estão no caso.</p>
       <form class="stack" method="post" action="/app/casos/{{ inv.id }}/ligacoes">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <label>De
@@ -221,21 +358,8 @@
   </div>
 </details>
 
-<div class="graph-stage">
-  <aside id="split-list" class="split-list" hidden></aside>
-  <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Carregando fontes… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
-  <aside id="graph-balloon" class="graph-balloon" hidden>
-    <p class="type-tag" id="gb-kind"></p>
-    <h2 id="gb-title"></h2>
-    <p class="graph-balloon-lead" id="gb-lead"></p>
-    <dl class="fact-grid" id="gb-facts" hidden></dl>
-    <div class="graph-balloon-actions" id="gb-actions" hidden></div>
-  </aside>
-  <div id="org-map" hidden></div>
-</div>
-<details class="case-board media-board" open>
-  <summary data-tip="A plataforma cruza os identificadores do caso em várias consultas especializadas">Notícias e galeria do alvo</summary>
-  <p class="muted">Busca pública (SearXNG / Brave / CSE) pelo nome, CNPJ, @user, placa, e-mail ou processo. CPF não vai para o buscador. A miniatura não é baixada no servidor e não prova identidade.</p>
+<details class="case-board media-board">
+  <summary data-tip="Cruza os identificadores do caso em consultas especializadas">Notícias e galeria do alvo</summary>
   <button
     class="btn primary"
     type="button"

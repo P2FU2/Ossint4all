@@ -39,6 +39,9 @@ class ExpansionEngine:
                 continue
             if not connector.accepts(entity):
                 continue
+            import time
+
+            started = time.perf_counter()
             try:
                 result = connector.collect(entity, ctx)
             except SkippedDisabled as exc:
@@ -46,7 +49,33 @@ class ExpansionEngine:
                 continue
             except Exception as exc:  # noqa: BLE001
                 logger.warning("connector_failed %s: %s", connector.name, exc)
+                from osint4all.engines.discovery import log_query
+
+                log_query(
+                    session,
+                    investigation,
+                    connector=connector.name,
+                    entity_id=entity.id,
+                    params={"key": entity.canonical_key, "type": entity.entity_type, "error": str(exc)[:200]},
+                    result_count=0,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    version=getattr(connector, "version", "1"),
+                    failed=True,
+                )
                 continue
+            from osint4all.engines.discovery import log_query
+
+            count = len(result.entities) + len(result.evidence)
+            log_query(
+                session,
+                investigation,
+                connector=connector.name,
+                entity_id=entity.id,
+                params={"key": entity.canonical_key, "type": entity.entity_type},
+                result_count=count,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                version=getattr(connector, "version", "1"),
+            )
             apply_result(
                 session,
                 investigation,

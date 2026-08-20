@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from osint4all.catalog.framework import load_framework_tree
-from osint4all.documents.metadata import ingest_local_pdf
+from osint4all.documents.metadata import ingest_local_file
 from osint4all.config import ALL_CONNECTORS, get_settings
 from osint4all.paths import project_root
+from osint4all.catalog.opensource import oss_cards
+from osint4all.catalog.sources import SOURCE_CATALOG, source_cards
 from osint4all.connectors.registry import connector_health, enabled_connector_names
 from osint4all.db.chain import active_chain, alvo_fields, chain_seeds, chain_view, ingest_outcome, reset_chain
 from osint4all.db.history import clear_searches, kind_label as history_kind_label, list_searches, record_search, replay_spec
@@ -30,6 +32,7 @@ from osint4all.db.repository import (
     enqueue_qsa_network,
     graph_payload,
     job_counts,
+    save_graph_layout,
     list_notes,
     note_tree,
     purge_investigation,
@@ -81,6 +84,62 @@ def _with_cases(ctx: dict, request: Request, session: Session) -> dict:
 
 def _set_flash(request: Request, level: str, message: str) -> None:
     request.session["flash"] = {"level": level, "message": message}
+
+
+def _host_cards_for(session: Session, investigation_id: str, entity: Entity) -> list:
+    from osint4all.intel.hosts import cards_for_entity
+
+    return cards_for_entity(session, investigation_id, entity)
+
+
+def _case_events(session: Session, investigation_id: str, entity_id: str | None = None):
+    from osint4all.quality.timeline import list_events
+
+    return list_events(session, investigation_id, entity_id=entity_id, limit=40)
+
+
+def _case_tasks(session: Session, investigation_id: str):
+    from osint4all.quality.tasks import list_tasks
+
+    return list_tasks(session, investigation_id)
+
+
+def _case_changes(session: Session, investigation_id: str):
+    from osint4all.quality.changes import recent_changes
+
+    return recent_changes(session, investigation_id, limit=12)
+
+
+def _case_digest(session: Session, investigation_id: str):
+    from osint4all.quality.changes import case_digest
+
+    return case_digest(session, investigation_id)
+
+
+def _source_errors(session: Session, investigation_id: str):
+    from osint4all.quality.health import recent_job_errors
+
+    return recent_job_errors(session, investigation_id)
+
+
+def _resolution(entity: Entity):
+    from osint4all.quality.resolution import resolution_score
+
+    return resolution_score(entity)
+
+
+def _parse_retain(raw: str):
+    from datetime import datetime, timezone
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        if len(text) == 10:
+            return datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 def _sync_expand(investigation_id: str, *, rounds: int = 1) -> int:
@@ -625,8 +684,10 @@ def new_investigation(
         {
             "nav": "nova",
             "connectors": ALL_CONNECTORS,
+            "source_catalog": SOURCE_CATALOG,
             "enabled": enabled_connector_names(settings),
             "default_depth": settings.default_max_depth,
+            "playbooks": ("PERSON", "COMPANY"),
         }
     )
     return templates.TemplateResponse(request, "app/new.html", ctx)
@@ -654,6 +715,9 @@ def create_case(
     max_depth: int = Form(2),
     monitor: str = Form(""),
     connectors: list[str] = Form(default=[]),
+    purpose: str = Form(""),
+    assignee: str = Form(""),
+    playbook_key: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     parsed = collect_form_seeds(
@@ -684,6 +748,12 @@ def create_case(
         created_by=user.username,
         max_attempts=get_settings().job_max_attempts,
     )
+    inv.purpose = purpose.strip() or None
+    inv.assignee = assignee.strip() or user.username
+    if playbook_key.upper() in {"COMPANY", "PERSON"}:
+        from osint4all.engines.playbooks import attach_playbook
+
+        attach_playbook(session, inv, playbook_key.upper())
     if looks_like_plate(seed_plate):
         attach_plate_owner(
             session,
@@ -796,8 +866,19 @@ def graph_page(
             ).all(),
             "rel_types": EDGE_REL_TYPES,
             "dossier": case_identifiers(session, inv.id),
+            "case_events": _case_events(session, inv.id),
+            "case_tasks": _case_tasks(session, inv.id),
+            "case_changes": _case_changes(session, inv.id),
+            "case_digest": _case_digest(session, inv.id),
+            "source_errors": _source_errors(session, inv.id),
+            "case_statuses": ("ACTIVE", "DRAFT", "INVESTIGATING", "REVIEW", "VERIFIED", "PUBLISHED", "CLOSED", "ARCHIVED"),
         }
     )
+    from osint4all.engines.playbooks import list_items, progress
+    from osint4all.engines.verification import quality_score
+
+    ctx["quality"] = quality_score(session, inv)
+    ctx["playbook_progress"] = progress(list_items(session, inv.id, inv.playbook_key))
     return templates.TemplateResponse(request, "app/graph.html", ctx)
 
 
@@ -840,6 +921,11 @@ def edit_case(
     seed_plate: str = Form(""),
     seed_plate_owner: str = Form(""),
     seed_cnj: str = Form(""),
+    purpose: str = Form(""),
+    assignee: str = Form(""),
+    classification: str = Form("interno"),
+    retain_until: str = Form(""),
+    case_status: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
@@ -849,6 +935,13 @@ def edit_case(
     if title.strip():
         inv.title = title.strip()[:255]
     inv.hypothesis = hypothesis.strip() or None
+    inv.purpose = purpose.strip() or None
+    inv.assignee = assignee.strip() or inv.assignee
+    inv.classification = (classification or "interno").strip()[:32] or "interno"
+    inv.retain_until = _parse_retain(retain_until)
+    if case_status in {"ACTIVE", "DRAFT", "INVESTIGATING", "REVIEW", "VERIFIED", "PUBLISHED", "CLOSED", "ARCHIVED"}:
+        inv.status = case_status
+        inv.workflow = case_status if case_status != "ACTIVE" else "INVESTIGATING"
     inv.max_depth = max(0, min(max_depth, MAX_GRAPH_DEPTH))
     incoming = collect_form_seeds(
         seeds,
@@ -911,6 +1004,26 @@ def graph_json(
     return JSONResponse(graph_payload(session, investigation_id))
 
 
+@router.post("/app/casos/{investigation_id}/grafo/layout")
+async def graph_layout_save(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> JSONResponse:
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"detail": "JSON inválido"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"detail": "JSON inválido"}, status_code=400)
+    require_csrf(request, str(data.get("csrf_token") or request.headers.get("x-csrf-token") or ""))
+    layout = save_graph_layout(session, investigation_id, data)
+    if layout is None:
+        return JSONResponse({"detail": "caso não encontrado"}, status_code=404)
+    return JSONResponse({"ok": True, "nodes": len(layout.get("nodes") or {})})
+
+
 @router.get("/app/casos/{investigation_id}/status")
 def job_status(
     investigation_id: str,
@@ -953,6 +1066,9 @@ def entity_page(
     if not entity:
         _set_flash(request, "error", "Entidade não encontrada neste caso.")
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    from osint4all.engines.intelligence import cross_case_hits
+    from osint4all.engines.knowledge import is_stale, versions_for
+    from osint4all.engines.verification import entity_pii
     edges = session.scalars(
         select(Edge).where(
             Edge.investigation_id == investigation_id,
@@ -1001,6 +1117,14 @@ def entity_page(
             "seed_q": seed_q,
             "partner_companies": partner_companies,
             "company_partners": company_partners,
+            "host_cards": _host_cards_for(session, investigation_id, entity),
+            "resolution": _resolution(entity),
+            "case_events": _case_events(session, investigation_id, entity.id),
+            "verdicts": (("confirmed", "Confirmado"), ("probable", "Provável"), ("unconfirmed", "Não confirmado"), ("contested", "Contestado"), ("false", "Falso")),
+            "versions": versions_for(session, entity.id),
+            "pii_class": entity_pii(entity),
+            "stale": is_stale(entity),
+            "cross_hits": [h for h in cross_case_hits(session, investigation_id) if h["key"] == entity.canonical_key],
         }
     )
     return templates.TemplateResponse(request, "app/entity.html", ctx)
@@ -1106,6 +1230,38 @@ def confirm_node(
     session.commit()
     _sync_expand(investigation_id)
     _set_flash(request, "ok", "Nó confirmado. A próxima camada pode expandir daqui.")
+    return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/entidades/{entity_id}/verificar")
+def verify_node(
+    investigation_id: str,
+    entity_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    verdict: str = Form("unconfirmed"),
+    reason: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    entity = session.scalar(select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id))
+    inv = session.get(Investigation, investigation_id)
+    if not entity or not inv:
+        _set_flash(request, "error", "Entidade não encontrada neste caso.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    from osint4all.quality.timeline import add_event
+    from osint4all.quality.verification import apply_verdict, verdict_label
+
+    apply_verdict(session, inv, entity, verdict=verdict, reason=reason, created_by=user.username)
+    add_event(session, inv, event_type="verdict", title=verdict_label(verdict), meta=reason[:400], entity_id=entity.id)
+    if verdict == "confirmed":
+        enqueue_expand(session, investigation=inv, entity=entity, depth=entity.depth, max_attempts=get_settings().job_max_attempts)
+    write_audit(session, "entity.verify", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id, "verdict": verdict})
+    session.commit()
+    if verdict == "confirmed":
+        _sync_expand(investigation_id)
+    _set_flash(request, "ok", f"Veredito: {verdict_label(verdict)}.")
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
 
@@ -1230,6 +1386,72 @@ def add_note(
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
+@router.post("/app/casos/{investigation_id}/tarefas")
+def add_task_route(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    title: str = Form(""),
+    body: str = Form(""),
+    assignee: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    from osint4all.quality.tasks import add_task
+    from osint4all.quality.timeline import add_event
+
+    add_task(session, inv, title=title, body=body, assignee=assignee or user.username, created_by=user.username)
+    add_event(session, inv, event_type="task", title=title or "Tarefa", meta=assignee or user.username)
+    write_audit(session, "task.add", username=user.username, investigation_id=inv.id, details={"title": title})
+    session.commit()
+    _set_flash(request, "ok", "Tarefa adicionada ao caso.")
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/tarefas/{task_id}/estado")
+def toggle_task_route(
+    investigation_id: str,
+    task_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    done: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    from osint4all.quality.tasks import set_task_status
+
+    row = set_task_status(session, investigation_id, task_id, done=done == "1")
+    if row:
+        write_audit(session, "task.toggle", username=user.username, investigation_id=investigation_id, details={"task_id": task_id, "done": done})
+        session.commit()
+        _set_flash(request, "ok", "Tarefa atualizada.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.get("/app/casos/{investigation_id}/evidencias/{evidence_id}/captura")
+def evidence_capture(
+    investigation_id: str,
+    evidence_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+):
+    ev = session.scalar(select(Evidence).where(Evidence.id == evidence_id, Evidence.investigation_id == investigation_id))
+    if not ev or not ev.raw_path:
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    from osint4all.quality.provenance import snapshot_abs
+
+    path = snapshot_abs(ev.raw_path)
+    if not path:
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    return FileResponse(path)
+
+
 @router.post("/app/casos/{investigation_id}/notas/{note_id}/apagar")
 def remove_note(
     investigation_id: str,
@@ -1292,7 +1514,25 @@ def edge_page(
     src = session.get(Entity, edge.from_entity_id)
     dst = session.get(Entity, edge.to_entity_id)
     ctx = template_context(request, user)
-    ctx.update({"nav": "casos", "inv": inv, "edge": edge, "src": src, "dst": dst, "rel_types": EDGE_REL_TYPES})
+    from osint4all.engines.knowledge import annotate_edge
+
+    why = annotate_edge(edge)
+    related = []
+    for ev in session.scalars(select(Evidence).where(Evidence.investigation_id == investigation_id)).all():
+        if ev.entity_id in {edge.from_entity_id, edge.to_entity_id}:
+            related.append(ev)
+    ctx.update(
+        {
+            "nav": "casos",
+            "inv": inv,
+            "edge": edge,
+            "src": src,
+            "dst": dst,
+            "rel_types": EDGE_REL_TYPES,
+            "why": why,
+            "edge_evidence": related[:12],
+        }
+    )
     return templates.TemplateResponse(request, "app/edge.html", ctx)
 
 
@@ -1306,9 +1546,11 @@ def edit_link(
     csrf_token: str = Form(""),
     rel_type: str = Form("RELACIONADO"),
     note: str = Form(""),
+    period: str = Form(""),
+    strength: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    edge = update_edge(session, investigation_id, edge_id, rel_type=rel_type, note=note)
+    edge = update_edge(session, investigation_id, edge_id, rel_type=rel_type, note=note, period=period, strength=strength)
     if edge:
         write_audit(session, "edge.edit", username=user.username, investigation_id=investigation_id, details={"rel": rel_type})
         session.commit()
@@ -1377,11 +1619,23 @@ def add_plate(
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
-_MAX_PDF_BYTES = 8 * 1024 * 1024
+_MAX_FILE_BYTES = 8 * 1024 * 1024
+_DOC_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png"}
+
+
+def _file_kind(name: str, data: bytes) -> str | None:
+    suffix = (name.rsplit(".", 1)[-1] if "." in name else "").lower()
+    if suffix == "pdf" or data.startswith(b"%PDF"):
+        return "pdf"
+    if suffix == "png" or data.startswith(b"\x89PNG"):
+        return "png"
+    if suffix in {"jpg", "jpeg"} or data.startswith(b"\xff\xd8"):
+        return "jpeg"
+    return None
 
 
 @router.post("/app/casos/{investigation_id}/documento")
-async def attach_pdf(
+async def attach_document(
     investigation_id: str,
     request: Request,
     user: User = Depends(current_user),
@@ -1395,17 +1649,18 @@ async def attach_pdf(
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app", status_code=303)
     name = arquivo.filename or "documento.pdf"
-    if not name.lower().endswith(".pdf"):
-        request.session["flash"] = {"level": "error", "message": "Envie um PDF público (máx. 8 MB)."}
+    suffix = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if suffix not in _DOC_SUFFIXES:
+        request.session["flash"] = {"level": "error", "message": "Envie PDF, JPEG ou PNG (máx. 8 MB)."}
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
-    data = await arquivo.read(_MAX_PDF_BYTES + 1)
-    if len(data) > _MAX_PDF_BYTES:
-        request.session["flash"] = {"level": "error", "message": "PDF acima de 8 MB."}
+    data = await arquivo.read(_MAX_FILE_BYTES + 1)
+    if len(data) > _MAX_FILE_BYTES:
+        request.session["flash"] = {"level": "error", "message": "Arquivo acima de 8 MB."}
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
-    if not data.startswith(b"%PDF"):
-        request.session["flash"] = {"level": "error", "message": "Arquivo não parece um PDF."}
+    if not _file_kind(name, data):
+        request.session["flash"] = {"level": "error", "message": "Arquivo não parece PDF, JPEG ou PNG."}
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
-    entity = ingest_local_pdf(session, inv, filename=name, data=data)
+    entity = ingest_local_file(session, inv, filename=name, data=data)
     write_audit(
         session,
         "document.attach",
@@ -1415,6 +1670,94 @@ async def attach_pdf(
     )
     request.session["flash"] = {"level": "ok", "message": f"Metadados extraídos de {name}."}
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity.id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/hosts-import")
+async def import_host_intel(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    arquivo: UploadFile = File(...),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
+        return RedirectResponse("/app", status_code=303)
+    name = arquivo.filename or "hosts.json"
+    if not name.lower().endswith(".json"):
+        request.session["flash"] = {"level": "error", "message": "Envie um JSON de hosts já coletados."}
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    data = await arquivo.read(_MAX_FILE_BYTES + 1)
+    if len(data) > _MAX_FILE_BYTES:
+        request.session["flash"] = {"level": "error", "message": "JSON acima de 8 MB."}
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    from osint4all.connectors.base import ConnectorResult, FoundEdge, FoundEntity, FoundEvidence
+    from osint4all.graph.resolve import apply_result
+    from osint4all.identifiers import canonical_key
+    from osint4all.intel.hosts import parse_imported_host_rows
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        request.session["flash"] = {"level": "error", "message": "JSON inválido."}
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    rows = parse_imported_host_rows(text)
+    if not rows:
+        request.session["flash"] = {
+            "level": "error",
+            "message": "Nenhum hostname público no arquivo. Linhas só com IP de varredura são ignoradas.",
+        }
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    origin = next((e for e in inv.entities if e.is_seed), None) or (inv.entities[0] if inv.entities else None)
+    if origin is None:
+        request.session["flash"] = {"level": "error", "message": "O caso precisa de uma semente antes de importar hosts."}
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    result = ConnectorResult()
+    for obs in rows:
+        url = f"https://{obs.host}"
+        found = FoundEntity(
+            entity_type="PROFILE",
+            kind="URL",
+            value=url,
+            display_name=obs.host,
+            attrs={"host": obs.host, "fonte": "import", "origin": "import"},
+            confidence=0.4,
+        )
+        result.entities.append(found)
+        ref = canonical_key("URL", url)
+        result.edges.append(FoundEdge(from_ref=origin.canonical_key, to_ref=ref, rel_type="MENCAO", confidence=0.4, attrs={"fonte": "import"}))
+        result.evidence.append(
+            FoundEvidence(
+                source_label="Host importado",
+                url=url,
+                snippet=obs.snippet or obs.host,
+                payload={
+                    "host": obs.host,
+                    "ip": obs.ip,
+                    "port": obs.port,
+                    "status": obs.status,
+                    "title": obs.title,
+                    "tech": obs.tech,
+                    "origin": "import",
+                    "fonte": obs.source or "import",
+                },
+                entity_ref=ref,
+            )
+        )
+    apply_result(session, inv, origin, result, connector="host_import", depth=origin.depth or 0, enqueue_children=False, max_attempts=1)
+    write_audit(
+        session,
+        "host.import",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"filename": name, "hosts": len(rows)},
+    )
+    session.commit()
+    request.session["flash"] = {"level": "ok", "message": f"{len(rows)} host(s) indexados no caso. Sem scan."}
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
 @router.get("/app/casos/{investigation_id}/relatorio", response_class=HTMLResponse)
@@ -1503,16 +1846,40 @@ def admin_page(
 ) -> HTMLResponse:
     audits = session.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(40)).all()
     jobs = session.scalars(select(ExpansionJob).order_by(desc(ExpansionJob.created_at)).limit(30)).all()
+    health = connector_health()
+    from osint4all.quality.health import latest_health
+
     ctx = template_context(request, user)
     ctx.update(
         {
             "nav": "admin",
-            "health": connector_health(),
+            "health": health,
+            "sources": source_cards(health_rows=health),
+            "oss_tools": oss_cards(),
             "audits": audits,
             "jobs": jobs,
+            "source_health": latest_health(session),
         }
     )
     return templates.TemplateResponse(request, "app/admin.html", ctx)
+
+
+@router.post("/app/admin/saude")
+def probe_source_health(
+    request: Request,
+    user: User = Depends(require_admin),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    from osint4all.quality.health import probe_sources
+
+    rows = probe_sources(session)
+    write_audit(session, "source.health", username=user.username, details={"n": len(rows)})
+    session.commit()
+    failed = sum(1 for row in rows if not row.ok)
+    _set_flash(request, "ok" if not failed else "error", f"Saúde das fontes: {len(rows) - failed} ok, {failed} com alerta.")
+    return RedirectResponse("/app/admin", status_code=303)
 
 
 @router.get("/app/manual", response_class=HTMLResponse)

@@ -21,10 +21,29 @@ Uso previsto: jornalismo investigativo. Não consulta DETRAN, cartório, operado
 - Expansão por profundidade (sócios → outras empresas → menções)
 - DJEN e DataJud como conectores de processo/publicação
 - TSE, Transparência, OpenCorporates, Wikidata, busca web (SearXNG público, Brave ou Google CSE) e checagem de URL pública
-- Relatório HTML/PDF e monitoramento das sementes no cron
+- Relatório HTML/PDF com citações `[n]`, hash, finalidade e responsável
+- Qualidade de evidência: provenance, resolução de entidade, timeline, tarefas, veredito e saúde das fontes
+- Segunda geração: playbooks, hipóteses, gap analysis, caminho no grafo, clusters, memória entre casos e nota de qualidade do dossiê
 - Mapa de ferramentas no modelo do [OSINT Framework](https://osintframework.com/) (árvore expansível + ramo Brasil / [OSINT Brazuca](https://github.com/osintbrazuca/osint-brazuca))
 - Anexo de PDF na investigação para ler metadados (estilo FOCA, só o arquivo que você envia)
 - Auditoria de quem buscou o quê
+
+O que diferencia o dossiê de uma lista de conectores é responder: de onde veio o dado, quando foi coletado, qual a confiança, o que contradiz e como reproduzir a conclusão.
+
+| Camada | No painel |
+|---|---|
+| Provenance | Fonte, URL, método, HTTP, timestamp, hash e captura |
+| Entity resolution | Score por âncora (CPF/CNPJ/e-mail) vs nome |
+| Evidence graph | Entidades + vínculos + evidências no grafo |
+| Timeline | Eventos persistidos no Quadro e na ficha |
+| Case management | Casos, notas, tarefas e responsável |
+| Verification | Confirmado / provável / não confirmado / contestado / falso |
+| Snapshot | HTML do host conhecido em `data/captures/` |
+| Change detection | “O que mudou” no Quadro e no monitor |
+| AI analyst | Síntese só com citações `[n]` |
+| Source health | Fontes → Checar agora (`health()`, sem scan) |
+| Legal/privacy | Finalidade, classificação, retenção (sem apagar sozinho) |
+| Reports | HTML/PDF com capa, veredito, tarefas e anexos |
 
 ## Instalação
 
@@ -69,6 +88,19 @@ pytest -q
 | `web_search` | não (SearXNG) | instâncias públicas; opcional Brave / Google CSE / `SEARXNG_URL` |
 | `username_public` | não | GET em URL canônica pública (GitHub, X, YouTube…) |
 | `crtsh` | não | nomes em certificados públicos ([crt.sh](https://crt.sh/)) |
+| `plate_public` | não | placa em menção pública; sem DETRAN |
+| `socio_search` | `BRASIL_IO_API_TOKEN` opcional | QSA por nome; CPF só com token |
+| `diario_oficial` | não | Querido Diário (município/estado) |
+| `geo_public` | não | ViaCEP + Nominatim no endereço do QSA |
+| `rdap_public` | não | titular público do domínio (não Gmail) |
+| `shodan_public` | `SHODAN_API_KEY` | API oficial: hostname/org. Sem scrape, sem CVE |
+| `host_public` | não | Wayback / HackerTarget / urlscan (estilo theHarvester) |
+| `email_public` | não | Keybase + Gravatar (estilo Holehe, sem leak) |
+| `phone_public` | não | DDD/cidade ANATEL (estilo PhoneInfoga, sem operadora) |
+| `aleph_public` | não | API pública Aleph/OCCRP. Sem CPF |
+| `censys_public` | `CENSYS_API_ID` + `CENSYS_API_SECRET` | Search API oficial. Sem FOFA scrape |
+| `host_observe` | não | Ficha do host já conhecido: status, título, tech, security.txt, links do domínio. Índice local estilo IVRE |
+| `google_public` | não | Scholar / News / Maps / YouTube públicos. Sem cookie GHunt |
 
 ## Mapa de ferramentas
 
@@ -80,13 +112,29 @@ pytest -q
 |---|---|
 | [OSINT Brazuca](https://github.com/osintbrazuca/osint-brazuca) | Portais oficiais/públicos no mapa (CNJ, TSE, CNA, CEIS, Jucesp…). Sem CPF por força bruta nem captcha. |
 | [user-scanner](https://github.com/kaifcodec/user-scanner) | Mais templates de URL pública no conector `username_public`. Sem módulos de breach / Hudson Rock. |
-| [SpiderFoot](https://github.com/smicallef/spiderfoot) | Modelo de conectores + `crtsh`. Link T no mapa. |
-| [FOCA](https://github.com/ElevenPaths/FOCA) | Metadados do PDF **anexado** no caso. Sem varrer Google atrás de documentos. |
+| [FOCA](https://github.com/ElevenPaths/FOCA) / [ExifTool](https://github.com/exiftool/exiftool) | Metadados do PDF/JPEG/PNG **anexado** no caso. Sem varrer a web. |
 | [Mr.Holmes](https://github.com/Lucksi/Mr.Holmes) | Só link T (instale localmente). |
 | [awesome-osint-arsenal](https://github.com/rawfilejson/awesome-osint-arsenal) | Mesma ideia de catálogo; não instalamos o script de red team. |
 | [Babel Street](https://www.babelstreet.com/solutions/strategic-threat-intelligence) | Só referência de UX (grafo + monitoramento). Sem telemetria móvel. |
 | [Toutatis](https://github.com/megadose/toutatis), [yesitsme](https://github.com/0x0be/yesitsme) | **Não.** Exigem `sessionid` do Instagram. |
 | [DarkSearch](https://github.com/DarkSearchApp/DarkSearch), [dark-web-osint-tools](https://github.com/apurvsinghgautam/dark-web-osint-tools), [IntelX](https://intelx.io/) | **Não.** Dark web / leaks. |
+| [ShodanSpider](https://github.com/shubhamrooter/ShodanSpider) | **Não o script.** Raspa o HTML e busca CVE. Só a [API oficial](https://developer.shodan.io/api) com `SHODAN_API_KEY`. |
+| [SpiderFoot](https://github.com/smicallef/spiderfoot) | Modelo de conectores + massa + crt.sh. Sem o daemon. |
+| [LinkScope](https://github.com/AccentuSoft/LinkScope_Client) | Equivale ao grafo Rede/Árvore/Split. Sem o desktop. |
+| [Recon-ng](https://github.com/lanmaster53/recon-ng) | Equivale aos conectores + Explodir. Sem o CLI. |
+| [theHarvester](https://github.com/laramies/theHarvester) / [Amass](https://github.com/owasp-amass/amass) / [Subfinder](https://github.com/projectdiscovery/subfinder) | Conector `host_public` (índices passivos). Sem brute de DNS. |
+| [Sherlock](https://github.com/sherlock-project/sherlock) / [Maigret](https://github.com/soxoj/maigret) | Ferramenta Redes sociais (URL canônica + templates extras). |
+| [Holehe](https://github.com/megadose/holehe) | Keybase + Gravatar. Sem HIBP e sem lista de leak. |
+| [PhoneInfoga](https://github.com/sundowndev/phoneinfoga) | DDD, cidade e tipo. Sem operadora. |
+| [Aleph](https://github.com/alephdata/aleph) | API pública OCCRP. Sem self-host. |
+| [Uncover](https://github.com/projectdiscovery/uncover) | Só Shodan/Censys com API oficial. Sem FOFA. |
+| [GHunt](https://github.com/mxrch/GHunt) | Scholar/News/Maps/YouTube públicos. Sem cookie. |
+| [Photon](https://github.com/s0md3v/Photon) | Até 8 links da homepage de um domínio já no caso. Sem crawl profundo. |
+| [httpx](https://github.com/projectdiscovery/httpx) | Um GET HTTPS no host conhecido: status, título, Server. Sem lista/porta. |
+| [Nuclei](https://github.com/projectdiscovery/nuclei) | Só security.txt e sitemap. Sem CVE/DAST. |
+| [IVRE](https://github.com/ivre/ivre) | Índice local (histórico + correlação) das fichas permitidas. Não dispara scan. |
+| [ZGrab2](https://github.com/zmap/zgrab2) / [Masscan](https://github.com/robertdavidgraham/masscan) | Parser de JSON importado com hostname. Sem coleta ativa. |
+| [ZMap](https://github.com/zmap/zmap) | **Não.** Internet-wide scanning. |
 
 ## Docker
 
@@ -111,7 +159,7 @@ Mantenha o projeto que já tem Postgres e o domínio. Não crie outro.
 | `UI_SESSION_SECRET` | string longa (não deixe `change-me-ui-session-secret`) |
 | `EXPAND_SYNC` | `true` |
 
-Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `SEARXNG_URL`, `SEARXNG_INSTANCES`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `BRASIL_IO_API_TOKEN`. Menções web usam SearXNG público sem chave; `SEARXNG_URL` aponta a sua instância.
+Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `SEARXNG_URL`, `SEARXNG_INSTANCES`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `BRASIL_IO_API_TOKEN`, `SHODAN_API_KEY`, `CENSYS_API_ID`, `CENSYS_API_SECRET`. Menções web usam SearXNG público sem chave; `SEARXNG_URL` aponta a sua instância.
 
 5. Custom Start Command: `python -m osint4all.main serve --host 0.0.0.0` (sem `--port 8000`; o app usa `$PORT` e também escuta 8000 para o domínio antigo).
 6. Em **Settings → Networking**, no domínio `authenticadm.org`, a porta-alvo deve ser **8000** ou **8080** (as duas funcionam). Se o site mostrar "Application failed to respond" com healthcheck verde, mude essa porta para a mesma do log `serve host=0.0.0.0 port=...`.

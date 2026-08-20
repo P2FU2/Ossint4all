@@ -81,22 +81,39 @@ def session_scope(database_url: str | None = None) -> Iterator[Session]:
 def _ensure_legacy_columns(engine: Engine) -> None:
     """O Postgres do Railway ainda tem o schema do Script_Jus — só completa o que falta."""
     from sqlalchemy import inspect, text
+    from sqlalchemy.exc import OperationalError
 
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
-    if "audit_log" not in tables:
-        return
-    cols = {c["name"] for c in inspector.get_columns("audit_log")}
     dialect = engine.dialect.name
     statements: list[str] = []
-    if "username" not in cols:
-        statements.append("ALTER TABLE audit_log ADD COLUMN username VARCHAR(80)")
-    if "investigation_id" not in cols:
-        statements.append("ALTER TABLE audit_log ADD COLUMN investigation_id VARCHAR(36)")
+
+    def add_col(table: str, name: str, ddl: str) -> None:
+        if table not in tables:
+            return
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if name not in cols:
+            statements.append(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+    if "audit_log" in tables:
+        add_col("audit_log", "username", "VARCHAR(80)")
+        add_col("audit_log", "investigation_id", "VARCHAR(36)")
+    if "investigations" in tables:
+        add_col("investigations", "purpose", "TEXT")
+        add_col("investigations", "assignee", "VARCHAR(80)")
+        add_col("investigations", "classification", "VARCHAR(32) DEFAULT 'interno'")
+        add_col("investigations", "retain_until", "TIMESTAMP")
+        add_col("investigations", "playbook_key", "VARCHAR(32)")
+        add_col("investigations", "workflow", "VARCHAR(32) DEFAULT 'INVESTIGATING'")
+        add_col("investigations", "retention_days", "INTEGER")
+        add_col("investigations", "graph_layout", "JSON")
+    if "evidence" in tables:
+        add_col("evidence", "method", "VARCHAR(16)")
+        add_col("evidence", "http_status", "INTEGER")
+        add_col("evidence", "content_sha256", "VARCHAR(64)")
+        add_col("evidence", "raw_path", "VARCHAR(512)")
     if not statements:
         return
-    from sqlalchemy.exc import OperationalError
-
     with engine.begin() as conn:
         for sql in statements:
             try:

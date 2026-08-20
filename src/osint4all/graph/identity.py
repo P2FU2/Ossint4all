@@ -36,7 +36,9 @@ def entity_status(obj: FoundEntity | Entity | dict[str, Any] | None) -> str:
         return "confirmed"
     attrs = obj if isinstance(obj, dict) else getattr(obj, "attrs", None) or {}
     status = str(attrs.get("status") or "").strip().lower()
-    if status in {"unconfirmed", "confirmed", "rejected"}:
+    if status == "rejected":
+        return "false"
+    if status in {"unconfirmed", "confirmed", "rejected", "probable", "contested", "false"}:
         return status
     if getattr(obj, "kind", None) == "NAME" and attrs.get("documento_ausente"):
         return "unconfirmed"
@@ -78,6 +80,12 @@ def should_enqueue_child(found: FoundEntity, entity: Entity) -> bool:
     found_type = str(getattr(found, "entity_type", "") or "")
     entity_type = str(getattr(entity, "entity_type", "") or "")
     if found_type == "PROFILE" or entity_type == "PROFILE":
+        return False
+    if found_type == "PUBLICATION" or entity_type == "PUBLICATION":
+        return False
+    if entity_status(found) in {"false", "rejected", "contested"}:
+        return False
+    if entity_status(entity) in {"false", "rejected", "contested"}:
         return False
     if has_expandable_anchor(found) or has_expandable_anchor(entity):
         return True

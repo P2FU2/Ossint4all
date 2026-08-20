@@ -26,6 +26,21 @@ def test_consult_tools_assign_edit(settings) -> None:
     )
     assert logged.status_code == 200
     assert "scan_target" in logged.text.lower()
+    fontes = client.get("/app/admin")
+    assert fontes.status_code == 200
+    assert "Diários oficiais" in fontes.text
+    assert "RDAP" in fontes.text
+    assert "Shodan" in fontes.text
+    assert "Nuclei" in fontes.text
+    assert "theHarvester" in fontes.text
+    assert "Maigret" in fontes.text
+    assert "Aleph" in fontes.text
+    assert "PhoneInfoga" in fontes.text
+    assert "ExifTool" in fontes.text
+    assert "E-mail · serviços públicos" in fontes.text
+    assert "Ficha de host" in fontes.text
+    assert "IVRE" in fontes.text
+    assert "Dispara em" in fontes.text
     assert "Negativa" in logged.text
     assert "Imóvel" in logged.text
     assert "Diário" in logged.text
@@ -94,6 +109,8 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Editar" in created.text
     assert "Buscar" in created.text
     assert "Explodir QSA" in created.text
+    assert "canvas-tools" in created.text
+    assert "ct-dots" in created.text
 
     token = _csrf(created.text)
     edited = client.post(
@@ -145,6 +162,10 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert 'href="/app/manual"' in manual.text
     assert "Explodir QSA" in manual.text
     assert "Detectar" in manual.text
+    assert "Cinco motores" in manual.text
+    assert "Investigar" in manual.text
+    assert "Playbooks" in manual.text
+    assert "/api/v1" in manual.text
 
     case_id = created.url.path.split("/")[3]
     token = _csrf(client.get("/app/casos").text)

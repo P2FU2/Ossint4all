@@ -78,6 +78,20 @@ class Settings(BaseSettings):
     plate_public_enable: bool = True
     socio_search_enable: bool = True
     brasil_io_api_token: str = ""
+    diario_oficial_enable: bool = True
+    geo_public_enable: bool = True
+    rdap_public_enable: bool = True
+    shodan_enable: bool = True
+    shodan_api_key: str = ""
+    host_public_enable: bool = True
+    email_public_enable: bool = True
+    phone_public_enable: bool = True
+    aleph_public_enable: bool = True
+    censys_enable: bool = True
+    censys_api_id: str = ""
+    censys_api_secret: str = ""
+    host_observe_enable: bool = True
+    google_public_enable: bool = True
 
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-4"
@@ -115,4 +129,15 @@ ALL_CONNECTORS = (
     "crtsh",
     "plate_public",
     "socio_search",
+    "diario_oficial",
+    "geo_public",
+    "rdap_public",
+    "shodan_public",
+    "host_public",
+    "email_public",
+    "phone_public",
+    "aleph_public",
+    "censys_public",
+    "host_observe",
+    "google_public",
 )
