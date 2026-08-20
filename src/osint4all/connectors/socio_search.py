@@ -146,6 +146,17 @@ class SocioSearchConnector:
             default_headers={"Accept": "application/json", "User-Agent": "osint4all/0.1 (investigative journalism)"},
         )
 
+    def collect_by_cpf(self, cpf: str, origin_key: str) -> ConnectorResult:
+        """Empresas do quadro societário público ligadas a um CPF."""
+        digits = only_digits(cpf)
+        if len(digits) != 11:
+            return ConnectorResult()
+        result = ConnectorResult()
+        result.merge(self._casadosdados_cpf(digits, origin_key))
+        if self.settings.brasil_io_api_token:
+            result.merge(self._brasil_io_cpf(digits, origin_key))
+        return result
+
     def health(self) -> dict[str, Any]:
         return {
             "source": self.name,
@@ -205,6 +216,73 @@ class SocioSearchConnector:
             origin_key=origin,
             source_label="Receita Federal (índice público Casa dos Dados)",
             source_url="https://casadosdados.com.br/",
+        )
+
+    def _casadosdados_cpf(self, digits: str, origin: str) -> ConnectorResult:
+        payloads = (
+            {"cpf": [digits], "limite": 20, "pagina": 1},
+            {"cpf_socio": [digits], "limite": 20, "pagina": 1},
+            {
+                "busca_textual": [
+                    {
+                        "texto": [digits],
+                        "tipo_busca": "exata",
+                        "razao_social": False,
+                        "nome_fantasia": False,
+                        "nome_socio": True,
+                    }
+                ],
+                "limite": 20,
+                "pagina": 1,
+            },
+        )
+        for payload in payloads:
+            try:
+                resp = self.http.request(
+                    "POST",
+                    "https://api.casadosdados.com.br/v5/public/cnpj/pesquisa",
+                    json=payload,
+                )
+            except Exception:
+                continue
+            if resp.status_code >= 400:
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                continue
+            rows = _walk_cnpj_rows(data)
+            if not rows:
+                continue
+            return parse_socio_hits(
+                rows,
+                origin_key=origin,
+                source_label="Receita Federal (índice público Casa dos Dados · CPF)",
+                source_url="https://casadosdados.com.br/",
+            )
+        return ConnectorResult()
+
+    def _brasil_io_cpf(self, digits: str, origin: str) -> ConnectorResult:
+        try:
+            resp = self.http.request(
+                "GET",
+                "https://api.brasil.io/v1/dataset/socios-brasil/socios/data/",
+                headers={"Authorization": f"Token {self.settings.brasil_io_api_token}"},
+                params={"cnpj_cpf_do_socio": digits, "page_size": 20},
+            )
+        except Exception:
+            return ConnectorResult()
+        if resp.status_code >= 400:
+            return ConnectorResult(notes=[f"Brasil.IO HTTP {resp.status_code}"])
+        data = resp.json()
+        rows = data.get("results") if isinstance(data, dict) else data
+        if not isinstance(rows, list):
+            rows = []
+        return parse_socio_hits(
+            rows,
+            origin_key=origin,
+            source_label="Receita Federal (Brasil.IO / sócios · CPF)",
+            source_url="https://brasil.io/dataset/socios-brasil/socios/",
         )
 
     def _brasil_io(self, name: str, origin: str) -> ConnectorResult:

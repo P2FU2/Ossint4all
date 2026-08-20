@@ -25,7 +25,7 @@ def test_consult_tools_assign_edit(settings) -> None:
         follow_redirects=True,
     )
     assert logged.status_code == 200
-    assert "o que você quer saber" in logged.text.lower()
+    assert "scan_target" in logged.text.lower()
 
     token = _csrf(logged.text)
     plate = client.post("/app/consultar", data={"csrf_token": token, "q": "ABC1D23", "modo": "PLATE"})

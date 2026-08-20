@@ -9,6 +9,7 @@
   </header>
 
   {% if result.facts %}
+  <p class="section-kicker">fatos</p>
   <dl class="fact-grid">
     {% for label, value in result.facts %}
     <div>
@@ -19,7 +20,30 @@
   </dl>
   {% endif %}
 
+  {% if result.graph_payload %}
+  <p class="section-kicker">mapa de vínculos</p>
+  <div class="mini-graph" data-graph='{{ result.graph_payload | tojson }}' role="img" aria-label="Diagrama de entidades relacionadas"></div>
+  {% endif %}
+
+  {% if result.timeline %}
+  <p class="section-kicker">linha do tempo</p>
+  <ol class="timeline">
+    {% for ev in result.timeline %}
+    <li class="tl-{{ ev.kind }}">
+      {% if ev.when %}<span class="tl-when">{{ ev.when }}</span>{% endif %}
+      {% if ev.url %}
+      <a href="{{ ev.url }}" target="_blank" rel="noopener">{{ ev.title }}</a>
+      {% else %}
+      <strong>{{ ev.title }}</strong>
+      {% endif %}
+      {% if ev.meta %}<span class="muted">{{ ev.meta }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+
   {% if result.hits %}
+  <p class="section-kicker">fontes e hits</p>
   <ul class="hit-list">
     {% for hit in result.hits %}
     <li>
@@ -75,7 +99,7 @@
       {% endif %}
       <button class="btn" type="submit" data-tip="Cria um caso novo só com este resultado">Novo caso</button>
     </form>
-    <a class="btn" href="/app/ferramentas?tool={% if result.kind == 'USERNAME' %}username{% elif result.kind == 'PLATE' %}plate{% elif result.kind == 'PHONE' %}phone{% elif result.kind == 'CNPJ' %}cnpj{% else %}massa{% endif %}&amp;q={{ result.query|urlencode }}" data-tip="Abre a suíte embutida neste tipo">Ferramentas</a>
+    <a class="btn" href="/app/ferramentas?tool={% if result.kind == 'USERNAME' %}username{% elif result.kind == 'PLATE' %}plate{% elif result.kind == 'PHONE' %}phone{% elif result.kind == 'CNPJ' %}cnpj{% elif result.kind == 'EMAIL' %}email{% elif result.kind == 'CPF' %}cpf{% else %}massa{% endif %}&amp;q={{ result.query|urlencode }}" data-tip="Abre a suíte embutida neste tipo">Ferramentas</a>
     <a class="btn ghost" href="/app?modo={{ result.kind }}" data-tip="Nova consulta do mesmo tipo">Outra consulta</a>
   </footer>
 </article>

@@ -10,9 +10,9 @@
   </ol>
 
   <section class="consult-hero">
-    <p class="eyebrow" data-tip="Consulta pontual. Não cria caso até você clicar em Guardar.">Consulta avulsa</p>
-    <h1>O que você quer saber agora?</h1>
-    <p class="lede">Placa, rede social, telefone, sócio, CNPJ, processo. Resultado na hora. O grafo só nasce se você guardar.</p>
+    <p class="eyebrow" data-tip="Consulta pontual. Não cria caso até você clicar em Guardar.">shell de consulta</p>
+    <h1>scan_target</h1>
+    <p class="lede">E-mail vira linha do tempo de redes. CPF cruza QSA e listas. CNPJ desenha empresas ligadas. Placa traz série, veículo e dono só se a menção for pública.</p>
   </section>
 
   <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="button[type=submit]">
@@ -29,14 +29,14 @@
     <div class="consult-bar">
       <label class="sr-only" for="q">Identificador</label>
       <input id="q" name="q" autofocus autocomplete="off" value="{{ q or '' }}" placeholder="ABC1D23, @jornalista, nome do sócio…" data-tip="Cole o valor e Enter. Em Detectar, o tipo é reconhecido sozinho. Atalho: /" />
-      <button class="btn primary" type="submit" data-tip="Consulta só a fonte pública deste tipo. Sem criar caso.">Consultar</button>
+      <button class="btn primary" type="submit" data-tip="Consulta só a fonte pública deste tipo. Sem criar caso.">exec</button>
     </div>
     <p id="consult-hint" class="consult-hint">Enter consulta · / foca o campo · Guardar é opcional</p>
   </form>
 
   <div id="consult-wait" class="htmx-indicator consult-wait" role="status">
     <span class="spinner" aria-hidden="true"></span>
-    Consultando fontes públicas…
+    varrendo nós públicos…
   </div>
   <div id="consult-result" class="consult-result" aria-live="polite">
     {% if mass %}
@@ -45,12 +45,12 @@
     {% include "app/consult_result.html" %}
     {% else %}
     <div class="consult-empty">
-      <p class="consult-empty-kicker">Fluxo</p>
+      <p class="consult-empty-kicker">playbook</p>
       <ol class="empty-steps">
-        <li><strong>Escolha o tipo</strong> — ou deixe em Detectar.</li>
-        <li><strong>Digite o valor</strong> — placa, @user, telefone, nome…</li>
-        <li><strong>Leia o resultado</strong> — fatos, fontes e o que não dá para saber.</li>
-        <li><strong>Guarde só se precisar</strong> — aí sim nasce o grafo do caso.</li>
+        <li><strong>tipo</strong> — Detectar, ou force e-mail / CPF / CNPJ / placa.</li>
+        <li><strong>payload</strong> — um identificador. Enter dispara o scan.</li>
+        <li><strong>dump</strong> — linha do tempo, mapa de vínculos e o que a fonte não entrega.</li>
+        <li><strong>persist</strong> — só então o caso e o grafo nascem.</li>
       </ol>
     </div>
     {% endif %}

@@ -24,6 +24,21 @@
       {% endfor %}
     </dl>
     {% endif %}
+    {% if part.graph_payload %}
+    <div class="mini-graph" data-graph='{{ part.graph_payload | tojson }}'></div>
+    {% endif %}
+    {% if part.timeline %}
+    <ol class="timeline">
+      {% for ev in part.timeline %}
+      <li class="tl-{{ ev.kind }}">
+        {% if ev.when %}<span class="tl-when">{{ ev.when }}</span>{% endif %}
+        {% if ev.url %}<a href="{{ ev.url }}" target="_blank" rel="noopener">{{ ev.title }}</a>
+        {% else %}<strong>{{ ev.title }}</strong>{% endif %}
+        {% if ev.meta %}<span class="muted">{{ ev.meta }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
     {% if part.hits %}
     <ul class="hit-list">
       {% for hit in part.hits %}

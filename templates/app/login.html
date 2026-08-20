@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Entrar · OSINT4ALL</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v=5" />
 </head>
 <body class="login-page">
   <form class="login-card" method="post" action="/login">
     <div class="brand-mark">OSINT4ALL</div>
-    <p class="lede">Consulta primeiro. Grafo só se você guardar.</p>
+    <p class="lede">acesso autorizado · consulta primeiro · grafo só se guardar</p>
     {% if flash %}
     <div class="flash {{ flash.level }}">{{ flash.message }}</div>
     {% endif %}
@@ -21,7 +21,7 @@
     <label>Senha
       <input name="password" type="password" autocomplete="current-password" required />
     </label>
-    <button class="btn primary" type="submit">Entrar</button>
+    <button class="btn primary" type="submit">auth --login</button>
     <p class="fine">Jornalismo investigativo. Sem DETRAN de dono, sem vazamentos, sem perfil privado.</p>
   </form>
 </body>

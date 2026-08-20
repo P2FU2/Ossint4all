@@ -120,5 +120,86 @@ document.addEventListener("submit", (event) => {
         next.classList.add("is-now");
       }
     }
+    window.renderConsultGraphs(event.detail && event.detail.target);
   });
+})();
+
+(function consultGraphs() {
+  const KIND_COLOR = {
+    org: "#ffe14a",
+    person: "#5eead4",
+    profile: "#b8ff57",
+    vehicle: "#00ff9c",
+    email: "#5eead4",
+    owner: "#ff5c7a",
+  };
+
+  function draw(el) {
+    const raw = el.getAttribute("data-graph");
+    if (!raw) return;
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (_) {
+      return;
+    }
+    const nodes = data.nodes || [];
+    const edges = data.edges || [];
+    if (!nodes.length) return;
+    const w = el.clientWidth || 640;
+    const h = el.clientHeight || 320;
+    const cx = w / 2;
+    const cy = h / 2;
+    const radius = Math.max(70, Math.min(w, h) / 2 - 48);
+    const pos = {};
+    nodes.forEach((node, idx) => {
+      if (idx === 0) {
+        pos[node.id] = { x: cx, y: cy };
+        return;
+      }
+      const angle = ((idx - 1) / Math.max(nodes.length - 1, 1)) * Math.PI * 2 - Math.PI / 2;
+      pos[node.id] = { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
+    });
+    const lines = edges
+      .map((edge) => {
+        const a = pos[edge.source];
+        const b = pos[edge.target];
+        if (!a || !b) return "";
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="rgba(0,255,156,0.35)" />` +
+          (edge.label ? `<text x="${mx}" y="${my - 6}" fill="#5f8f6e" font-size="9" text-anchor="middle">${escapeXml(edge.label)}</text>` : "");
+      })
+      .join("");
+    const dots = nodes
+      .map((node) => {
+        const p = pos[node.id];
+        if (!p) return "";
+        const fill = KIND_COLOR[node.kind] || "#00ff9c";
+        const label = String(node.label || node.id).slice(0, 28);
+        return `<circle cx="${p.x}" cy="${p.y}" r="${node === nodes[0] ? 10 : 7}" fill="${fill}" stroke="#020604" stroke-width="2" />` +
+          `<text x="${p.x}" y="${p.y + 22}" fill="#c8ffd4" font-size="10" text-anchor="middle">${escapeXml(label)}</text>`;
+      })
+      .join("");
+    el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="presentation">${lines}${dots}</svg>`;
+  }
+
+  function escapeXml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  window.renderConsultGraphs = (root) => {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll("[data-graph]").forEach(draw);
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => window.renderConsultGraphs(document));
+  } else {
+    window.renderConsultGraphs(document);
+  }
 })();

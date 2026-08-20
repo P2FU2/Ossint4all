@@ -3,13 +3,13 @@
   if (!root || typeof cytoscape === "undefined") return;
 
   const colors = {
-    PERSON: "#5b8def",
-    ORG: "#e8b84a",
-    CASE: "#c45c5c",
-    PROFILE: "#7c6bff",
-    ASSET: "#3db88a",
-    VEHICLE: "#3db88a",
-    PUBLICATION: "#9aa3b2",
+    PERSON: "#5eead4",
+    ORG: "#ffe14a",
+    CASE: "#ff5c7a",
+    PROFILE: "#b8ff57",
+    ASSET: "#00ff9c",
+    VEHICLE: "#00ff9c",
+    PUBLICATION: "#7aa88a",
   };
 
   const UF_CENTER = {
@@ -44,13 +44,14 @@
         selector: "node",
         style: {
           label: "data(label)",
-          color: "#e8e4d9",
+          color: "#c8ffd4",
           "font-size": 10,
+          "font-family": "IBM Plex Mono, monospace",
           "text-wrap": "ellipsis",
           "text-max-width": 110,
-          "background-color": "#5b8def",
+          "background-color": "#5eead4",
           "border-width": 2,
-          "border-color": "#0c0e12",
+          "border-color": "#00ff9c",
           width: 28,
           height: 28,
         },
@@ -61,18 +62,18 @@
       { selector: 'node[type = "ASSET"]', style: { "background-color": colors.ASSET } },
       { selector: 'node[type = "VEHICLE"]', style: { "background-color": colors.VEHICLE } },
       { selector: 'node[type = "PUBLICATION"]', style: { "background-color": colors.PUBLICATION } },
-      { selector: "node[?seed]", style: { width: 36, height: 36, "border-color": "#e8b84a", "border-width": 3 } },
+      { selector: "node[?seed]", style: { width: 36, height: 36, "border-color": "#00ff9c", "border-width": 3 } },
       {
         selector: "edge",
         style: {
           width: 1.2,
-          "line-color": "rgba(232,228,217,0.28)",
-          "target-arrow-color": "rgba(232,228,217,0.28)",
+          "line-color": "rgba(0,255,156,0.28)",
+          "target-arrow-color": "rgba(0,255,156,0.28)",
           "target-arrow-shape": "triangle",
           "curve-style": "bezier",
           label: "data(label)",
           "font-size": 8,
-          color: "#9aa3b2",
+          color: "#5f8f6e",
         },
       },
     ],

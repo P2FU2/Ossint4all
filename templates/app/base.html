@@ -6,9 +6,9 @@
   <title>{% block title %}{{ app_name }}{% endblock %} · {{ brand }}</title>
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/app.css?v=4" />
+  <link rel="stylesheet" href="/static/app.css?v=5" />
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="/static/app.js?v=4" defer></script>
+  <script src="/static/app.js?v=5" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -16,7 +16,7 @@
     <aside class="sidebar">
       <a class="brand" href="/app" data-tip="Volta para a consulta rápida — sem abrir caso">
         {{ brand }}
-        <small>Fontes públicas</small>
+        <small>root · fontes públicas</small>
       </a>
       <nav>
         <p class="nav-section">Fluxo</p>
