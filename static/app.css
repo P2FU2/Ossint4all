@@ -237,6 +237,22 @@ h1 { margin: 0 0 8px; text-shadow: var(--glow); }
   margin-bottom: 22px;
 }
 .graph-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.case-title-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-shadow: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.case-title-btn:hover,
+.case-title-btn:focus-visible { color: var(--gold); }
 .kpi, .pill {
   border: 1px solid var(--line);
   border-radius: 2px;
@@ -920,10 +936,13 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 }
 .graph-stage { position: relative; flex: 1; min-height: 560px; display: flex; border-top: 1px solid var(--line); overflow: hidden; }
 .graph-balloon {
-  position: absolute;
-  z-index: 40;
-  width: 228px;
-  max-width: min(86vw, 360px);
+  position: fixed;
+  z-index: 80;
+  width: 260px;
+  max-width: min(92vw, 380px);
+  max-height: min(70vh, 560px);
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 10px 12px;
   background: #04150d;
   border: 1px solid var(--gold);
@@ -940,7 +959,7 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   transform: none;
 }
 .graph-balloon.is-open {
-  width: 328px;
+  width: min(360px, calc(100vw - 24px));
   padding: 14px 16px;
   box-shadow: var(--glow), var(--shadow);
 }
@@ -1341,12 +1360,20 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 
 .source-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  align-items: start;
   gap: 12px;
+  min-width: 0;
 }
 .source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  height: auto;
+  overflow: visible;
   border: 1px solid var(--line);
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   background: #04150d;
 }
 .source-card header {
@@ -1354,10 +1381,20 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   flex-wrap: wrap;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 8px;
+  margin: 0;
 }
-.source-card h3 { margin: 0; flex: 1; font-size: 0.95rem; }
-.source-card p { margin: 0 0 10px; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+.source-card h3 { margin: 0; flex: 1 1 8ch; min-width: 0; font-size: 0.95rem; overflow-wrap: anywhere; }
+.source-card p,
+.source-card a,
+.source-card code {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.source-card a { color: var(--gold); display: inline-block; max-width: 100%; }
 .source-card.is-pronta { border-color: rgba(0, 255, 156, 0.28); }
 .source-card.is-parcial { border-color: rgba(255, 225, 74, 0.35); }
 .source-card.is-precisa-chave { border-color: rgba(255, 225, 74, 0.45); }
@@ -1574,8 +1611,45 @@ body.inspect-open-body { overflow: hidden; }
 .manual-dl dt { color: var(--gold); font-family: var(--display); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.78rem; }
 .manual-dl dd { margin: 4px 0 0; max-width: 72ch; }
 
-.media-board { margin: 0 0 16px; }
-.media-slot { margin-top: 14px; }
+.media-board {
+  position: relative;
+  z-index: 2;
+  margin: 18px 0 0;
+  clear: both;
+}
+.media-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  margin: 12px 0 0;
+}
+.media-toolbar .muted { margin: 0; max-width: 52ch; }
+.media-combos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+.media-combos li {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+.media-notes { margin: 8px 0 0; color: var(--muted); }
+.media-notes p { margin: 0 0 8px; max-width: 72ch; }
+.media-notes.is-empty {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  background: #04150d;
+}
+.media-slot { margin-top: 14px; min-height: 8px; }
 .media-news { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 12px; }
 .media-news li {
   border: 1px solid var(--line);

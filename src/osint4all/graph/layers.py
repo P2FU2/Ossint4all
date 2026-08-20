@@ -113,8 +113,13 @@ def run_alvo_layer(
                 )
     if kind == "CNPJ" and live:
         _layer_cnpj_qsa(out, settings, merged.get("NAME") or "")
-    elif kind == "NAME" and live:
-        _layer_name_candidates(out, settings, text)
+    elif kind == "NAME":
+        if any(merged.get(k) for k in ("CPF", "EMAIL", "PHONE")):
+            out.notes.append(
+                "O alvo já tem CPF ou contato. A busca só pelo nome fica desligada para não misturar homônimo."
+            )
+        elif live:
+            _layer_name_candidates(out, settings, text)
     elif kind == "CPF" and live and " " in (merged.get("NAME") or ""):
         out.notes.append("CPF âncora. Empresas pelo nome só entram se o QSA bater com este alvo.")
     return out

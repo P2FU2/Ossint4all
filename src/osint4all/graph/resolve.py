@@ -11,8 +11,17 @@ from sqlalchemy.orm import Session
 
 from osint4all.connectors.base import ConnectorResult, FoundEntity
 from osint4all.db.models import Edge, Entity, Evidence, Identifier, Investigation
-from osint4all.db.repository import add_identifier, blocked_key_set, enqueue_expand, find_entity_by_key, utcnow
-from osint4all.graph.identity import found_canonical_key, should_enqueue_child
+from osint4all.db.repository import (
+    add_identifier,
+    blocked_key_set,
+    case_target_profile,
+    consolidate_identities,
+    enqueue_expand,
+    find_entity_by_key,
+    find_person_by_name,
+    utcnow,
+)
+from osint4all.graph.identity import bind_found_to_profile, found_canonical_key, should_enqueue_child
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
 
 
@@ -26,6 +35,28 @@ def upsert_found_entity(
 ) -> Entity:
     key = found_canonical_key(found)
     existing = find_entity_by_key(session, investigation.id, key)
+    if existing is None and found.entity_type == "PERSON" and found.kind == "NAME":
+        existing = find_person_by_name(session, investigation.id, found.display_name or found.value)
+    if existing is None and found.kind in {"CPF", "EMAIL", "PHONE", "USERNAME", "BIRTHDATE"}:
+        host = find_person_by_name(session, investigation.id, found.display_name or "")
+        if host is None:
+            host = session.scalar(
+                select(Entity).where(
+                    Entity.investigation_id == investigation.id,
+                    Entity.entity_type == "PERSON",
+                    Entity.is_seed.is_(True),
+                )
+            )
+        if host is not None:
+            ident_key = canonical_key(found.kind, found.value)
+            add_identifier(host, found.kind, found.value, ident_key)
+            if found.kind == "CPF" and not str(host.canonical_key or "").startswith("cpf:"):
+                host.canonical_key = ident_key
+            attrs = dict(host.attrs or {})
+            if found.kind == "USERNAME":
+                attrs["username"] = found.display_name or found.value
+            host.attrs = attrs
+            return host
     if existing:
         old_name = existing.display_name
         existing.last_seen_at = utcnow()
@@ -140,10 +171,25 @@ def apply_result(
     created: list[Entity] = []
     ref_map: dict[str, Entity] = {origin.canonical_key: origin}
     blocked = blocked_key_set(session, investigation.id)
+    profile = case_target_profile(session, investigation.id)
+    target = None
+    if profile.cpf:
+        target = find_entity_by_key(session, investigation.id, canonical_key("CPF", profile.cpf))
+    if target is None and profile.name:
+        target = find_person_by_name(session, investigation.id, profile.name)
 
     for found in result.entities:
         key = found_canonical_key(found)
         if key in blocked or canonical_key(found.kind, found.value) in blocked:
+            continue
+        action = bind_found_to_profile(found, profile)
+        if action == "skip":
+            continue
+        if action == "remap" and target is not None:
+            ref_map[key] = target
+            ref_map[canonical_key(found.kind, found.value)] = target
+            if found.kind in {"CPF", "EMAIL", "PHONE", "USERNAME", "BIRTHDATE"}:
+                add_identifier(target, found.kind, found.value, canonical_key(found.kind, found.value))
             continue
         entity = upsert_found_entity(session, investigation, found, depth=depth + 1)
         ref_map[found_canonical_key(found)] = entity
@@ -153,7 +199,7 @@ def apply_result(
             enqueue_children
             and depth + 1 < investigation.max_depth
             and entity.id != origin.id
-            and should_enqueue_child(found, entity)
+            and should_enqueue_child(found, entity, profile)
         ):
             enqueue_expand(
                 session,
@@ -189,15 +235,15 @@ def apply_result(
         )
 
     for ev in result.evidence:
-        target = origin
+        ev_target = origin
         if ev.entity_ref:
-            target = ref_map.get(ev.entity_ref) or find_entity_by_key(
+            ev_target = ref_map.get(ev.entity_ref) or find_entity_by_key(
                 session, investigation.id, ev.entity_ref
             ) or origin
         _add_evidence(
             session,
             investigation,
-            target,
+            ev_target,
             connector,
             ev.source_label,
             ev.url,
@@ -207,8 +253,9 @@ def apply_result(
             http_status=getattr(ev, "http_status", None),
             raw_path=getattr(ev, "raw_path", None),
         )
-        _index_host_payload(session, investigation, target, connector, ev.payload)
+        _index_host_payload(session, investigation, ev_target, connector, ev.payload)
 
+    consolidate_identities(session, investigation.id)
     return created
 
 

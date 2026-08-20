@@ -18,6 +18,7 @@ from osint4all.identifiers import dedupe_seeds, parse_seed
 KEEP_CHAINS = 8
 MAX_STEPS = 16
 SHOW_FINDINGS = 10
+ALVO_DRAFT_TITLE = "__alvo_draft__"
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _AT_USER_RE = re.compile(r"(?<![A-Za-z0-9._%+-])@([A-Za-z0-9._-]{2,32})\b")
@@ -216,7 +217,7 @@ def _prune_chains(session: Session, user: User) -> None:
     old_ids = list(
         session.scalars(
             select(SearchChain.id)
-            .where(SearchChain.user_id == user.id)
+            .where(SearchChain.user_id == user.id, SearchChain.title != ALVO_DRAFT_TITLE)
             .order_by(desc(SearchChain.updated_at))
             .offset(KEEP_CHAINS)
         )
@@ -229,34 +230,101 @@ def _prune_chains(session: Session, user: User) -> None:
 def active_chain(session: Session, user: User) -> SearchChain | None:
     return session.scalar(
         select(SearchChain)
-        .where(SearchChain.user_id == user.id, SearchChain.active.is_(True))
+        .where(
+            SearchChain.user_id == user.id,
+            SearchChain.active.is_(True),
+            SearchChain.title != ALVO_DRAFT_TITLE,
+        )
         .order_by(desc(SearchChain.updated_at))
         .limit(1)
     )
 
 
 def reset_chain(session: Session, user: User) -> None:
-    session.execute(update(SearchChain).where(SearchChain.user_id == user.id, SearchChain.active.is_(True)).values(active=False))
+    session.execute(
+        update(SearchChain)
+        .where(
+            SearchChain.user_id == user.id,
+            SearchChain.active.is_(True),
+            SearchChain.title != ALVO_DRAFT_TITLE,
+        )
+        .values(active=False)
+    )
+
+
+def _alvo_draft(session: Session, user: User) -> SearchChain | None:
+    return session.scalar(
+        select(SearchChain)
+        .where(SearchChain.user_id == user.id, SearchChain.title == ALVO_DRAFT_TITLE)
+        .limit(1)
+    )
 
 
 def alvo_fields(session: Session, user: User) -> dict[str, str]:
-    chain = active_chain(session, user)
+    """Só o que o utilizador digitou ou confirmou no Alvo — nunca hits de outra consulta."""
+    draft = _alvo_draft(session, user)
     fields: dict[str, str] = {}
-    if not chain:
+    if not draft:
         return fields
-    for step in _chain_steps(session, chain.id):
+    for step in _chain_steps(session, draft.id):
         kind = (step.kind or "").upper()
-        if kind in ALVO_KINDS and (step.query or "").strip():
-            fields[kind] = step.query.strip()
-        for ident in step.identifiers or []:
-            ident_kind = str(ident.get("kind") or "").upper()
-            ident_value = str(ident.get("value") or "").strip()
-            if ident_kind in ALVO_KINDS and ident_value and ident_kind not in fields:
-                fields[ident_kind] = ident_value
+        value = (step.query or "").strip()
+        if kind in ALVO_KINDS and value:
+            fields[kind] = value
     return fields
 
 
+def save_alvo_fields(session: Session, user: User, fields: dict[str, str]) -> dict[str, str]:
+    cleaned = {
+        kind.upper(): (value or "").strip()
+        for kind, value in fields.items()
+        if kind.upper() in ALVO_KINDS and (value or "").strip()
+    }
+    draft = _alvo_draft(session, user)
+    if draft is None:
+        draft = SearchChain(user_id=user.id, title=ALVO_DRAFT_TITLE, active=False)
+        session.add(draft)
+        session.flush()
+    existing = {step.kind.upper(): step for step in _chain_steps(session, draft.id)}
+    for kind, value in cleaned.items():
+        row = existing.pop(kind, None)
+        if row:
+            row.query = value[:512]
+            row.title = value[:255]
+            row.identifiers = []
+            row.findings = []
+            continue
+        session.add(
+            SearchChainStep(
+                chain_id=draft.id,
+                kind=kind[:32],
+                query=value[:512],
+                title=value[:255],
+                summary="confirmado no alvo",
+                ok=True,
+                identifiers=[],
+                findings=[],
+            )
+        )
+    for stale in existing.values():
+        if stale.kind.upper() not in cleaned:
+            session.delete(stale)
+    draft.updated_at = _now()
+    session.flush()
+    return cleaned
+
+
+def reset_alvo_draft(session: Session, user: User) -> None:
+    draft = _alvo_draft(session, user)
+    if not draft:
+        return
+    session.execute(delete(SearchChainStep).where(SearchChainStep.chain_id == draft.id))
+    session.delete(draft)
+    session.flush()
+
+
 def ingest_outcome(session: Session, user: User, outcome: object) -> SearchChain | None:
+    """Cada consulta fica sozinha. Não cola com busca anterior por e-mail/@/hit."""
     if not bool(getattr(outcome, "ok", True)):
         return active_chain(session, user)
     query = str(getattr(outcome, "query", "") or "").strip()
@@ -268,49 +336,25 @@ def ingest_outcome(session: Session, user: User, outcome: object) -> SearchChain
     kind = str(getattr(outcome, "kind", "") or "")
     title = str(getattr(outcome, "title", "") or query)
     summary = str(getattr(outcome, "summary", "") or "")
-    keys = _keys(idents)
 
-    chains = list(
-        session.scalars(
-            select(SearchChain)
-            .where(SearchChain.user_id == user.id)
-            .order_by(desc(SearchChain.updated_at))
-            .limit(KEEP_CHAINS)
-        )
-    )
-    matched: SearchChain | None = None
-    for chain in chains:
-        for step in _chain_steps(session, chain.id):
-            if _keys(step.identifiers) & keys:
-                matched = chain
-                break
-        if matched:
-            break
+    current = active_chain(session, user)
+    if current and current.title != ALVO_DRAFT_TITLE:
+        existing = _chain_steps(session, current.id)
+        if existing:
+            last = existing[-1]
+            if _same_query(last.query, query) and (last.kind or "") == kind:
+                last.identifiers = idents
+                last.findings = slim_findings(outcome)
+                last.summary = summary[:400]
+                last.title = title[:255]
+                last.ok = True
+                current.updated_at = _now()
+                return current
 
-    if matched is None:
-        reset_chain(session, user)
-        matched = SearchChain(user_id=user.id, title=f"Cadeia · {title}"[:255], active=True)
-        session.add(matched)
-        session.flush()
-    else:
-        session.execute(update(SearchChain).where(SearchChain.user_id == user.id, SearchChain.id != matched.id).values(active=False))
-        matched.active = True
-        matched.updated_at = _now()
-
-    existing = _chain_steps(session, matched.id)
-    if existing:
-        last = existing[-1]
-        if _same_query(last.query, query) and (last.kind or "") == kind:
-            last.identifiers = idents
-            last.findings = slim_findings(outcome)
-            last.summary = summary[:400]
-            last.title = title[:255]
-            last.ok = True
-            return matched
-        if len(existing) >= MAX_STEPS:
-            oldest = existing[0]
-            session.delete(oldest)
-
+    reset_chain(session, user)
+    matched = SearchChain(user_id=user.id, title=f"Consulta · {title}"[:255], active=True)
+    session.add(matched)
+    session.flush()
     session.add(
         SearchChainStep(
             chain_id=matched.id,

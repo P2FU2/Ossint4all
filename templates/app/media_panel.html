@@ -1,12 +1,13 @@
 {% if media.queries %}
-<p class="muted">{{ media.queries | join(" · ") }}</p>
+<ul class="media-combos">
+  {% for q in media.queries %}
+  <li>{{ q }}</li>
+  {% endfor %}
+</ul>
 {% endif %}
-{% for note in media.notes %}
-<p class="muted">{{ note }}</p>
-{% endfor %}
 
 {% if media.news %}
-<p class="section-kicker">notícias</p>
+<p class="section-kicker">notícias · {{ media.news|length }}</p>
 <ul class="media-news">
   {% for item in media.news %}
   <li>
@@ -20,7 +21,7 @@
 {% endif %}
 
 {% if media.images %}
-<p class="section-kicker">galeria</p>
+<p class="section-kicker">galeria · {{ media.images|length }}</p>
 <ul class="media-gallery">
   {% for item in media.images %}
   <li>
@@ -31,6 +32,17 @@
   </li>
   {% endfor %}
 </ul>
+{% endif %}
+
+{% if media.notes %}
+<div class="media-notes {% if not media.news and not media.images %}is-empty{% endif %}">
+  {% for note in media.notes %}
+  <p>{{ note }}</p>
+  {% endfor %}
+  {% if not media.news and not media.images %}
+  <p>O botão acima tenta de novo sem recarregar a página.</p>
+  {% endif %}
+</div>
 {% endif %}
 
 {% if not media.news and not media.images and not media.notes %}

@@ -6,10 +6,12 @@
     <div>
       <p class="eyebrow">Dossiê em camadas</p>
       <h1>Alvo desta pessoa</h1>
+      <p class="lede">Cada campo é uma busca à parte. Confirme o que for desta pessoa. Só depois atribua a um caso — nunca liga sozinho a consulta anterior.</p>
     </div>
-    {% if current_case %}
-    <span class="kpi" data-tip="O grafo deste caso recebe o que for confirmado">Caso: {{ current_case.title }}</span>
-    {% endif %}
+    <form method="post" action="/app/alvo/limpar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn ghost" type="submit" data-tip="Apaga o rascunho deste alvo. Não mexe em nenhum caso.">Novo alvo</button>
+    </form>
   </header>
 
   <div class="alvo-tree">
@@ -21,7 +23,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="kind" value="{{ kind }}" />
         <label>{{ label }}
-          <input name="value" value="{{ fields.get(kind) or '' }}" autocomplete="off" placeholder="{{ label }}" data-tip="Edite e busque só neste campo. A camada seguinte usa o que já está no dossiê." />
+          <input name="value" value="{{ fields.get(kind) or '' }}" autocomplete="off" placeholder="{{ label }}" data-mask="{% if kind == 'CPF' %}cpf{% elif kind == 'CNPJ' %}cnpj{% elif kind == 'PHONE' %}phone{% endif %}" inputmode="{% if kind in ('CPF', 'CNPJ', 'PHONE') %}numeric{% else %}text{% endif %}" data-tip="Edite e busque só neste campo. A camada seguinte usa o que já está no dossiê." />
         </label>
         <button class="btn primary" type="submit" data-tip="Roda a camada deste campo e cruza com o restante do alvo">Buscar nesta camada</button>
       </form>
@@ -29,24 +31,6 @@
     </section>
     {% endfor %}
   </div>
-
-  <details class="case-board media-board">
-    <summary data-tip="Cruza os campos do alvo em consultas especializadas">Notícias</summary>
-    <button
-      class="btn primary"
-      type="button"
-      hx-get="/app/alvo/midia"
-      hx-target="#alvo-media"
-      hx-swap="innerHTML"
-      hx-indicator="#alvo-media-wait"
-      data-tip="Consulta notícias e imagens públicas deste alvo"
-    >Buscar notícias e imagens</button>
-    <div id="alvo-media-wait" class="htmx-indicator consult-wait" role="status">
-      <span class="spinner" aria-hidden="true"></span>
-      varrendo menções públicas…
-    </div>
-    <div id="alvo-media" class="media-slot" aria-live="polite"></div>
-  </details>
 
   {% if layer %}
   <article class="result-card {% if layer.qsa_match %}kind-cnpj{% elif layer.consult %}kind-{{ layer.consult.kind|lower }}{% endif %}">
@@ -140,20 +124,43 @@
   </article>
   {% endif %}
 
-  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px" data-busy="Criando caso" data-done="Caso criado.">
+  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px" data-busy="Atribuindo ao caso…" data-done="Caso atualizado.">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     {% if cases %}
-    <label class="save-extra">Caso
-      <select name="investigation_id">
-        <option value="">Novo caso</option>
+    <label class="save-extra">Atribuir a
+      <select name="investigation_id" data-tip="Por omissão cria um caso novo. Só entra o que você validou nestas camadas.">
+        <option value="" selected>Novo caso (separado)</option>
         {% for c in cases %}
-        <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+        <option value="{{ c.id }}">{{ c.title }}</option>
         {% endfor %}
       </select>
     </label>
     {% endif %}
-    <button class="btn primary" type="submit" data-tip="Só leva identificadores confirmados (não homônimos)">Abrir / atualizar grafo</button>
+    <button class="btn primary" type="submit" data-tip="Leva só o que você digitou ou confirmou. Não expande o grafo sozinho.">Atribuir ao caso</button>
     <a class="btn ghost" href="/app" data-tip="Consulta pontual, sem dossiê">Consulta rápida</a>
   </form>
+
+  <details class="case-board media-board" id="media-board">
+    <summary data-tip="Cruza os campos do alvo em consultas especializadas">Notícias e galeria do alvo</summary>
+    <div class="media-toolbar">
+      <button
+        class="btn primary"
+        type="button"
+        hx-get="/app/alvo/midia"
+        hx-target="#alvo-media"
+        hx-swap="innerHTML"
+        hx-indicator="#alvo-media-wait"
+        hx-disabled-elt="this"
+        hx-on::after-settle="this.closest('details').open = true; document.getElementById('alvo-media')?.scrollIntoView({block:'nearest'})"
+        data-tip="Consulta notícias e imagens públicas deste alvo"
+      >Buscar notícias e imagens</button>
+      <p class="muted">Usa o que já está no dossiê. CPF não vai ao buscador.</p>
+    </div>
+    <div id="alvo-media-wait" class="htmx-indicator consult-wait" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      varrendo menções públicas…
+    </div>
+    <div id="alvo-media" class="media-slot" aria-live="polite"></div>
+  </details>
 </div>
 {% endblock %}

@@ -1,8 +1,20 @@
 from osint4all.connectors.base import FoundEntity
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 from osint4all.db.models import Entity
+from osint4all.db.models import Edge
 from osint4all.db.repository import detach_entity, enqueue_qsa_network
-from osint4all.graph.identity import found_canonical_key, has_expandable_anchor, is_unconfirmed, names_match, should_enqueue_child
+from osint4all.graph.identity import (
+    TargetProfile,
+    bind_found_to_profile,
+    found_canonical_key,
+    has_expandable_anchor,
+    is_unconfirmed,
+    name_search_blocked,
+    names_match,
+    profile_from_fields,
+    seed_fits_profile,
+    should_enqueue_child,
+)
 from osint4all.graph.layers import confirmed_seeds, run_alvo_layer
 from osint4all.graph.resolve import apply_result
 from osint4all.graph.seed import create_investigation
@@ -26,6 +38,28 @@ def test_homonym_does_not_share_key() -> None:
     )
     assert found_canonical_key(a) != found_canonical_key(b)
     assert is_unconfirmed(a)
+
+
+def test_validated_seeds_do_not_auto_expand(db) -> None:
+    from sqlalchemy import func, select
+
+    from osint4all.db.models import ExpansionJob
+
+    name = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    email = parse_seed("ana@exemplo.com", forced_kind="EMAIL")
+    inv = create_investigation(
+        db,
+        title="Só validado",
+        hypothesis="sem expand",
+        seeds=[name, email],
+        connectors=[],
+        max_depth=1,
+        monitor=False,
+        created_by="t",
+        enqueue=False,
+    )
+    queued = db.scalar(select(func.count()).select_from(ExpansionJob).where(ExpansionJob.investigation_id == inv.id))
+    assert queued == 0
 
 
 def test_name_only_does_not_seed_graph() -> None:
@@ -84,6 +118,8 @@ def test_qsa_partner_with_full_name_is_enqueued() -> None:
         depth=1,
     )
     assert should_enqueue_child(found, parent) is True
+    anchored = TargetProfile(name="Maria Silva Souza", cpf="52998224725")
+    assert should_enqueue_child(found, parent, anchored) is False
 
 
 def test_profile_child_is_not_enqueued() -> None:
@@ -321,6 +357,9 @@ def test_enqueue_qsa_network_raises_depth_and_queues_cnpj(settings, db) -> None:
     )
     db.add(company)
     db.flush()
+    origin = next(e for e in inv.entities if e.is_seed)
+    db.add(Edge(investigation_id=inv.id, from_entity_id=origin.id, to_entity_id=company.id, rel_type="SOCIO"))
+    db.flush()
     queued = enqueue_qsa_network(db, inv, max_attempts=3)
     db.flush()
     assert inv.max_depth == 6
@@ -330,3 +369,134 @@ def test_enqueue_qsa_network_raises_depth_and_queues_cnpj(settings, db) -> None:
 
     jobs = db.scalars(select(ExpansionJob).where(ExpansionJob.entity_id == company.id)).all()
     assert jobs
+
+
+def test_profile_blocks_homonym_cpf_and_name_seed() -> None:
+    profile = profile_from_fields({"NAME": "Maria Silva Souza", "CPF": "529.982.247-25"})
+    assert profile.has_person_anchor
+    same = FoundEntity(
+        entity_type="PERSON",
+        kind="CPF",
+        value="39053344705",
+        display_name="Maria Silva Souza",
+        confidence=0.8,
+    )
+    partner = FoundEntity(
+        entity_type="PERSON",
+        kind="CPF",
+        value="39053344705",
+        display_name="Joao Pereira Lima",
+        confidence=0.8,
+    )
+    alias = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="Maria Silva Souza",
+        display_name="Maria Silva Souza",
+        attrs={"status": "unconfirmed"},
+        confidence=0.4,
+    )
+    assert bind_found_to_profile(same, profile) == "skip"
+    assert bind_found_to_profile(partner, profile) == "keep"
+    assert bind_found_to_profile(alias, profile) == "remap"
+    assert seed_fits_profile("CPF", "390.533.447-05", "Maria Silva Souza", profile) is False
+    assert seed_fits_profile("NAME", "Maria Silva Souza", "Maria Silva Souza", profile) is False
+    assert seed_fits_profile("EMAIL", "maria@exemplo.com", "", profile) is True
+    assert name_search_blocked("Maria Silva Souza", profile) is True
+    assert name_search_blocked("Joao Pereira Lima", profile) is False
+
+
+def test_alvo_name_stays_quiet_when_cpf_present() -> None:
+    layer = run_alvo_layer(
+        {"NAME": "Maria Silva Souza", "CPF": "529.982.247-25"},
+        kind="NAME",
+        value="Maria Silva Souza",
+        live=False,
+    )
+    assert any("homônimo" in note for note in layer.notes)
+    assert layer.candidates == []
+
+
+def test_apply_result_drops_homonym_and_remaps_alias(settings, db) -> None:
+    seed = parse_seed("529.982.247-25", forced_kind="CPF")
+    name = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed, name],
+        connectors=[],
+        max_depth=2,
+        monitor=False,
+        created_by="tester",
+    )
+    origin = next(e for e in inv.entities if e.canonical_key.startswith("cpf:"))
+    from osint4all.connectors.base import ConnectorResult, FoundEdge
+    from sqlalchemy import select
+
+    apply_result(
+        db,
+        inv,
+        origin,
+        ConnectorResult(
+            entities=[
+                FoundEntity(
+                    entity_type="PERSON",
+                    kind="CPF",
+                    value="39053344705",
+                    display_name="Maria Silva Souza",
+                    confidence=0.8,
+                ),
+                FoundEntity(
+                    entity_type="ORG",
+                    kind="CNPJ",
+                    value="33000167000101",
+                    display_name="Empresa",
+                    confidence=0.8,
+                ),
+            ],
+            edges=[
+                FoundEdge(from_ref="name:maria silva souza", to_ref="cnpj:33000167000101", rel_type="SOCIO"),
+            ],
+        ),
+        connector="cnpj_receita",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=3,
+    )
+    people = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON")).all()
+    assert all(not (e.canonical_key or "").endswith("39053344705") for e in people)
+    assert any(e.canonical_key.startswith("cnpj:") for e in db.scalars(select(Entity).where(Entity.investigation_id == inv.id)))
+
+
+def test_enqueue_skips_company_off_the_target(settings, db) -> None:
+    seed = parse_seed("529.982.247-25", forced_kind="CPF")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=["cnpj_receita"],
+        max_depth=2,
+        monitor=False,
+        created_by="tester",
+    )
+    stray = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa solta",
+        attrs={},
+        depth=2,
+    )
+    db.add(stray)
+    db.flush()
+    queued = enqueue_qsa_network(db, inv, max_attempts=3)
+    db.flush()
+    from osint4all.db.models import ExpansionJob
+    from sqlalchemy import select
+
+    jobs = db.scalars(select(ExpansionJob).where(ExpansionJob.entity_id == stray.id)).all()
+    assert jobs == []
+    assert db.get(Entity, stray.id) is None
+    assert queued >= 0

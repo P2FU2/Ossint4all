@@ -28,12 +28,18 @@ class ExpansionEngine:
         from sqlalchemy.orm import object_session
 
         enabled = set(investigation.connectors or [])
-        ctx = ExpandContext(investigation=investigation, settings=self.settings, enabled=enabled)
-        applied = 0
+        from osint4all.db.repository import case_target_profile
+
         session = object_session(entity)
         if session is None:
             raise RuntimeError("entity precisa estar ligado a uma Session")
-
+        ctx = ExpandContext(
+            investigation=investigation,
+            settings=self.settings,
+            enabled=enabled,
+            profile=case_target_profile(session, investigation.id),
+        )
+        applied = 0
         for connector in self.connectors:
             if enabled and connector.name not in enabled:
                 continue

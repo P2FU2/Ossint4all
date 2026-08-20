@@ -59,14 +59,15 @@
       <input type="hidden" name="values" value="{{ part.query }}" />
       {% endfor %}
       {% if cases %}
-      <label class="save-extra" data-tip="O caso que recebe estes identificadores">Caso
-        <select name="investigation_id">
+      <label class="save-extra" data-tip="Escolha o caso. Nada vai sozinho para a consulta anterior.">Caso
+        <select name="investigation_id" required>
+          <option value="" selected>Escolha o caso</option>
           {% for c in cases %}
-          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+          <option value="{{ c.id }}">{{ c.title }}</option>
           {% endfor %}
         </select>
       </label>
-      <button class="btn primary" type="submit" data-tip="Adiciona todos os identificadores ao caso e expande o grafo">Adicionar ao caso</button>
+      <button class="btn primary" type="submit" data-tip="Adiciona só estes identificadores ao caso escolhido. Sem expandir o grafo.">Adicionar ao caso</button>
       {% else %}
       <button class="btn primary" type="submit" formaction="/app/consultar/grafo" formmethod="post" name="kind" value="{{ mass.kind }}" data-tip="Ainda não há caso. Isto cria um com todos os identificadores desta massa.">Guardar no grafo</button>
       <input type="hidden" name="value" value="{{ mass.query }}" />

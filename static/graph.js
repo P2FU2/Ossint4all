@@ -26,12 +26,33 @@
   let payload = { nodes: [], edges: [] };
   let map;
 
+  function formatCardId(item) {
+    const kind = String((item && item.kind) || "").toUpperCase();
+    const raw = String((item && item.value) || "").trim();
+    if (kind === "CPF") {
+      const d = raw.replace(/\D/g, "").slice(0, 11);
+      if (d.length === 11) return "CPF " + d.slice(0, 3) + "." + d.slice(3, 6) + "." + d.slice(6, 9) + "-" + d.slice(9);
+      return "CPF " + raw;
+    }
+    if (kind === "PHONE") return "tel " + raw;
+    if (kind === "EMAIL") return raw;
+    if (kind === "USERNAME") return raw.startsWith("@") ? raw : "@" + raw;
+    if (kind === "BIRTHDATE") return "nasc. " + raw;
+    return (kind ? kind + " " : "") + raw;
+  }
+
+  function cardLabel(n) {
+    const title = n.seed ? n.label + " · alvo" : n.label + " · g" + (n.depth || 0);
+    const extras = (n.ids || []).filter((item) => item.kind !== "NAME").slice(0, 4).map(formatCardId);
+    return [title].concat(extras).join("\n");
+  }
+
   function toElements(data) {
     const nodes = (data.nodes || []).map((n) => ({
       data: {
         id: n.id,
         name: n.label,
-        label: n.seed ? n.label + " · alvo" : n.label + " · g" + (n.depth || 0),
+        label: cardLabel(n),
         type: n.type,
         seed: n.seed,
         status: n.status || "confirmed",
@@ -40,6 +61,8 @@
         key: n.key || "",
         kind: (n.attrs || {}).kind || "",
         attrs: n.attrs || {},
+        ids: n.ids || [],
+        lines: 1 + Math.min(4, (n.ids || []).filter((item) => item.kind !== "NAME").length),
       },
     }));
     const edges = (data.edges || []).map((e) => ({
@@ -73,8 +96,8 @@
           color: "#d7e4dc",
           "font-size": 11,
           "font-family": "IBM Plex Mono, monospace",
-          "text-wrap": "ellipsis",
-          "text-max-width": 148,
+          "text-wrap": "wrap",
+          "text-max-width": 188,
           "text-valign": "center",
           "text-halign": "center",
           "min-zoomed-font-size": 8,
@@ -82,9 +105,9 @@
           "background-color": "#121a16",
           "border-width": 1.4,
           "border-color": "#5e7a62",
-          width: 168,
-          height: 44,
-          padding: "6px",
+          width: 200,
+          height: 52,
+          padding: "8px",
         },
       },
       { selector: 'node[type = "ORG"]', style: { "border-color": colors.ORG } },
@@ -96,7 +119,11 @@
       { selector: 'node[type = "PERSON"]', style: { "border-color": colors.PERSON } },
       { selector: 'node[type = "NOTE"]', style: { "border-color": colors.NOTE, "background-color": "#1c1a10" } },
       { selector: 'node[kind = "diagram"]', style: { width: 210, height: 64, "border-color": "#d4b45a", "background-color": "#1c1810", "text-wrap": "wrap", "text-max-width": 190 } },
-      { selector: "node[?seed]", style: { width: 188, height: 50, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
+      { selector: "node[?seed]", style: { width: 210, height: 58, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
+      { selector: "node[lines > 1]", style: { height: 72 } },
+      { selector: "node[lines > 2]", style: { height: 90 } },
+      { selector: "node[lines > 3]", style: { height: 108 } },
+      { selector: "node[lines > 4]", style: { height: 124 } },
       { selector: 'node[status = "unconfirmed"]', style: { "border-style": "dashed", "border-color": "#c4a35a", "opacity": 0.85 } },
       { selector: 'node[status = "probable"]', style: { "border-style": "dotted", "border-color": "#5eead4" } },
       { selector: 'node[status = "contested"]', style: { "border-color": "#ffe14a" } },
@@ -483,8 +510,11 @@
     const live = capturePositions();
     const camera = snapshotView();
     const hadNodes = cy.nodes().length > 0;
-    const res = await fetch(root.dataset.graphUrl, { credentials: "same-origin" });
-    payload = await res.json();
+    const res = await fetch(root.dataset.graphUrl, { credentials: "same-origin", headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("grafo " + res.status);
+    const next = await res.json();
+    if (!next || typeof next !== "object") throw new Error("grafo inválido");
+    payload = next;
     if (yearInput && (payload.years || []).length && !yearInput.dataset.ready) {
       yearInput.min = String(payload.years[0]);
       yearInput.max = String(payload.years[payload.years.length - 1]);
@@ -547,6 +577,9 @@
     nome: "nome",
     simples: "simples",
     mei: "MEI",
+    nascimento: "nascimento",
+    nome_pai: "pai",
+    nome_mae: "mãe",
   };
   const balloon = document.getElementById("graph-balloon");
   const gbKind = document.getElementById("gb-kind");
@@ -625,6 +658,9 @@
       gbFacts.appendChild(factRow("estado", labels[status] || status));
       gbFacts.appendChild(factRow("grau com o alvo", el.data("seed") ? "0 · alvo" : String(rec.depth ?? el.data("depth") ?? 0)));
       if (rec.confidence != null) gbFacts.appendChild(factRow("confiança", Math.round(Number(rec.confidence) * 100) + "%"));
+      (rec.ids || el.data("ids") || []).forEach((item) => {
+        gbFacts.appendChild(factRow(item.kind || "dado", formatCardId(item)));
+      });
       Object.keys(ATTR_LABEL).forEach((key) => {
         if (attrs[key] == null || attrs[key] === "") return;
         gbFacts.appendChild(factRow(ATTR_LABEL[key], String(attrs[key])));
@@ -634,8 +670,18 @@
     gbActions.hidden = !full;
     gbActions.replaceChildren();
     if (full) {
+      const probe = document.createElement("button");
+      probe.type = "button";
+      probe.className = "btn primary";
+      probe.textContent = type === "ORG" ? "Procurar empresas e QSA" : "Procurar informações";
+      probe.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeBalloon();
+        probeNode(el.id(), el.data("name") || rec.label || "", type === "ORG" ? "CNPJ" : "NAME");
+      });
       const open = document.createElement("a");
-      open.className = "btn primary";
+      open.className = "btn";
       open.href = root.dataset.entityBase + el.id();
       open.textContent = "Abrir ficha";
       const close = document.createElement("button");
@@ -643,24 +689,25 @@
       close.className = "btn";
       close.textContent = "Fechar";
       close.addEventListener("click", closeBalloon);
-      gbActions.append(open, close);
+      gbActions.append(probe, open, close);
     }
   }
 
   function placeBalloon(el) {
     if (!balloon || balloon.hidden) return;
-    const stage = document.querySelector(".graph-stage");
-    if (!stage) return;
+    const host = cy.container() || document.getElementById("cy");
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
     const box = el.renderedBoundingBox({ includeLabels: true });
-    const width = balloon.offsetWidth || 228;
+    const width = balloon.offsetWidth || 260;
     const height = balloon.offsetHeight || 90;
-    const maxX = stage.clientWidth - width - 12;
-    const maxY = stage.clientHeight - height - 12;
-    let left = box.x2 + 14;
-    let top = box.y1;
-    if (left > maxX) left = box.x1 - width - 14;
-    balloon.style.left = Math.max(8, Math.min(maxX, left)) + "px";
-    balloon.style.top = Math.max(8, Math.min(maxY, top)) + "px";
+    const pad = 12;
+    let left = rect.left + box.x2 + 14;
+    let top = rect.top + box.y1;
+    if (left + width > window.innerWidth - pad) left = rect.left + box.x1 - width - 14;
+    if (top + height > window.innerHeight - pad) top = window.innerHeight - height - pad;
+    balloon.style.left = Math.max(pad, Math.min(window.innerWidth - width - pad, left)) + "px";
+    balloon.style.top = Math.max(pad, Math.min(window.innerHeight - height - pad, top)) + "px";
   }
 
   function showMini(el) {
@@ -689,6 +736,7 @@
     requestAnimationFrame(() => {
       balloon.classList.add("is-visible");
       placeBalloon(el);
+      requestAnimationFrame(() => placeBalloon(el));
     });
   }
 
@@ -737,6 +785,9 @@
   cy.on("mouseout", "node, edge", scheduleHide);
   cy.on("pan zoom resize", () => {
     if (balloonTarget && !balloon.hidden) placeBalloon(balloonTarget);
+  });
+  window.addEventListener("resize", () => {
+    if (balloonTarget && balloon && !balloon.hidden) placeBalloon(balloonTarget);
   });
   if (balloon) {
     balloon.addEventListener("mouseenter", () => window.clearTimeout(hideTimer));
@@ -1008,22 +1059,76 @@
 
   let lastShape = "";
   let lastPhase = "";
+  let mutating = false;
+  let pollTimer = 0;
+
+  function schedulePoll(ms) {
+    window.clearTimeout(pollTimer);
+    pollTimer = window.setTimeout(() => {
+      poll().catch(() => schedulePoll(5000));
+    }, ms);
+  }
+
+  function applyPulse(jobs) {
+    const pill = document.getElementById("job-pill");
+    const queue = (jobs.PENDING || 0) + (jobs.RUNNING || 0);
+    if (pill) pill.textContent = queue ? "rodando " + queue : "concluído";
+    if (!mutating && jobs.label && window.setActionStatus) {
+      window.setActionStatus(jobs.phase || (queue ? "loading" : "ok"), jobs.label);
+    }
+    const shape = `${jobs.entities || 0}:${jobs.edges || 0}`;
+    const changed = lastShape && shape !== lastShape;
+    lastShape = shape;
+    lastPhase = jobs.phase || "";
+    return { queue, changed };
+  }
+
+  async function readJson(res) {
+    const ctype = (res.headers.get("content-type") || "").toLowerCase();
+    if (!ctype.includes("json")) {
+      throw new Error("resposta sem JSON");
+    }
+    return res.json();
+  }
+
   async function poll() {
+    if (mutating) {
+      schedulePoll(1500);
+      return;
+    }
     try {
-      const res = await fetch(root.dataset.statusUrl, { credentials: "same-origin" });
-      const jobs = await res.json();
-      const pill = document.getElementById("job-pill");
-      const queue = (jobs.PENDING || 0) + (jobs.RUNNING || 0);
-      if (pill) pill.textContent = queue ? "carregando " + queue : "concluído";
-      if (jobs.label && window.setActionStatus) {
-        window.setActionStatus(jobs.phase || (queue ? "loading" : "ok"), jobs.label);
+      const res = await fetch(root.dataset.statusUrl, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) {
+        schedulePoll(4000);
+        return;
       }
-      const shape = `${jobs.entities || 0}:${jobs.edges || 0}`;
-      if (lastShape && shape !== lastShape) load();
-      lastShape = shape;
-      lastPhase = jobs.phase || "";
+      let jobs = await readJson(res);
+      let info = applyPulse(jobs);
+      if (info.queue && root.dataset.tickUrl) {
+        const tick = await fetch(root.dataset.tickUrl, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          body: new URLSearchParams({ csrf_token: csrfToken() }),
+        });
+        if (tick.ok) {
+          jobs = await readJson(tick);
+          info = applyPulse(jobs);
+        }
+      }
+      if (info.changed) {
+        try {
+          await load();
+        } catch (_) {
+          /* próximo ciclo tenta de novo */
+        }
+      }
+      schedulePoll(info.queue ? 1600 : 4000);
     } catch (_) {
-      /* ignore */
+      schedulePoll(5000);
     }
   }
 
@@ -1165,12 +1270,50 @@
     if (first) first.focus();
   }
 
-  async function postBoard(url, fields) {
+  async function postBoard(url, fields, status) {
     const body = new URLSearchParams({ csrf_token: csrfToken(), ...fields });
-    if (window.setActionStatus) window.setActionStatus("loading", "Gravando no quadro…");
-    await fetch(url, { method: "POST", body, credentials: "same-origin", redirect: "follow" });
-    if (window.setActionStatus) window.setActionStatus("ok", "Quadro atualizado.");
-    await load();
+    const loading = (status && status.loading) || "Gravando no quadro…";
+    const done = (status && status.done) || "Quadro atualizado.";
+    mutating = true;
+    if (window.setActionStatus) window.setActionStatus("loading", loading);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        redirect: "follow",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error("http " + res.status);
+      const ctype = (res.headers.get("content-type") || "").toLowerCase();
+      if (ctype.includes("json")) {
+        const data = await res.json();
+        if (data && data.ok === false) throw new Error(data.error || "falhou");
+        if (data) applyPulse(data);
+      }
+      if (window.setActionStatus) window.setActionStatus("ok", done);
+      try {
+        await load();
+      } catch (_) {
+        if (window.setActionStatus) window.setActionStatus("error", "Ação feita. Recarregue se o grafo não mudou.");
+      }
+    } catch (_) {
+      if (window.setActionStatus) window.setActionStatus("error", "Não concluiu nesta passagem. O grafo tenta de novo sozinho.");
+    } finally {
+      mutating = false;
+      if (window.unlockActionForms) window.unlockActionForms();
+      schedulePoll(800);
+    }
+  }
+
+  function probeNode(id, label, kind) {
+    const name = label || "nó";
+    const fields = kind ? { kind: kind } : {};
+    return postBoard(
+      root.dataset.entityBase + id + "/procurar",
+      fields,
+      { loading: "Procurando informações de " + name + "…", done: "Informações adicionadas ao caso." }
+    );
   }
 
   function startLink(fromId) {
@@ -1242,8 +1385,20 @@
     head.className = "k";
     if (kind === "node") {
       const node = evt.target;
+      const type = node.data("type") || "";
+      const label = node.data("name") || node.data("label") || "";
       head.textContent = "nó";
       menu.appendChild(head);
+      menu.appendChild(menuButton(
+        type === "ORG" ? "Procurar empresas e QSA" : "Procurar informações deste nome",
+        () => probeNode(node.id(), label, "NAME")
+      ));
+      (node.data("ids") || []).forEach((item) => {
+        if (!item || !item.kind || item.kind === "NAME") return;
+        menu.appendChild(menuButton("Procurar a partir de " + formatCardId(item), () => {
+          probeNode(node.id(), formatCardId(item), item.kind);
+        }));
+      });
       menu.appendChild(menuButton("Abrir ficha", () => {
         window.location.href = root.dataset.entityBase + node.id();
       }));
@@ -1254,14 +1409,22 @@
       sep.className = "sep";
       menu.appendChild(sep);
       menu.appendChild(menuButton("Expandir daqui", () => {
-        postBoard(root.dataset.entityBase + node.id() + "/expandir", {});
+        postBoard(root.dataset.entityBase + node.id() + "/expandir", {}, {
+          loading: "Rodando expansão…",
+          done: "Expansão na fila — o grafo atualiza sozinho.",
+        });
       }));
       menu.appendChild(menuButton("Copiar nome", () => {
         const text = node.data("name") || node.data("label") || "";
         if (navigator.clipboard) navigator.clipboard.writeText(text);
       }));
       menu.appendChild(menuButton("Desligar nó", () => {
-        if (confirm("Desligar este nó e as ligações?")) postBoard(root.dataset.entityBase + node.id() + "/desligar", {});
+        if (confirm("Desligar este nó e tudo que só existe por causa dele?")) {
+          postBoard(root.dataset.entityBase + node.id() + "/desligar", {}, {
+            loading: "Removendo…",
+            done: "Nó desligado.",
+          });
+        }
       }));
     } else if (kind === "edge") {
       const edge = evt.target;
@@ -1271,7 +1434,12 @@
         window.location.href = root.dataset.edgeBase + edge.id();
       }));
       menu.appendChild(menuButton("Apagar seta", () => {
-        if (confirm("Remover só esta ligação?")) postBoard(root.dataset.edgeBase + edge.id() + "/apagar", {});
+        if (confirm("Remover só esta ligação?")) {
+          postBoard(root.dataset.edgeBase + edge.id() + "/apagar", {}, {
+            loading: "Removendo…",
+            done: "Ligação removida.",
+          });
+        }
       }));
     } else {
       head.textContent = "quadro";
@@ -1305,10 +1473,22 @@
     stopLink();
   });
 
+  document.querySelectorAll('form[action*="/explodir"], form[action*="/processar"]').forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const exploding = (form.getAttribute("action") || "").includes("/explodir");
+      postBoard(form.action, {}, {
+        loading: exploding ? "Rodando QSA…" : "Rodando fila…",
+        done: exploding ? "QSA na fila — o grafo atualiza sozinho." : "Lote na fila — o grafo atualiza sozinho.",
+      });
+    });
+  });
+
   if (root.dataset.statusInit && window.setActionStatus) {
     window.setActionStatus(root.dataset.statusPhase || "loading", root.dataset.statusInit);
   }
-  load();
+  load().catch(() => {
+    if (window.setActionStatus) window.setActionStatus("error", "Não deu para desenhar o grafo. Recarregue a página.");
+  });
   poll();
-  setInterval(poll, 4000);
 })();

@@ -30,6 +30,77 @@ function setActionStatus(phase, message) {
 }
 window.setActionStatus = setActionStatus;
 
+function unlockActionForms() {
+  document.querySelectorAll("form.is-busy").forEach((form) => form.classList.remove("is-busy"));
+  document.querySelectorAll("button[data-locked]").forEach((btn) => {
+    if (btn.dataset.original) btn.textContent = btn.dataset.original;
+    delete btn.dataset.locked;
+    delete btn.dataset.original;
+  });
+}
+window.unlockActionForms = unlockActionForms;
+
+function applyInputMask(input) {
+  if (!(input instanceof HTMLInputElement) || input.type === "hidden") return;
+  const kind = (input.dataset.mask || "").toLowerCase()
+    || (input.name === "seed_cpf" || input.name === "seed_plate_cpf" ? "cpf" : "")
+    || (input.name === "seed_cnpj" ? "cnpj" : "")
+    || (input.name === "seed_phone" ? "phone" : "")
+    || (input.name === "seed_birth" ? "date" : "");
+  if (!kind) return;
+  const digits = String(input.value || "").replace(/\D/g, "");
+  let next = digits;
+  if (kind === "cpf") {
+    const d = digits.slice(0, 11);
+    next = d;
+    if (d.length > 9) next = `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+    else if (d.length > 6) next = `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+    else if (d.length > 3) next = `${d.slice(0, 3)}.${d.slice(3)}`;
+  } else if (kind === "cnpj") {
+    const d = digits.slice(0, 14);
+    next = d;
+    if (d.length > 12) next = `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+    else if (d.length > 8) next = `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8)}`;
+    else if (d.length > 5) next = `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5)}`;
+    else if (d.length > 2) next = `${d.slice(0, 2)}.${d.slice(2)}`;
+  } else if (kind === "phone") {
+    const d = digits.slice(0, 11);
+    next = d;
+    if (d.length > 6) next = `${d.slice(0, 2)} ${d.slice(2, 7)}-${d.slice(7)}`;
+    else if (d.length > 2) next = `${d.slice(0, 2)} ${d.slice(2)}`;
+  } else if (kind === "date") {
+    const d = digits.slice(0, 8);
+    next = d;
+    if (d.length > 4) next = `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+    else if (d.length > 2) next = `${d.slice(0, 2)}/${d.slice(2)}`;
+  }
+  if (input.value !== next) input.value = next;
+}
+
+document.addEventListener("input", (event) => {
+  applyInputMask(event.target);
+});
+
+function openCaseDossier() {
+  const box = document.getElementById("case-dossier");
+  if (!(box instanceof HTMLDetailsElement)) return;
+  box.open = true;
+  const focus = box.querySelector("input[name=seed_name], input[name=seed_cpf], input[name=title]");
+  if (focus instanceof HTMLInputElement) focus.focus();
+}
+
+document.addEventListener("click", (event) => {
+  const src = event.target instanceof Element ? event.target : event.target.parentElement;
+  const btn = src && src.closest("#case-title-btn");
+  if (!btn) return;
+  event.preventDefault();
+  openCaseDossier();
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("input[data-mask], input[name=seed_cpf], input[name=seed_cnpj], input[name=seed_phone], input[name=seed_birth]").forEach(applyInputMask);
+});
+
 function formAction(form) {
   if (!(form instanceof HTMLFormElement)) return "";
   const submitter = form.querySelector("button[formaction], input[formaction]");

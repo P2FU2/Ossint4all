@@ -44,7 +44,7 @@
       </header>
       <p>{{ t.role }}</p>
       <p>{{ t.in_app }}</p>
-      {% if t.github %}<p class="muted"><a href="{{ t.github }}">{{ t.github }}</a></p>{% endif %}
+      {% if t.github %}<p class="muted"><a href="{{ t.github }}" rel="noreferrer">{{ t.github | replace("https://github.com/", "") }}</a></p>{% endif %}
     </article>
     {% endfor %}
   </div>

@@ -5,13 +5,13 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=19" defer></script>
+<script src="/static/graph.js?v=24" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
   <div>
     <a class="crumb" href="/app/casos" data-tip="Volta à lista de casos guardados">Casos</a>
-    <h1>{{ inv.title }}</h1>
+    <h1><button type="button" class="case-title-btn" id="case-title-btn" data-tip="Abre o dossiê: nome, CPF e o que mais o caso já tem">{{ inv.title }}</button></h1>
     {% if inv.hypothesis %}<p class="lede">{{ inv.hypothesis }}</p>{% endif %}
     <p class="muted">{{ inv.status }} · {{ inv.assignee or inv.created_by or "—" }}{% if inv.playbook_key %} · {{ inv.playbook_key }}{% endif %}{% if quality %} · qualidade {{ quality.overall }}/100{% endif %}{% if playbook_progress %} · playbook {{ playbook_progress.done }}/{{ playbook_progress.total }}{% endif %}{% if inv.purpose %} · {{ inv.purpose }}{% endif %}{% if case_digest %} · {{ case_digest.entities }} nós · {{ case_digest.evidence }} evidências{% if case_digest.changes %} · {{ case_digest.changes }} mudança(s){% endif %}{% endif %}</p>
   </div>
@@ -21,7 +21,7 @@
     <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote.">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
     <form method="post" action="/app/casos/{{ inv.id }}/explodir" data-busy="Explodindo QSA…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn primary" type="submit" data-busy="Explodindo QSA…" data-tip="Puxa o QSA e, de cada sócio, as outras empresas até o último grau. A linha mostra o grau até o alvo.">Explodir QSA</button>
+      <button class="btn primary" type="submit" data-busy="Explodindo QSA…" data-tip="Expande só nós ativos ligados ao alvo. Homônimo e empresa solta saem do mapa.">Explodir QSA</button>
     </form>
     <form method="post" action="/app/casos/{{ inv.id }}/processar" data-busy="Processando fila…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -29,7 +29,7 @@
     </form>
     <a class="btn" href="/app/casos/{{ inv.id }}/investigar" data-tip="Hipóteses, playbook, lacunas e caminho">Investigar</a>
     <a class="btn" href="/app/casos/{{ inv.id }}/relatorio" data-tip="Relatório narrativo com fontes citadas">Relatório</a>
-    <details class="more-menu">
+    <details class="more-menu" id="case-dossier">
       <summary class="btn" data-tip="Dossiê do alvo: o que já tem e o que falta">Editar</summary>
       <div class="more-panel case-dossier">
         <form class="stack" method="post" action="/app/casos/{{ inv.id }}/editar" data-busy="Salvando e atualizando o caso…">
@@ -65,17 +65,22 @@
           {% else %}
           <p class="muted">Nenhum identificador listado ainda.</p>
           {% endif %}
-          <p class="section-kicker">adicionar e reprocessar</p>
+          {% set target = target or {} %}
+          <p class="section-kicker">já no grafo — complete para afunilar a busca</p>
+          <p class="muted">CPF, e-mail, telefone e nascimento travam o nome. Sem isso, homônimo continua entrando.</p>
           <fieldset class="seed-grid compact">
-            <label>Nome <input name="seed_name" placeholder="Nome completo" autocomplete="off" /></label>
-            <label>CPF <input name="seed_cpf" placeholder="000.000.000-00" autocomplete="off" /></label>
-            <label>CNPJ <input name="seed_cnpj" placeholder="00.000.000/0001-00" autocomplete="off" /></label>
-            <label>E-mail <input name="seed_email" placeholder="nome@dominio.com" autocomplete="off" /></label>
-            <label>Telefone <input name="seed_phone" placeholder="11 99999-0000" autocomplete="off" /></label>
-            <label>Usuário <input name="seed_username" placeholder="@usuario" autocomplete="off" /></label>
-            <label>Placa <input name="seed_plate" placeholder="ABC1D23" autocomplete="off" /></label>
+            <label>Nome <input name="seed_name" value="{{ target.NAME or '' }}" placeholder="Nome completo" autocomplete="off" /></label>
+            <label>CPF <input name="seed_cpf" value="{{ target.CPF or '' }}" data-mask="cpf" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off" /></label>
+            <label>CNPJ <input name="seed_cnpj" value="{{ target.CNPJ or '' }}" data-mask="cnpj" inputmode="numeric" placeholder="00.000.000/0001-00" autocomplete="off" /></label>
+            <label>E-mail <input name="seed_email" value="{{ target.EMAIL or '' }}" placeholder="nome@dominio.com" autocomplete="off" /></label>
+            <label>Telefone <input name="seed_phone" value="{{ target.PHONE or '' }}" data-mask="phone" inputmode="numeric" placeholder="11 99999-0000" autocomplete="off" /></label>
+            <label>Usuário <input name="seed_username" value="{{ target.USERNAME or '' }}" placeholder="@usuario" autocomplete="off" /></label>
+            <label>Data de nascimento <input name="seed_birth" value="{{ target.BIRTHDATE or '' }}" data-mask="date" inputmode="numeric" placeholder="00/00/0000" autocomplete="off" /></label>
+            <label>Nome do pai <input name="seed_father" value="{{ target.FATHER or '' }}" placeholder="Nome completo" autocomplete="off" /></label>
+            <label>Nome da mãe <input name="seed_mother" value="{{ target.MOTHER or '' }}" placeholder="Nome completo" autocomplete="off" /></label>
+            <label>Placa <input name="seed_plate" value="{{ target.PLATE or '' }}" placeholder="ABC1D23" autocomplete="off" /></label>
             <label>Dono da placa <input name="seed_plate_owner" placeholder="Nome" autocomplete="off" /></label>
-            <label>Processo CNJ <input name="seed_cnj" placeholder="0000000-00.0000.0.00.0000" autocomplete="off" /></label>
+            <label>Processo CNJ <input name="seed_cnj" value="{{ target.CNJ or '' }}" placeholder="0000000-00.0000.0.00.0000" autocomplete="off" /></label>
           </fieldset>
           <label>Lista extra
             <textarea name="seeds" rows="2" placeholder="Um identificador por linha"></textarea>
@@ -181,7 +186,7 @@
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
   <div class="graph-canvas">
-    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Carregando fontes… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
   </div>
   <div class="canvas-tools" aria-label="Canvas">
     <div class="canvas-tools-group">
@@ -358,17 +363,22 @@
   </div>
 </details>
 
-<details class="case-board media-board">
+<details class="case-board media-board" id="media-board">
   <summary data-tip="Cruza os identificadores do caso em consultas especializadas">Notícias e galeria do alvo</summary>
-  <button
-    class="btn primary"
-    type="button"
-    hx-get="/app/casos/{{ inv.id }}/midia"
-    hx-target="#case-media"
-    hx-swap="innerHTML"
-    hx-indicator="#case-media-wait"
-    data-tip="Consulta notícias e imagens públicas deste caso"
-  >Buscar notícias e imagens</button>
+  <div class="media-toolbar">
+    <button
+      class="btn primary"
+      type="button"
+      hx-get="/app/casos/{{ inv.id }}/midia"
+      hx-target="#case-media"
+      hx-swap="innerHTML"
+      hx-indicator="#case-media-wait"
+      hx-disabled-elt="this"
+      hx-on::after-settle="this.closest('details').open = true; document.getElementById('case-media')?.scrollIntoView({block:'nearest'})"
+      data-tip="Consulta notícias e imagens públicas deste caso"
+    >Buscar notícias e imagens</button>
+    <p class="muted">Nome, empresa, @user e placa do caso. CPF não vai ao buscador.</p>
+  </div>
   <div id="case-media-wait" class="htmx-indicator consult-wait" role="status">
     <span class="spinner" aria-hidden="true"></span>
     varrendo menções públicas…

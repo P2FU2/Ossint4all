@@ -75,13 +75,12 @@ def test_consult_tools_assign_edit(settings) -> None:
     token = _csrf(cleared.text)
     social = client.post("/app/consultar", data={"csrf_token": token, "q": "@ana", "modo": "USERNAME"})
     assert social.status_code == 200
-    assert "ponto de cadeia" in social.text.lower()
+    assert "última consulta" in social.text.lower()
 
     token = _csrf(social.text)
     email = client.post("/app/consultar", data={"csrf_token": token, "q": "ana@exemplo.com", "modo": "EMAIL"})
     assert email.status_code == 200
-    assert "consultas ligadas" in email.text.lower()
-    assert "@ana" in email.text
+    assert "consultas ligadas" not in email.text.lower()
     assert "ana@exemplo.com" in email.text
 
     tools = client.get("/app/ferramentas")
@@ -104,6 +103,13 @@ def test_consult_tools_assign_edit(settings) -> None:
         follow_redirects=True,
     )
     assert created.status_code == 200
+    case_id = created.url.path.split("/")[3]
+    pulse = client.get(f"/app/casos/{case_id}/status")
+    assert pulse.status_code == 200
+    body = pulse.json()
+    assert "entities" in body
+    assert "PENDING" in body
+    assert "label" in body
     assert "Caso corrente" in created.text
     assert "criado" in created.text.lower()
     assert "Editar" in created.text
@@ -148,6 +154,8 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert alvo.status_code == 200
     assert "desta pessoa" in alvo.text.lower()
     assert "Buscar nesta camada" in alvo.text
+    assert "Novo alvo" in alvo.text
+    assert "Atribuir ao caso" in alvo.text
 
     midia = client.get(f"/app/casos/{created.url.path.split('/')[3]}/midia")
     assert midia.status_code == 200

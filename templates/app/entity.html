@@ -20,13 +20,17 @@
       <input name="reason" placeholder="Por quê? fonte, contradição…" />
       <button class="btn primary" type="submit">Verificar</button>
     </form>
+    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/procurar" data-busy="Procurando informações…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn primary" type="submit" data-tip="Busca empresas e dados públicos deste nome e joga no caso.">Procurar informações</button>
+    </form>
     <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir" data-busy="Expandindo nó…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn primary" type="submit" data-tip="Enfileira fontes a partir deste nó.">Expandir daqui</button>
+      <button class="btn" type="submit" data-tip="Enfileira fontes a partir deste nó.">Expandir daqui</button>
     </form>
-    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/desligar" onsubmit="return confirm('Desligar este nó e todas as ligações?');">
+    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/desligar" onsubmit="return confirm('Desligar este nó e tudo que só existe por causa dele?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn danger" type="submit" data-tip="Remove o nó e todas as arestas ligadas a ele">Desligar nó</button>
+      <button class="btn danger" type="submit" data-tip="Remove o nó e as pessoas/empresas que só existiam por ele">Desligar nó</button>
     </form>
     <details class="more-menu">
       <summary class="btn" data-tip="Corrige o nome de exibição e anota a ficha">Editar</summary>

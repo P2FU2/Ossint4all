@@ -158,10 +158,10 @@
         <p class="type-tag">modelo</p>
         <h2>Consulta, alvo, caso e cadeia</h2>
         <dl class="manual-dl">
-          <div><dt>Consulta</dt><dd>Um identificador, um modo, um resultado. Fica no histórico da sua conta. Não mistura pessoas só porque o nome parece.</dd></div>
-          <div><dt>Cadeia</dt><dd>Fio das suas últimas consultas. Se o próximo valor cruza um e-mail, @user ou telefone que já saiu, o painel mostra o ponto em comum. Dá para abrir um caso a partir da cadeia inteira.</dd></div>
-          <div><dt>Alvo</dt><dd>Dossiê de <em>uma</em> pessoa. Você acrescenta campos (nome, CPF, e-mail…). Nome sozinho não confirma. Âncora forte ou QSA com o nome igual confirma.</dd></div>
-          <div><dt>Caso</dt><dd>Investigação persistida: sementes, grafo, fila, evidências, playbook, hipóteses, notas, tarefas, PDF anexado, relatório. Pode ser o “caso corrente”.</dd></div>
+          <div><dt>Consulta</dt><dd>Um identificador, um modo, um resultado. Fica no histórico. Não cola com busca anterior nem entra num caso até você atribuir.</dd></div>
+          <div><dt>Cadeia</dt><dd>Mostra só a última consulta. Não junta e-mail/@ de buscas anteriores — isso gerava falso positivo.</dd></div>
+          <div><dt>Alvo</dt><dd>Dossiê isolado de <em>uma</em> pessoa. Você busca campo a campo, confirma candidatos, e só depois atribui a um caso novo ou escolhido. Não herda a Consulta.</dd></div>
+          <div><dt>Caso</dt><dd>Investigação persistida, sempre criada à parte. Recebe só o que você validou. Expandir o grafo é um passo seguinte (Procurar / Explodir QSA).</dd></div>
           <div><dt>Semente</dt><dd>Identificador que você plantou. A expansão parte delas.</dd></div>
           <div><dt>Grau</dt><dd>Distância até o alvo no QSA: alvo, sócio (g1), empresa do sócio (g2), e assim por diante, até o máximo 6.</dd></div>
           <div><dt>Evidência</dt><dd>Fato coletado com fonte, data, método e hash. É o que sustenta o nó e a aresta.</dd></div>
@@ -181,7 +181,7 @@
           <li><strong>CNPJ + nome no QSA</strong> — se o nome do alvo bate com um sócio oficial daquela empresa, o vínculo confirma mesmo sem CPF.</li>
           <li><strong>Veredito</strong> — na ficha: confirmado, provável, não confirmado, contestado, falso. Sempre com motivo (fonte ou contradição). Falso e contestado não entram na fila.</li>
           <li><strong>Decay</strong> — cargo ou endereço com ano antigo (ex.: 2019) aparece como <em>reconfirmar</em>. Não trate como atual.</li>
-          <li><strong>Desligar nó</strong> — apaga o nó e as arestas e <em>bloqueia</em> a chave. Explodir / processar não recria aquele identificador neste caso.</li>
+          <li><strong>Desligar nó</strong> — apaga o nó, as pessoas/empresas que só existiam por ele, e <em>bloqueia</em> as chaves. Explodir / processar não recria aqueles identificadores neste caso.</li>
         </ul>
         <p>CPF precisa dos dígitos verificadores da Receita. Celular de 11 dígitos (DDD + 9) não é lido como CPF. Número inválido no campo CPF é ignorado — não vira semente.</p>
       </section>
@@ -194,9 +194,9 @@
           <li>Escolha o tipo na fileira (<strong>Detectar</strong> reconhece sozinho, ou force Placa, CPF, Processo…).</li>
           <li>Cole o valor. <kbd>Enter</kbd> ou o botão <strong>exec</strong>. Atalho <kbd>/</kbd> foca o campo.</li>
           <li>Espere o dump: fatos, linha do tempo, árvore de vínculos, hits. Clique em qualquer título para abrir a <strong>ficha</strong> (modal). Nada abre site externo.</li>
-          <li>Opcional: <strong>Novo caso</strong> cria um grafo só com este resultado. <strong>Adicionar ao caso</strong> manda para o caso corrente (escolha um em Casos → Usar, ou crie em Montar caso).</li>
+          <li>Opcional: <strong>Novo caso</strong> cria um grafo só com este resultado. <strong>Adicionar ao caso</strong> exige escolher o caso na lista — não usa o caso anterior sozinho e não expande o grafo.</li>
         </ol>
-        <p>A consulta avulsa <em>não</em> grava no grafo. Guardar é um clique à parte. Se não houver caso corrente, “Adicionar” pede para escolher ou montar um.</p>
+        <p>A consulta avulsa <em>não</em> grava no grafo e <em>não</em> cola com a busca anterior. Guardar é um clique à parte.</p>
       </section>
 
       <section id="buscas" class="manual-section">
@@ -304,12 +304,12 @@
         <p class="type-tag">memória</p>
         <h2>Histórico e cadeia</h2>
         <p>À direita (ou abaixo no celular) fica o <strong>histórico</strong> das suas consultas nesta conta. Clique para repetir. <strong>Limpar</strong> apaga só o histórico, não os casos.</p>
-        <p>A <strong>cadeia</strong> junta buscas seguidas quando há identificador em comum (mesmo e-mail, mesmo @user…). Ações:</p>
+        <p>A <strong>última consulta</strong> aparece à parte. Uma busca <em>não</em> se cola à anterior por e-mail, @user ou hit — isso misturava gente errada no mesmo fio.</p>
         <ul>
-          <li><strong>Nova cadeia</strong> — corta o fio e começa outro.</li>
-          <li><strong>Guardar cadeia no grafo</strong> — cria um caso com todos os identificadores fortes do fio.</li>
+          <li><strong>Guardar caso</strong> — cria um caso novo só com esta consulta. Não expande o grafo sozinho.</li>
+          <li><strong>Nova cadeia</strong> — limpa o painel da última consulta.</li>
         </ul>
-        <p>Cadeia não mistura homônimos. Só cruza chave canônica (e-mail normalizado, CPF com dígitos, etc.). A memória <em>entre casos</em> é outra coisa: na ficha do nó, “esta chave também aparece no Caso X”.</p>
+        <p>Para juntar dados, use <strong>Alvo</strong> (confirmar camadas) ou <strong>Adicionar ao caso</strong> escolhendo o caso na lista.</p>
       </section>
 
       <section id="alvo" class="manual-section">
@@ -328,9 +328,9 @@
           <li>Clique <strong>Buscar nesta camada</strong>. A consulta daquele tipo roda e cruza com o que já está no dossiê.</li>
           <li>Hits <strong>confirmados</strong> vs <strong>candidatos</strong> aparecem separados. Homônimo no QSA fica candidato.</li>
           <li>E-mail deriva o local-part como @user (você pode buscar essa camada em seguida).</li>
-          <li>Quando houver âncora ou QSA com o nome, <strong>Abrir no grafo</strong> cria um caso “Alvo · …” ou acrescenta ao caso corrente.</li>
+          <li><strong>Atribuir ao caso</strong> cria um caso novo (por omissão) ou acrescenta ao caso que você escolher. Só vai o que você digitou ou confirmou. O grafo não explode sozinho.</li>
         </ol>
-        <p>Nome sozinho <em>não</em> abre grafo. A mensagem pede CPF, CNPJ, e-mail, telefone, placa ou @user.</p>
+        <p><strong>Novo alvo</strong> apaga o rascunho. Não mexe em casos. Nome sozinho <em>não</em> abre grafo — precisa de CPF, CNPJ, e-mail, telefone, placa ou @user.</p>
         <p>Na mesma página, <strong>Notícias e galeria do alvo</strong> testa sozinha combinações dos campos preenchidos (nome+empresa, nome+@user…). Veja o capítulo seguinte.</p>
       </section>
 
@@ -351,7 +351,7 @@
           <li>O servidor não baixa nem guarda as fotos — só exibe a URL da miniatura.</li>
           <li>Título e imagem <em>não</em> confirmam que a pessoa da foto é o alvo. Homônimo vale aqui também.</li>
           <li>Dez matérias iguais não são dez confirmações. Em Investigar, independência de fonte agrupa o eco.</li>
-          <li>Instâncias SearXNG caem; se vier vazio, tente de novo ou configure <code>SEARXNG_URL</code> / Brave / CSE.</li>
+          <li>Se a busca pública não responder, a área diz se as instâncias falharam ou se rodaram sem menção. Tente de novo ou configure <code>SEARXNG_URL</code> / Brave / CSE.</li>
         </ul>
       </section>
 
@@ -393,7 +393,7 @@
             <tr><th>Ação</th><th>O que faz</th></tr>
           </thead>
           <tbody>
-            <tr><td>Explodir QSA</td><td>Enfileira CNPJ/CPF e sócios. Cada sócio puxa as outras empresas até o grau máximo. A linha mostra o grau até o alvo.</td></tr>
+            <tr><td>Explodir QSA</td><td>Só âncoras ativas ligadas ao alvo. Depois limpa pessoa/empresa sem caminho até o alvo. Clique no título do caso para ver/completar CPF e demais dados — com âncora, a busca por nome não mistura homônimo.</td></tr>
             <tr><td>Processar</td><td>Roda o próximo lote da fila. Repita se ainda houver pendências no kpi “fila”. Cada consulta grava log (reprodutibilidade).</td></tr>
             <tr><td>Investigar</td><td>Playbook, hipóteses, lacunas, planner, caminho, clusters, qualidade e snapshots.</td></tr>
             <tr><td>Relatório</td><td>Dossiê HTML com capa, qualidade, veredito e citações <code>[n]</code>.</td></tr>
@@ -429,7 +429,7 @@
           <li><strong>Clique no nó</strong> — ficha maior no painel. Não navega sozinho.</li>
           <li><strong>Clique na aresta</strong> — tipo, força, período. <strong>Editar ligação</strong> abre o “por quê”.</li>
           <li><strong>Esc</strong> ou clique no fundo — fecha o balão.</li>
-          <li><strong>Botão direito</strong> (Rede / Árvore / Split): anotação, diagrama, seta (origem depois destino), abrir ficha, expandir, desligar, editar/apagar aresta.</li>
+          <li><strong>Botão direito</strong> (Rede / Árvore / Split): <em>Procurar informações deste nome</em> busca empresas e dados e joga no caso; também anotação, diagrama, seta, ficha, expandir, desligar.</li>
           <li>Modo seta: clique origem, depois destino. Tipos <code>SETA</code> ou <code>HIPOTESE</code>.</li>
           <li><strong>+</strong> / <strong>−</strong> no teclado também dão zoom, se o foco não estiver num campo.</li>
         </ul>
@@ -453,7 +453,7 @@
         <ul>
           <li><strong>Verificar</strong> — escolhe o veredito e o motivo. É o motor de verificação. Confirmar antigo ainda existe e marca confirmado.</li>
           <li><strong>Expandir</strong> — reconsulta as fontes deste nó (mesmo se já rodou).</li>
-          <li><strong>Desligar</strong> — tira o nó e bloqueia a chave neste caso.</li>
+          <li><strong>Desligar</strong> — tira o nó, o que só existia por ele, e bloqueia as chaves neste caso.</li>
           <li><strong>Editar</strong> — nome de exibição e nota da ficha. Mudança de nome, cargo ou endereço vira versão no tempo.</li>
           <li><strong>Mapa de ferramentas</strong> — abre a suíte já no tipo deste identificador.</li>
           <li><strong>Captura</strong> — abre o HTML preservado da evidência, se houver.</li>

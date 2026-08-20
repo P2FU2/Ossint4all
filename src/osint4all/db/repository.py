@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from osint4all.db.models import (
@@ -34,7 +34,18 @@ from osint4all.db.models import (
     ResearchPlan,
     VerificationRecord,
 )
-from osint4all.graph.identity import MAX_GRAPH_DEPTH, entity_status, has_expandable_anchor
+from osint4all.graph.identity import (
+    MAX_GRAPH_DEPTH,
+    TargetProfile,
+    collapse_name,
+    entity_status,
+    has_expandable_anchor,
+    is_active_node,
+    is_weak_name,
+    names_match,
+    profile_from_fields,
+)
+from osint4all.security import only_digits
 from osint4all.identifiers import STRONG_ID_KINDS
 
 EDGE_REL_TYPES = (
@@ -49,6 +60,8 @@ EDGE_REL_TYPES = (
     "CANDIDATO",
     "SAME_AS",
     "PARTE",
+    "PAI",
+    "MAE",
 )
 
 
@@ -65,8 +78,14 @@ CASE_ID_LABELS = {
     "USERNAME": "Usuário",
     "PLATE": "Placa",
     "CNJ": "Processo",
+    "BIRTHDATE": "Nascimento",
+    "FATHER": "Pai",
+    "MOTHER": "Mãe",
     "URL": "URL",
 }
+_TARGET_FIELD_KINDS = frozenset(
+    {"NAME", "CPF", "CNPJ", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ", "BIRTHDATE"}
+)
 
 
 def case_known_keys(session: Session, investigation_id: str) -> set[str]:
@@ -117,17 +136,324 @@ def case_identifiers(session: Session, investigation_id: str) -> list[dict[str, 
     return out
 
 
+def case_target_fields(session: Session, investigation_id: str) -> dict[str, str]:
+    """Nome, CPF e demais âncoras do alvo (semente primeiro)."""
+    fields: dict[str, str] = {}
+    entities = session.scalars(
+        select(Entity)
+        .options(selectinload(Entity.identifiers))
+        .where(Entity.investigation_id == investigation_id)
+        .order_by(Entity.is_seed.desc(), Entity.depth, Entity.display_name)
+    ).all()
+    for entity in entities:
+        attrs = entity.attrs or {}
+        if entity.is_seed and entity.entity_type == "PERSON":
+            name = (entity.display_name or "").strip()
+            if name.count(" ") >= 1:
+                fields.setdefault("NAME", name)
+            if attrs.get("nascimento"):
+                fields.setdefault("BIRTHDATE", str(attrs["nascimento"]))
+            if attrs.get("nome_pai"):
+                fields.setdefault("FATHER", str(attrs["nome_pai"]))
+            if attrs.get("nome_mae"):
+                fields.setdefault("MOTHER", str(attrs["nome_mae"]))
+        for ident in entity.identifiers or []:
+            kind = str(ident.kind or "").upper()
+            value = str(ident.value or "").strip()
+            if kind in _TARGET_FIELD_KINDS and value:
+                fields.setdefault(kind, value)
+        key = str(entity.canonical_key or "")
+        if key.startswith("cpf:") and "CPF" not in fields:
+            fields["CPF"] = key.split(":", 1)[1]
+        if key.startswith("cnpj:") and "CNPJ" not in fields:
+            fields["CNPJ"] = key.split(":", 1)[1]
+    return fields
+
+
+def case_target_profile(session: Session, investigation_id: str) -> TargetProfile:
+    return profile_from_fields(case_target_fields(session, investigation_id))
+
+
+def seed_entity_ids(session: Session, investigation_id: str) -> set[str]:
+    rows = session.scalars(
+        select(Entity.id).where(Entity.investigation_id == investigation_id, Entity.is_seed.is_(True))
+    ).all()
+    ids = {str(item) for item in rows}
+    if ids:
+        return ids
+    fallback = session.scalars(
+        select(Entity.id).where(Entity.investigation_id == investigation_id, Entity.depth == 0)
+    ).all()
+    return {str(item) for item in fallback}
+
+
+def _undirected_adj(session: Session, investigation_id: str) -> dict[str, set[str]]:
+    adj: dict[str, set[str]] = {}
+    for edge in session.scalars(select(Edge).where(Edge.investigation_id == investigation_id)):
+        src, dst = str(edge.from_entity_id), str(edge.to_entity_id)
+        adj.setdefault(src, set()).add(dst)
+        adj.setdefault(dst, set()).add(src)
+    return adj
+
+
+def _bfs_ids(starts: set[str], adj: dict[str, set[str]], *, blocked: set[str] | None = None) -> set[str]:
+    blocked = blocked or set()
+    seen: set[str] = set()
+    stack = [item for item in starts if item not in blocked]
+    while stack:
+        cur = stack.pop()
+        if cur in seen or cur in blocked:
+            continue
+        seen.add(cur)
+        for nxt in adj.get(cur, ()):
+            if nxt not in seen and nxt not in blocked:
+                stack.append(nxt)
+    return seen
+
+
+def linked_entity_ids(session: Session, investigation_id: str) -> set[str]:
+    seeds = seed_entity_ids(session, investigation_id)
+    if not seeds:
+        return set()
+    return _bfs_ids(seeds, _undirected_adj(session, investigation_id))
+
+
+def derived_entity_ids(session: Session, investigation_id: str, root_id: str) -> set[str]:
+    """Nós que só existem neste caso porque passam pelo `root_id`."""
+    adj = _undirected_adj(session, investigation_id)
+    keep = seed_entity_ids(session, investigation_id) - {root_id}
+    from_root = _bfs_ids({root_id}, adj)
+    from_keep = _bfs_ids(keep, adj, blocked={root_id}) if keep else set()
+    return (from_root - from_keep) | {root_id}
+
+
+def prune_unlinked_entities(session: Session, investigation_id: str) -> int:
+    """Tira pessoas/empresas que não têm caminho até o alvo."""
+    linked = linked_entity_ids(session, investigation_id)
+    seeds = seed_entity_ids(session, investigation_id)
+    if not seeds:
+        return 0
+    removed = 0
+    for entity in list(session.scalars(select(Entity).where(Entity.investigation_id == investigation_id))):
+        if entity.id in linked or entity.id in seeds or entity.is_seed:
+            continue
+        if entity.entity_type not in {"PERSON", "ORG"}:
+            continue
+        _delete_entity_local(session, investigation_id, entity, block=False)
+        removed += 1
+    return removed
+
+
 def get_investigation(session: Session, investigation_id: str) -> Investigation | None:
     return session.get(Investigation, investigation_id)
 
 
 def find_entity_by_key(session: Session, investigation_id: str, canonical_key: str) -> Entity | None:
-    return session.scalar(
+    key = (canonical_key or "").strip()
+    if not key:
+        return None
+    entity = session.scalar(
         select(Entity).where(
             Entity.investigation_id == investigation_id,
-            Entity.canonical_key == canonical_key,
+            Entity.canonical_key == key,
         )
     )
+    if entity:
+        return entity
+    ident = session.scalar(select(Identifier).where(Identifier.canonical_key == key))
+    if not ident:
+        return None
+    other = session.get(Entity, ident.entity_id)
+    if other and other.investigation_id == investigation_id:
+        return other
+    return None
+
+
+_FOLD_PREFIXES = ("cpf:", "email:", "phone:", "username:")
+_CARD_ID_KINDS = ("CPF", "EMAIL", "PHONE", "USERNAME", "BIRTHDATE", "CNPJ", "PLATE", "CNJ")
+
+
+def person_cpf(entity: Entity) -> str:
+    key = str(entity.canonical_key or "")
+    if key.startswith("cpf:"):
+        digits = only_digits(key.split(":", 1)[1])
+        return digits if len(digits) == 11 else ""
+    for ident in entity.identifiers or []:
+        if str(ident.kind or "").upper() == "CPF":
+            digits = only_digits(ident.value)
+            if len(digits) == 11:
+                return digits
+    return ""
+
+
+def find_person_by_name(session: Session, investigation_id: str, name: str) -> Entity | None:
+    if is_weak_name(name):
+        return None
+    people = session.scalars(
+        select(Entity)
+        .options(selectinload(Entity.identifiers))
+        .where(Entity.investigation_id == investigation_id, Entity.entity_type == "PERSON")
+    ).all()
+    hits = [row for row in people if names_match(row.display_name, name)]
+    if not hits:
+        return None
+    hits.sort(key=lambda row: (not row.is_seed, 0 if person_cpf(row) else 1, row.depth or 0))
+    return hits[0]
+
+
+def absorb_entity(session: Session, investigation_id: str, keeper: Entity, extra: Entity) -> None:
+    """Junta o nó extra no keeper: identificadores, arestas e evidências."""
+    if not keeper or not extra or keeper.id == extra.id:
+        return
+    if extra.is_seed:
+        keeper.is_seed = True
+    if extra.depth is not None and (keeper.depth or 0) > extra.depth:
+        keeper.depth = extra.depth
+    keeper.confidence = max(keeper.confidence or 0, extra.confidence or 0)
+    extra_key = str(extra.canonical_key or "")
+    if extra_key and extra_key != str(keeper.canonical_key or ""):
+        extra.canonical_key = f"absorbed:{extra.id}"
+        session.flush()
+        prefix = extra_key.split(":", 1)[0].upper()
+        if prefix in _CARD_ID_KINDS:
+            add_identifier(keeper, prefix, extra.display_name or extra_key, extra_key)
+        if extra_key.startswith("cpf:") and not str(keeper.canonical_key or "").startswith("cpf:"):
+            keeper.canonical_key = extra_key
+    if extra.display_name and (
+        not keeper.display_name
+        or keeper.display_name == keeper.canonical_key
+        or (len(extra.display_name) > len(keeper.display_name) and " " in extra.display_name)
+    ):
+        keeper.display_name = extra.display_name
+    attrs = dict(keeper.attrs or {})
+    for key, value in (extra.attrs or {}).items():
+        if value not in (None, "") and key not in attrs:
+            attrs[key] = value
+    if extra_key.startswith("username:"):
+        attrs.setdefault("username", extra.display_name)
+    keeper.attrs = attrs
+    for ident in list(extra.identifiers or []):
+        add_identifier(keeper, ident.kind, ident.value, ident.canonical_key)
+    edges = list(
+        session.scalars(
+            select(Edge).where(
+                Edge.investigation_id == investigation_id,
+                or_(Edge.from_entity_id == extra.id, Edge.to_entity_id == extra.id),
+            )
+        )
+    )
+    for edge in edges:
+        src = keeper.id if edge.from_entity_id == extra.id else edge.from_entity_id
+        dst = keeper.id if edge.to_entity_id == extra.id else edge.to_entity_id
+        session.delete(edge)
+        session.flush()
+        if src == dst:
+            continue
+        exists = session.scalar(
+            select(Edge).where(
+                Edge.investigation_id == investigation_id,
+                Edge.from_entity_id == src,
+                Edge.to_entity_id == dst,
+                Edge.rel_type == edge.rel_type,
+            )
+        )
+        if exists:
+            continue
+        session.add(
+            Edge(
+                investigation_id=investigation_id,
+                from_entity_id=src,
+                to_entity_id=dst,
+                rel_type=edge.rel_type,
+                confidence=edge.confidence,
+                attrs=dict(edge.attrs or {}),
+                source_connector=edge.source_connector,
+            )
+        )
+    session.execute(update(Evidence).where(Evidence.entity_id == extra.id).values(entity_id=keeper.id))
+    session.flush()
+    _delete_entity_local(session, investigation_id, extra, block="#cand:" in extra_key)
+
+
+def consolidate_identities(session: Session, investigation_id: str) -> int:
+    """Uma pessoa = um bloco. CPF/@user/e-mail/telefone entram no cartão, sem nó solto."""
+    merged = 0
+    entities = list(
+        session.scalars(
+            select(Entity)
+            .options(selectinload(Entity.identifiers))
+            .where(Entity.investigation_id == investigation_id)
+        )
+    )
+    people = [row for row in entities if row.entity_type == "PERSON"]
+    named = [
+        row
+        for row in people
+        if not is_weak_name(row.display_name) and not str(row.canonical_key or "").startswith(("father:", "mother:"))
+    ]
+    named_seeds = [row for row in named if row.is_seed]
+    seed_person = next((row for row in named_seeds if person_cpf(row)), None)
+    if seed_person is None and len(named_seeds) == 1:
+        seed_person = named_seeds[0]
+    if seed_person is None and len(named) == 1:
+        seed_person = named[0]
+
+    for row in list(entities):
+        key = str(row.canonical_key or "")
+        if not key.startswith(_FOLD_PREFIXES) or row.entity_type not in {"PERSON", "PROFILE"}:
+            continue
+        host = None
+        if key.startswith("cpf:"):
+            digits = only_digits(key.split(":", 1)[1])
+            host = next((p for p in people if p.id != row.id and person_cpf(p) == digits), None)
+            if host is None and len(named) == 1:
+                host = named[0]
+        else:
+            host = seed_person
+        if host is None or host.id == row.id:
+            continue
+        absorb_entity(session, investigation_id, host, row)
+        merged += 1
+
+    people = list(
+        session.scalars(
+            select(Entity)
+            .options(selectinload(Entity.identifiers))
+            .where(Entity.investigation_id == investigation_id, Entity.entity_type == "PERSON")
+        )
+    )
+    groups: dict[str, list[Entity]] = {}
+    for row in people:
+        if is_weak_name(row.display_name):
+            continue
+        groups.setdefault(collapse_name(row.display_name), []).append(row)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        by_cpf: dict[str, list[Entity]] = {}
+        nameless: list[Entity] = []
+        for row in group:
+            digits = person_cpf(row)
+            if digits:
+                by_cpf.setdefault(digits, []).append(row)
+            else:
+                nameless.append(row)
+        buckets = list(by_cpf.values())
+        if len(by_cpf) == 1:
+            buckets[0].extend(nameless)
+        elif not by_cpf:
+            buckets = [nameless]
+        else:
+            buckets.append(nameless)
+        for bucket in buckets:
+            if len(bucket) < 2:
+                continue
+            bucket.sort(key=lambda row: (not row.is_seed, 0 if person_cpf(row) else 1, row.depth or 0))
+            keeper = bucket[0]
+            for extra in bucket[1:]:
+                absorb_entity(session, investigation_id, keeper, extra)
+                merged += 1
+    return merged
 
 
 def enqueue_expand(
@@ -170,11 +496,17 @@ def enqueue_expand(
 
 
 def enqueue_qsa_network(session: Session, investigation: Investigation, *, max_attempts: int = 3) -> int:
-    """Enfileira CNPJ/CPF e sócios do QSA para puxar as outras empresas até o último grau."""
+    """Enfileira só âncoras ativas ligadas ao alvo — sem homônimo solto no grafo."""
     investigation.max_depth = max(investigation.max_depth or 0, MAX_GRAPH_DEPTH)
+    prune_unlinked_entities(session, investigation.id)
+    linked = linked_entity_ids(session, investigation.id)
     queued = 0
     entities = session.scalars(select(Entity).where(Entity.investigation_id == investigation.id)).all()
     for entity in entities:
+        if linked and entity.id not in linked and not entity.is_seed:
+            continue
+        if not is_active_node(entity):
+            continue
         if not has_expandable_anchor(entity):
             continue
         force = entity.entity_type == "ORG" or entity.canonical_key.startswith(("cnpj:", "cpf:"))
@@ -220,6 +552,47 @@ def job_counts(session: Session, investigation_id: str) -> dict[str, int]:
     return counts
 
 
+def graph_counts(session: Session, investigation_id: str) -> dict[str, int]:
+    entities = session.scalar(select(func.count()).select_from(Entity).where(Entity.investigation_id == investigation_id)) or 0
+    edges = session.scalar(select(func.count()).select_from(Edge).where(Edge.investigation_id == investigation_id)) or 0
+    return {"entities": int(entities), "edges": int(edges)}
+
+
+def requeue_stale_running_jobs(session: Session, investigation_id: str, *, older_than: int = 90) -> int:
+    """RUNNING órfão (aba fechada / timeout) volta para a fila."""
+    cutoff = utcnow() - timedelta(seconds=max(15, older_than))
+    rows = list(
+        session.scalars(
+            select(ExpansionJob).where(
+                ExpansionJob.investigation_id == investigation_id,
+                ExpansionJob.status == "RUNNING",
+            )
+        )
+    )
+    changed = 0
+    for job in rows:
+        started = job.started_at
+        if started is None:
+            job.status = "PENDING"
+            changed += 1
+            continue
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if started > cutoff:
+            continue
+        if (job.attempt_count or 0) >= (job.max_attempts or 3):
+            job.status = "FAILED"
+            job.last_error = (job.last_error or "interrompido")[:400]
+            job.finished_at = utcnow()
+        else:
+            job.status = "PENDING"
+            job.started_at = None
+        changed += 1
+    if changed:
+        session.flush()
+    return changed
+
+
 def add_identifier(entity: Entity, kind: str, value: str, canonical_key: str) -> Identifier:
     for existing in entity.identifiers:
         if existing.canonical_key == canonical_key:
@@ -235,9 +608,103 @@ def add_identifier(entity: Entity, kind: str, value: str, canonical_key: str) ->
     return ident
 
 
+def _card_ids(entity: Entity) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for ident in entity.identifiers or []:
+        kind = str(ident.kind or "").upper()
+        if kind not in _CARD_ID_KINDS:
+            continue
+        key = ident.canonical_key or f"{kind}:{ident.value}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"kind": kind, "value": str(ident.value or ""), "key": key})
+    key = str(entity.canonical_key or "")
+    prefix = key.split(":", 1)[0].upper() if ":" in key else ""
+    if prefix in _CARD_ID_KINDS and key not in seen:
+        out.insert(0, {"kind": prefix, "value": entity.display_name, "key": key})
+    return out
+
+
+def collapse_graph_view(nodes: list[dict[str, Any]], links: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """No desenho: mesma pessoa vira um bloco; CPF/@user entram no cartão."""
+    alias: dict[str, str] = {}
+    people = [n for n in nodes if n.get("type") == "PERSON"]
+    named = [n for n in people if not is_weak_name(str(n.get("label") or ""))]
+    seed = next((n for n in named if n.get("seed")), None) or (named[0] if len(named) == 1 else None)
+
+    def cpf_of(node: dict[str, Any]) -> str:
+        key = str(node.get("key") or "")
+        if key.startswith("cpf:"):
+            return only_digits(key.split(":", 1)[1])
+        for item in node.get("ids") or []:
+            if str(item.get("kind") or "").upper() == "CPF":
+                return only_digits(str(item.get("value") or ""))
+        return ""
+
+    for node in nodes:
+        key = str(node.get("key") or "")
+        if not key.startswith(_FOLD_PREFIXES) or node.get("type") not in {"PERSON", "PROFILE"}:
+            continue
+        host = seed
+        if key.startswith("cpf:"):
+            digits = only_digits(key.split(":", 1)[1])
+            host = next((p for p in people if p["id"] != node["id"] and cpf_of(p) == digits), host)
+        if host and host["id"] != node["id"]:
+            alias[node["id"]] = host["id"]
+            have = {(i.get("kind"), i.get("value")) for i in (host.get("ids") or [])}
+            extra = [i for i in (node.get("ids") or []) if (i.get("kind"), i.get("value")) not in have]
+            host["ids"] = list(host.get("ids") or []) + extra
+            if node.get("seed"):
+                host["seed"] = True
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for node in people:
+        if node["id"] in alias or is_weak_name(str(node.get("label") or "")):
+            continue
+        groups.setdefault(collapse_name(str(node.get("label") or "")), []).append(node)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda n: (not n.get("seed"), 0 if cpf_of(n) else 1, n.get("depth") or 0))
+        cpfs = {cpf_of(n) for n in group if cpf_of(n)}
+        if len(cpfs) > 1:
+            continue
+        keeper = group[0]
+        for extra in group[1:]:
+            alias[extra["id"]] = keeper["id"]
+            have = {(i.get("kind"), i.get("value")) for i in (keeper.get("ids") or [])}
+            keeper["ids"] = list(keeper.get("ids") or []) + [
+                i for i in (extra.get("ids") or []) if (i.get("kind"), i.get("value")) not in have
+            ]
+            if extra.get("seed"):
+                keeper["seed"] = True
+
+    if not alias:
+        return nodes, links
+    kept = [n for n in nodes if n["id"] not in alias]
+    rewritten = []
+    seen_edge: set[tuple[str, str, str]] = set()
+    for link in links:
+        src = alias.get(link["source"], link["source"])
+        dst = alias.get(link["target"], link["target"])
+        if src == dst:
+            continue
+        mark = (src, dst, str(link.get("type") or ""))
+        if mark in seen_edge:
+            continue
+        seen_edge.add(mark)
+        item = dict(link)
+        item["source"] = src
+        item["target"] = dst
+        rewritten.append(item)
+    return kept, rewritten
+
+
 def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
     entities = session.scalars(
-        select(Entity).where(Entity.investigation_id == investigation_id)
+        select(Entity).options(selectinload(Entity.identifiers)).where(Entity.investigation_id == investigation_id)
     ).all()
     edges = session.scalars(select(Edge).where(Edge.investigation_id == investigation_id)).all()
     nodes = [
@@ -250,6 +717,7 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
             "confidence": e.confidence,
             "key": e.canonical_key,
             "status": entity_status(e),
+            "ids": _card_ids(e),
             "attrs": {
                 k: e.attrs.get(k)
                 for k in (
@@ -271,6 +739,10 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "papel",
                     "nome",
                     "kind",
+                    "nascimento",
+                    "nome_pai",
+                    "nome_mae",
+                    "username",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
             },
@@ -297,6 +769,7 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                 "year": info["year"],
             }
         )
+    nodes, links = collapse_graph_view(nodes, links)
     years = sorted({int(link["year"]) for link in links if link.get("year")})
     inv = session.get(Investigation, investigation_id)
     return {
@@ -397,7 +870,14 @@ def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bo
     )
     if not entity:
         return False
-    _delete_entity_local(session, investigation_id, entity, block=True)
+    victims = derived_entity_ids(session, investigation_id, entity_id)
+    keep = seed_entity_ids(session, investigation_id) - {entity_id}
+    for vid in victims:
+        if vid in keep:
+            continue
+        row = session.get(Entity, vid)
+        if row and row.investigation_id == investigation_id:
+            _delete_entity_local(session, investigation_id, row, block=True)
     return True
 
 

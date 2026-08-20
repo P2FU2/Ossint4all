@@ -12,6 +12,7 @@ from osint4all.exceptions import SkippedDisabled
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
+from osint4all.graph.identity import name_search_blocked
 from osint4all.validators import socio_doc_matches_cpf, validate_cnpj, validate_cpf
 
 _CNPJ_RE = re.compile(r"\b(\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})\b")
@@ -193,6 +194,12 @@ class SocioSearchConnector:
         result = ConnectorResult()
         if cpf:
             result.merge(self.collect_by_cpf(cpf, origin))
+            return result
+        profile = getattr(ctx, "profile", None)
+        if name_search_blocked(name, profile):
+            result.notes.append(
+                "Este é o alvo e o caso já tem CPF/contato. A busca por nome fica desligada para não misturar homônimo."
+            )
             return result
         result.merge(self._casadosdados(name, origin, name_only=True))
         if self.settings.brasil_io_api_token:

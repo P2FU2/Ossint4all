@@ -60,6 +60,7 @@ class ExpandContext:
     investigation: Investigation
     settings: Settings
     enabled: set[str]
+    profile: Any = None
 
 
 class Connector(Protocol):

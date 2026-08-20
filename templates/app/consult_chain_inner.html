@@ -2,18 +2,14 @@
 <section class="chain-box {% if chain.linked %}is-linked{% endif %}" aria-label="Cadeia de consultas">
   <header class="chain-head">
     <div>
-      <p class="eyebrow">ponto de cadeia</p>
+      <p class="eyebrow">última consulta</p>
       <h2>{{ chain.title }}</h2>
-      {% if chain.linked %}
-      <p class="lede">{{ chain.steps|length }} consultas ligadas{% if chain.shared %} · {{ chain.shared|join(", ") }}{% endif %}</p>
-      {% else %}
-      <p class="lede">Ponto de cadeia.</p>
-      {% endif %}
+      <p class="lede">Consulta isolada. Não cola com busca anterior. Só vira caso se você atribuir.</p>
     </div>
     <div class="chain-actions">
       <form method="post" action="/app/cadeia/grafo" data-busy="Criando caso" data-done="Caso criado.">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <button class="btn primary" type="submit" data-tip="Cria um caso com todos os identificadores desta cadeia">guardar caso</button>
+        <button class="btn primary" type="submit" data-tip="Cria um caso novo só com esta consulta. Sem expandir o grafo.">guardar caso</button>
       </form>
       {% if chain.export %}
       <button type="button" class="btn ghost" data-chain-export data-tip="Copia o fio e os achados para a área de transferência">copiar fio</button>

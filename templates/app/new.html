@@ -34,11 +34,14 @@
 
   <fieldset class="seed-grid">
     <legend>Identificadores</legend>
-    <label data-tip="Pessoa. A Receita não devolve o nome pelo CPF.">CPF <input name="seed_cpf" placeholder="000.000.000-00" /></label>
-    <label data-tip="Empresa. Puxa QSA oficial.">CNPJ <input name="seed_cnpj" placeholder="00.000.000/0001-00" /></label>
+    <label data-tip="Pessoa. A Receita não devolve o nome pelo CPF.">CPF <input name="seed_cpf" data-mask="cpf" inputmode="numeric" placeholder="000.000.000-00" /></label>
+    <label data-tip="Empresa. Puxa QSA oficial.">CNPJ <input name="seed_cnpj" data-mask="cnpj" inputmode="numeric" placeholder="00.000.000/0001-00" /></label>
     <label data-tip="Rede societária na base aberta da Receita.">Nome <input name="seed_name" placeholder="Nome completo" /></label>
     <label data-tip="Só menções públicas. Sem caixa de e-mail.">E-mail <input name="seed_email" placeholder="nome@dominio.com" /></label>
-    <label data-tip="Só se já apareceu em fonte pública. Sem operadora.">Telefone <input name="seed_phone" placeholder="11 99999-0000" /></label>
+    <label data-tip="Só se já apareceu em fonte pública. Sem operadora.">Telefone <input name="seed_phone" data-mask="phone" inputmode="numeric" placeholder="11 99999-0000" /></label>
+    <label data-tip="Data que você já tem de fonte lícita.">Data de nascimento <input name="seed_birth" data-mask="date" inputmode="numeric" placeholder="00/00/0000" /></label>
+    <label data-tip="Filiação. Entra no dossiê e no grafo como pessoa.">Nome do pai <input name="seed_father" placeholder="Nome completo" /></label>
+    <label data-tip="Filiação. Entra no dossiê e no grafo como pessoa.">Nome da mãe <input name="seed_mother" placeholder="Nome completo" /></label>
     <label data-tip="Checagem de URLs públicas, sem login.">Usuário <input name="seed_username" placeholder="@usuario" /></label>
     <label data-tip="Número unificado. DataJud e menções públicas.">Processo CNJ <input name="seed_cnj" placeholder="0000000-00.0000.0.00.0000" /></label>
     <label data-tip="Série histórica e portais. Sem dono no DETRAN.">Placa <input name="seed_plate" placeholder="ABC1D23" /></label>

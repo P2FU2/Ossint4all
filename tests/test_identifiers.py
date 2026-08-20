@@ -2,6 +2,7 @@ from osint4all.identifiers import (
     canonical_key,
     collect_form_seeds,
     detect_kind,
+    normalize_birth,
     parse_seed,
     parse_seed_lines,
     seeds_from_kind_values,
@@ -55,3 +56,18 @@ def test_consult_modes_do_not_fake_entity_kind() -> None:
     assigned = seeds_from_kind_values([("PROCESSOS", "0000123-45.2024.8.26.0100"), ("PROCESSOS", "0000123-45.2024.8.26.0100")])
     assert len(assigned) == 1
     assert assigned[0].kind == "CNJ"
+
+
+def test_birth_and_filiation_seeds() -> None:
+    assert normalize_birth("14061980") == "14/06/1980"
+    assert normalize_birth("14/06/1980") == "14/06/1980"
+    assert normalize_birth("99/99/9999") is None
+    assert parse_seed("14061980", forced_kind="BIRTHDATE").value == "14/06/1980"
+    seeds = collect_form_seeds(
+        seed_name="Eduardo Hermelino Leite",
+        seed_birth="14/06/1980",
+        seed_father="Joao da Silva",
+        seed_mother="Maria da Silva",
+    )
+    kinds = {s.kind for s in seeds}
+    assert kinds == {"NAME", "BIRTHDATE", "FATHER", "MOTHER"}

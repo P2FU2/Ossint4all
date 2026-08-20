@@ -70,14 +70,15 @@
         <input name="owner" placeholder="Nome (opcional)" autocomplete="off" />
       </label>
       {% endif %}
-      <label class="save-extra" data-tip="Caso que recebe este identificador">Caso
-        <select name="investigation_id">
+      <label class="save-extra" data-tip="Escolha o caso. Nada vai sozinho para a consulta ou o caso anterior.">Caso
+        <select name="investigation_id" required>
+          <option value="" selected>Escolha o caso</option>
           {% for c in cases %}
-          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+          <option value="{{ c.id }}">{{ c.title }}</option>
           {% endfor %}
         </select>
       </label>
-      <button class="btn primary" type="submit" data-tip="Adiciona ao caso escolhido e expande o grafo">Adicionar ao caso</button>
+      <button class="btn primary" type="submit" data-tip="Adiciona só este identificador ao caso escolhido. Sem expandir o grafo.">Adicionar ao caso</button>
     </form>
     {% endif %}
     <form class="save-form" method="post" action="/app/consultar/grafo" data-busy="Criando caso" data-done="Caso criado.">
@@ -89,7 +90,7 @@
         <input name="owner" placeholder="Nome (opcional)" autocomplete="off" />
       </label>
       {% endif %}
-      <button class="btn" type="submit" data-tip="Cria um caso novo só com este resultado">Novo caso</button>
+      <button class="btn" type="submit" data-tip="Cria um caso novo só com este resultado. Sem ligar a buscas anteriores.">Novo caso</button>
     </form>
     <a class="btn" href="/app/ferramentas?tool={{ tool_id_for_kind(result.kind) }}&amp;q={{ result.query|urlencode }}" data-tip="Abre a suíte embutida neste tipo">Ferramentas</a>
     <a class="btn ghost" href="/app?modo={{ result.kind }}" data-tip="Nova consulta do mesmo tipo">Outra consulta</a>

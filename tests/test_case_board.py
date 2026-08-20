@@ -3,18 +3,24 @@ from osint4all.db.models import BlockedKey, CaseNote, Edge, Entity, Evidence, Ex
 from osint4all.db.repository import (
     add_case_note,
     case_identifiers,
+    case_target_fields,
+    collapse_graph_view,
+    consolidate_identities,
     blocked_key_set,
     create_manual_edge,
     delete_case_note,
     delete_edge,
     detach_entity,
+    graph_counts,
     graph_payload,
     purge_investigation,
+    requeue_stale_running_jobs,
     save_graph_layout,
     update_edge,
+    utcnow,
 )
 from osint4all.graph.resolve import apply_result
-from osint4all.graph.seed import create_investigation
+from osint4all.graph.seed import attach_person_profile, create_investigation
 from osint4all.identifiers import parse_seed
 from sqlalchemy import select
 
@@ -153,6 +159,118 @@ def test_case_identifiers_lists_seeds(settings, db) -> None:
     rows = case_identifiers(db, inv.id)
     kinds = {item["kind"] for item in rows}
     assert "CPF" in kinds
+    fields = case_target_fields(db, inv.id)
+    assert fields.get("CPF")
+
+
+def test_detach_removes_derived_people_and_companies(settings, db) -> None:
+    inv = _case(db)
+    person = inv.entities[0]
+    company = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={},
+        depth=1,
+    )
+    partner = Entity(
+        investigation_id=inv.id,
+        entity_type="PERSON",
+        canonical_key="name:joao pereira lima",
+        display_name="Joao Pereira Lima",
+        attrs={"status": "unconfirmed"},
+        depth=2,
+    )
+    extra = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:00000000000191",
+        display_name="Outra",
+        attrs={},
+        depth=0,
+        is_seed=True,
+    )
+    db.add_all([company, partner, extra])
+    db.flush()
+    db.add_all(
+        [
+            Edge(investigation_id=inv.id, from_entity_id=person.id, to_entity_id=company.id, rel_type="SOCIO"),
+            Edge(investigation_id=inv.id, from_entity_id=company.id, to_entity_id=partner.id, rel_type="SOCIO"),
+        ]
+    )
+    db.flush()
+    assert detach_entity(db, inv.id, company.id)
+    assert db.get(Entity, company.id) is None
+    assert db.get(Entity, partner.id) is None
+    assert db.get(Entity, person.id) is not None
+    assert db.get(Entity, extra.id) is not None
+
+
+def test_same_person_stays_in_one_block(settings, db) -> None:
+    seed = parse_seed("Eduardo Hermelino Leite", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=[],
+        max_depth=2,
+        monitor=False,
+        created_by="tester",
+    )
+    person = next(e for e in inv.entities if e.is_seed)
+    twin = Entity(
+        investigation_id=inv.id,
+        entity_type="PERSON",
+        canonical_key="name:eduardo hermelino leite#cand:qsa:1",
+        display_name="Eduardo Hermelino Leite",
+        attrs={"status": "unconfirmed"},
+        depth=2,
+    )
+    user = Entity(
+        investigation_id=inv.id,
+        entity_type="PROFILE",
+        canonical_key="username:ehleite",
+        display_name="ehleite",
+        attrs={"seed": True},
+        depth=0,
+        is_seed=True,
+    )
+    db.add_all([twin, user])
+    db.flush()
+    db.add(Edge(investigation_id=inv.id, from_entity_id=twin.id, to_entity_id=person.id, rel_type="ADMIN"))
+    db.flush()
+    assert consolidate_identities(db, inv.id) >= 1
+    db.expire_all()
+    people = [e for e in db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON"))]
+    assert len(people) == 1
+    kinds = {i.kind for i in people[0].identifiers}
+    assert "USERNAME" in kinds or (people[0].canonical_key or "").startswith("username:") or any(
+        (people[0].attrs or {}).get("username")
+    )
+    payload = graph_payload(db, inv.id)
+    labels = [n["label"] for n in payload["nodes"] if n["type"] == "PERSON"]
+    assert labels.count("Eduardo Hermelino Leite") == 1
+    edu = next(n for n in payload["nodes"] if n["type"] == "PERSON")
+    assert any(i["kind"] == "USERNAME" for i in edu["ids"])
+
+
+def test_collapse_graph_view_merges_duplicate_name() -> None:
+    nodes = [
+        {"id": "a", "label": "Eduardo Hermelino Leite", "type": "PERSON", "seed": True, "key": "name:edu", "ids": [{"kind": "CPF", "value": "52998224725"}]},
+        {"id": "b", "label": "Eduardo Hermelino Leite", "type": "PERSON", "seed": False, "key": "name:edu#cand:2", "ids": []},
+        {"id": "c", "label": "EHL Gestao", "type": "ORG", "seed": False, "key": "cnpj:1", "ids": []},
+    ]
+    links = [
+        {"id": "1", "source": "a", "target": "c", "type": "ADMIN"},
+        {"id": "2", "source": "b", "target": "c", "type": "ADMIN"},
+    ]
+    kept, edges = collapse_graph_view(nodes, links)
+    people = [n for n in kept if n["type"] == "PERSON"]
+    assert len(people) == 1
+    assert len(edges) == 1
+    assert edges[0]["source"] == "a"
 
 
 def test_diagram_note_lands_on_graph(settings, db) -> None:
@@ -243,3 +361,52 @@ def test_graph_layout_persists_on_case(settings, db) -> None:
     payload = graph_payload(db, inv.id)
     assert payload["layout"]["pan"]["x"] == 40
     assert payload["layout"]["nodes"][entity.id]["y"] == 222.8
+
+
+def test_person_profile_birth_and_parents(settings, db) -> None:
+    from osint4all.graph.seed import add_seed_entities
+    from osint4all.identifiers import collect_form_seeds
+
+    inv = _case(db)
+    add_seed_entities(db, inv, collect_form_seeds(seed_father="Joao da Silva Souza", seed_mother="Maria da Silva Souza"))
+    person = attach_person_profile(
+        db,
+        inv,
+        birth="14061980",
+        father="Joao da Silva Souza",
+        mother="Maria da Silva Souza",
+        cpf="529.982.247-25",
+    )
+    assert person is not None
+    assert person.attrs.get("nascimento") == "14/06/1980"
+    assert person.attrs.get("nome_pai") == "Joao da Silva Souza"
+    rels = {edge.rel_type for edge in db.scalars(select(Edge).where(Edge.investigation_id == inv.id))}
+    assert {"PAI", "MAE"} <= rels
+
+
+def test_graph_counts_are_cheap(db) -> None:
+    inv = _case(db)
+    size = graph_counts(db, inv.id)
+    assert size["entities"] >= 1
+    assert size["edges"] >= 0
+
+
+def test_stale_running_job_returns_to_queue(db) -> None:
+    from datetime import timedelta
+
+    inv = _case(db)
+    person = db.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON"))
+    assert person is not None
+    job = ExpansionJob(
+        investigation_id=inv.id,
+        entity_id=person.id,
+        status="RUNNING",
+        started_at=utcnow() - timedelta(minutes=5),
+        attempt_count=1,
+        max_attempts=3,
+    )
+    db.add(job)
+    db.flush()
+    assert requeue_stale_running_jobs(db, inv.id, older_than=90) == 1
+    db.refresh(job)
+    assert job.status == "PENDING"

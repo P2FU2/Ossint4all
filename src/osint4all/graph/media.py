@@ -214,16 +214,22 @@ def plan_search_combos(fields: dict[str, str], *, extra: str = "") -> list[Searc
     return combos[:8]
 
 
-def fields_from_identifiers(rows: list[dict[str, Any]], *, company: str = "") -> dict[str, str]:
+def fields_from_identifiers(rows: list[dict[str, Any]], *, company: str = "", name: str = "") -> dict[str, str]:
     fields: dict[str, str] = {}
-    for row in rows:
+    ranked = sorted(rows, key=lambda row: 0 if row.get("seed") else 1)
+    for row in ranked:
         kind = str(row.get("kind") or "").upper()
-        if kind in fields or kind == "CPF":
+        if kind in fields or kind in {"CPF", "FATHER", "MOTHER", "BIRTHDATE", "PHONE"}:
             continue
-        fields[kind] = str(row.get("value") or "")
+        value = str(row.get("value") or "").strip()
+        if value:
+            fields[kind] = value
     text = (company or "").strip()
     if text and "COMPANY" not in fields and not validate_cnpj(text) and not text.isdigit():
         fields["COMPANY"] = text
+    person = (name or "").strip()
+    if person and " " in person and "NAME" not in fields:
+        fields["NAME"] = person
     return fields
 
 
@@ -345,8 +351,11 @@ def collect_target_media(
     conn = WebSearchConnector(settings)
     seen_news: set[str] = set()
     seen_img: set[str] = set()
+    empty_runs = 0
     for combo in combos:
         rows = _fetch_category(conn, settings, combo.query, combo.category)
+        if not rows:
+            empty_runs += 1
         if combo.category == "news":
             for item in parse_news_rows(rows, source=combo.label):
                 if item.url in seen_news:
@@ -364,7 +373,14 @@ def collect_target_media(
     out.news = out.news[:10]
     out.images = out.images[:12]
     if not out.news and not out.images:
-        out.notes.append("Nenhuma menção ou miniatura pública nesta passagem. As instâncias de busca caem com frequência.")
+        if empty_runs == len(combos):
+            out.notes.append(
+                "Nenhuma instância de busca respondeu agora. Tente de novo daqui a pouco ou configure Brave / Google CSE."
+            )
+        else:
+            out.notes.append(
+                "As combinações rodaram, mas não veio menção ou miniatura pública nesta passagem."
+            )
     else:
         out.notes.append(
             "Cada combinação especializa a anterior (nome+empresa, nome+@user…). "
@@ -376,6 +392,8 @@ def collect_target_media(
 def _fetch_category(conn: WebSearchConnector, settings: Settings, query: str, category: str) -> list[dict[str, Any]]:
     if settings.brave_search_api_key:
         rows = _brave_category(conn, query, category)
+        if not rows and category == "news":
+            rows = _brave_web(conn, query)
         if rows:
             return rows
     if category == "images" and settings.google_cse_api_key and settings.google_cse_cx:
@@ -383,12 +401,16 @@ def _fetch_category(conn: WebSearchConnector, settings: Settings, query: str, ca
         if rows:
             return rows
     if settings.searxng_enable:
-        return _searxng_category(conn, settings, query, category)
+        rows = _searxng_category(conn, settings, query, category)
+        if rows:
+            return rows
+        if category != "general":
+            return _searxng_category(conn, settings, query, "general")
     return []
 
 
 def _searxng_category(conn: WebSearchConnector, settings: Settings, query: str, category: str) -> list[dict[str, Any]]:
-    for base in searxng_bases(settings)[:2]:
+    for base in searxng_bases(settings)[:4]:
         try:
             resp = conn.http.request(
                 "GET",
@@ -432,6 +454,28 @@ def _brave_category(conn: WebSearchConnector, query: str, category: str) -> list
     except Exception:
         return []
     rows = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _brave_web(conn: WebSearchConnector, query: str) -> list[dict[str, Any]]:
+    try:
+        resp = conn.http.request(
+            "GET",
+            "https://api.search.brave.com/res/v1/web/search",
+            headers={"X-Subscription-Token": conn.settings.brave_search_api_key, "Accept": "application/json"},
+            params={"q": query, "count": 10},
+        )
+    except Exception:
+        return []
+    if resp.status_code >= 400:
+        return []
+    try:
+        data = resp.json()
+    except Exception:
+        return []
+    rows = ((data.get("web") or {}).get("results")) if isinstance(data, dict) else None
     if not isinstance(rows, list):
         return []
     return [row for row in rows if isinstance(row, dict)]

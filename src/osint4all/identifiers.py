@@ -69,6 +69,13 @@ def canonical_key(kind: str, value: str) -> str:
         return f"plate:{normalize_plate(value)}"
     if kind == "NAME":
         return f"name:{_collapse_name(value).casefold()}"
+    if kind == "BIRTHDATE":
+        stamp = normalize_birth(value) or (value or "").strip()
+        return f"birth:{only_digits(stamp)}"
+    if kind == "FATHER":
+        return f"father:{_collapse_name(value).casefold()}"
+    if kind == "MOTHER":
+        return f"mother:{_collapse_name(value).casefold()}"
     return f"{kind.lower()}:{(value or '').strip().casefold()}"
 
 
@@ -84,6 +91,9 @@ def entity_type_for_kind(kind: str) -> str:
         "USERNAME": "PROFILE",
         "URL": "PROFILE",
         "PLATE": "VEHICLE",
+        "BIRTHDATE": "PERSON",
+        "FATHER": "PERSON",
+        "MOTHER": "PERSON",
     }.get(kind.upper(), "PERSON")
 
 
@@ -100,6 +110,11 @@ def parse_seed(raw: str, *, forced_kind: str | None = None) -> ParsedSeed | None
         return None
     if kind == "CNPJ" and not validate_cnpj(text):
         return None
+    if kind == "BIRTHDATE":
+        stamp = normalize_birth(text)
+        if not stamp:
+            return None
+        text = stamp
     key = canonical_key(kind, text)
     display = text.lstrip("@")
     if kind == "CNJ":
@@ -111,6 +126,8 @@ def parse_seed(raw: str, *, forced_kind: str | None = None) -> ParsedSeed | None
         display = text.lstrip("@")
     elif kind == "PLATE":
         display = format_plate(text)
+    elif kind == "BIRTHDATE":
+        display = text
     return ParsedSeed(
         kind=kind,
         value=text,
@@ -154,6 +171,21 @@ def detect_kind(raw: str) -> str | None:
     return None
 
 
+def normalize_birth(value: str) -> str | None:
+    text = (value or "").strip()
+    match = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$", text)
+    if match:
+        day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    else:
+        digits = only_digits(text)
+        if len(digits) != 8:
+            return None
+        day, month, year = int(digits[:2]), int(digits[2:4]), int(digits[4:])
+    if not (1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2100):
+        return None
+    return f"{day:02d}/{month:02d}/{year}"
+
+
 def parse_seed_lines(blob: str) -> list[ParsedSeed]:
     return dedupe_seeds(parse_seed(line) for line in (blob or "").splitlines())
 
@@ -186,6 +218,9 @@ def collect_form_seeds(
     seed_plate_owner: str = "",
     seed_plate_cpf: str = "",
     seed_cnj: str = "",
+    seed_birth: str = "",
+    seed_father: str = "",
+    seed_mother: str = "",
 ) -> list[ParsedSeed]:
     extras = [
         parse_seed(seed_cpf, forced_kind="CPF"),
@@ -198,5 +233,8 @@ def collect_form_seeds(
         parse_seed(seed_plate, forced_kind="PLATE") if looks_like_plate(seed_plate) else None,
         parse_seed(seed_plate_cpf, forced_kind="CPF"),
         parse_seed(seed_plate_owner, forced_kind="NAME"),
+        parse_seed(seed_father, forced_kind="FATHER"),
+        parse_seed(seed_mother, forced_kind="MOTHER"),
+        parse_seed(seed_birth, forced_kind="BIRTHDATE"),
     ]
     return dedupe_seeds([*parse_seed_lines(seeds), *extras])

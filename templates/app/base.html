@@ -6,9 +6,9 @@
   <title>{% block title %}{{ app_name }}{% endblock %} · {{ brand }}</title>
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/app.css?v=35" />
+  <link rel="stylesheet" href="/static/app.css?v=39" />
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="/static/app.js?v=25" defer></script>
+  <script src="/static/app.js?v=28" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -33,7 +33,7 @@
       </nav>
       <div class="sidebar-foot">
         {% if current_case_id %}
-        <a class="nav-link" href="/app/casos/{{ current_case_id }}" data-tip="Caso que recebe as buscas agora">Caso corrente</a>
+        <a class="nav-link" href="/app/casos/{{ current_case_id }}" data-tip="Último caso que você abriu. Consultas não entram aqui sozinhas.">Caso corrente</a>
         {% endif %}
         <div class="user-chip" data-tip="Conta desta sessão">{{ user.username }} · {{ user.role }}</div>
         <form method="post" action="/logout">

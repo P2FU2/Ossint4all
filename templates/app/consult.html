@@ -7,11 +7,11 @@
     <li class="is-done">Tipo</li>
     <li class="{% if result %}is-done{% else %}is-now{% endif %}">Valor</li>
     <li class="{% if result %}is-now{% else %}is-next{% endif %}">Resultado</li>
-    <li class="{% if chain and chain.linked %}is-now{% else %}is-next{% endif %}">Cadeia</li>
+    <li class="is-next">Caso (só se atribuir)</li>
   </ol>
 
   <section class="consult-hero">
-    <p class="eyebrow" data-tip="Consulta pontual. Não cria caso até você clicar em Guardar.">shell de consulta</p>
+    <p class="eyebrow" data-tip="Consulta pontual. Não liga a buscas anteriores nem cria caso até você atribuir.">shell de consulta</p>
     <h1>scan_target</h1>
     <p class="lede sr-only">Consulta pontual em fontes públicas.</p>
   </section>

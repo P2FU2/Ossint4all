@@ -3,15 +3,86 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from osint4all.db.models import Entity
 from osint4all.identifiers import canonical_key
+from osint4all.security import only_digits
+from osint4all.validators import validate_cpf
 
 if TYPE_CHECKING:
     from osint4all.connectors.base import FoundEntity
 
 MAX_GRAPH_DEPTH = 6
+
+
+@dataclass(frozen=True)
+class TargetProfile:
+    """Âncoras do alvo neste caso. Nome sozinho não segura identidade."""
+
+    name: str = ""
+    cpf: str = ""
+    emails: frozenset[str] = field(default_factory=frozenset)
+    phones: frozenset[str] = field(default_factory=frozenset)
+    birth: str = ""
+    cnpjs: frozenset[str] = field(default_factory=frozenset)
+
+    @property
+    def has_person_anchor(self) -> bool:
+        return bool(self.cpf or self.emails or self.phones or self.birth)
+
+
+def profile_from_fields(fields: dict[str, str] | None) -> TargetProfile:
+    bag = {str(k).upper(): str(v or "").strip() for k, v in (fields or {}).items() if str(v or "").strip()}
+    cpf = only_digits(bag.get("CPF") or "")
+    emails = frozenset({bag["EMAIL"].lower()}) if bag.get("EMAIL") else frozenset()
+    phones = frozenset({only_digits(bag["PHONE"])}) if bag.get("PHONE") else frozenset()
+    cnpj = only_digits(bag.get("CNPJ") or "")
+    return TargetProfile(
+        name=bag.get("NAME") or "",
+        cpf=cpf if validate_cpf(cpf) else "",
+        emails=emails,
+        phones=phones if len(next(iter(phones), "")) >= 10 else frozenset(),
+        birth=bag.get("BIRTHDATE") or bag.get("NASCIMENTO") or "",
+        cnpjs=frozenset({cnpj}) if len(cnpj) == 14 else frozenset(),
+    )
+
+
+def bind_found_to_profile(found: FoundEntity, profile: TargetProfile | None) -> str:
+    """keep | skip | remap — remap liga o nome do alvo ao nó que já tem CPF."""
+    if not profile or not profile.has_person_anchor:
+        return "keep"
+    label = str(getattr(found, "display_name", "") or getattr(found, "value", "") or "")
+    same_name = bool(profile.name and names_match(label, profile.name))
+    kind = str(getattr(found, "kind", "") or "").upper()
+    if kind == "CPF":
+        digits = only_digits(str(getattr(found, "value", "") or ""))
+        if profile.cpf and digits == profile.cpf:
+            return "keep"
+        if profile.cpf and digits != profile.cpf and same_name:
+            return "skip"
+        return "keep"
+    if kind == "NAME" and same_name:
+        return "remap"
+    if kind in {"EMAIL", "PHONE", "USERNAME", "BIRTHDATE"} and same_name:
+        return "remap"
+    return "keep"
+
+
+def seed_fits_profile(kind: str, value: str, display_name: str, profile: TargetProfile | None) -> bool:
+    """Impede gravar no caso o mesmo nome com outro CPF."""
+    if not profile or not profile.has_person_anchor:
+        return True
+    kind = (kind or "").upper()
+    label = display_name or value or ""
+    if kind == "CPF" and profile.cpf:
+        digits = only_digits(value)
+        if digits != profile.cpf and profile.name and names_match(label, profile.name):
+            return False
+    if kind == "NAME" and profile.cpf and profile.name and names_match(value, profile.name):
+        return False
+    return True
 
 
 def collapse_name(value: str) -> str:
@@ -25,6 +96,13 @@ def name_tokens(value: str) -> list[str]:
 def names_match(left: str, right: str) -> bool:
     a, b = collapse_name(left), collapse_name(right)
     return bool(a) and a == b
+
+
+def name_search_blocked(name: str, profile: TargetProfile | None) -> bool:
+    """Só bloqueia busca por nome do próprio alvo quando o caso já tem âncora."""
+    if not profile or not profile.has_person_anchor or not profile.name:
+        return False
+    return names_match(name or "", profile.name)
 
 
 def is_weak_name(value: str) -> bool:
@@ -76,7 +154,11 @@ def has_expandable_anchor(obj: FoundEntity | Entity | dict[str, Any] | None) -> 
     return str(attrs.get("kind") or "") in _EXPAND_KINDS
 
 
-def should_enqueue_child(found: FoundEntity, entity: Entity) -> bool:
+def is_active_node(obj: FoundEntity | Entity | dict[str, Any] | None) -> bool:
+    return entity_status(obj) not in {"false", "rejected", "contested"}
+
+
+def should_enqueue_child(found: FoundEntity, entity: Entity, profile: TargetProfile | None = None) -> bool:
     found_type = str(getattr(found, "entity_type", "") or "")
     entity_type = str(getattr(entity, "entity_type", "") or "")
     if found_type == "PROFILE" or entity_type == "PROFILE":
@@ -86,6 +168,8 @@ def should_enqueue_child(found: FoundEntity, entity: Entity) -> bool:
     if entity_status(found) in {"false", "rejected", "contested"}:
         return False
     if entity_status(entity) in {"false", "rejected", "contested"}:
+        return False
+    if profile and profile.has_person_anchor and not has_expandable_anchor(found):
         return False
     if has_expandable_anchor(found) or has_expandable_anchor(entity):
         return True

@@ -95,6 +95,23 @@ def test_media_queries_use_full_name() -> None:
     assert "nome + domínio (notícia)" in queries
 
 
+def test_fields_prefer_seed_name_and_skip_filiation() -> None:
+    fields = fields_from_identifiers(
+        [
+            {"kind": "NAME", "value": "Homônimo Qualquer", "seed": False},
+            {"kind": "NAME", "value": "Maria Silva Souza", "seed": True},
+            {"kind": "FATHER", "value": "Joao da Silva"},
+            {"kind": "CPF", "value": "529.982.247-25"},
+        ],
+        name="Eduardo Hermelino Leite",
+    )
+    assert fields["NAME"] == "Maria Silva Souza"
+    assert "FATHER" not in fields
+    assert "CPF" not in fields
+    only_title = fields_from_identifiers([], name="Eduardo Hermelino Leite")
+    assert only_title["NAME"] == "Eduardo Hermelino Leite"
+
+
 def test_fields_from_identifiers_add_company_not_cnpj() -> None:
     fields = fields_from_identifiers(
         [{"kind": "NAME", "value": "Maria Silva Souza"}, {"kind": "CPF", "value": "529.982.247-25"}],
@@ -131,6 +148,26 @@ def test_parse_news_and_images() -> None:
     assert len(images) == 1
     assert images[0].thumb.startswith("https://")
     assert images[0].via == "nome + empresa (foto)"
+
+
+def test_collect_explains_dead_instances(monkeypatch, settings) -> None:
+    from osint4all.graph import media as media_mod
+
+    monkeypatch.setattr(media_mod, "web_search_ready", lambda _settings: True)
+    monkeypatch.setattr(media_mod, "_fetch_category", lambda *_a, **_k: [])
+    dead = collect_target_media(["Maria Silva Souza"], settings=settings, live=True)
+    assert dead.news == []
+    assert dead.images == []
+    assert any("instância" in note.lower() for note in dead.notes)
+
+    monkeypatch.setattr(
+        media_mod,
+        "_fetch_category",
+        lambda *_a, **_k: [{"title": "Menção", "url": "https://g1.exemplo/a", "content": "texto"}],
+    )
+    hit = collect_target_media(["Maria Silva Souza"], settings=settings, live=True)
+    assert hit.news
+    assert any("não provam identidade" in note for note in hit.notes)
 
 
 def test_collect_media_stays_offline_in_pytest(settings) -> None:
