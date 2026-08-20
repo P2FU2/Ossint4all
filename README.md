@@ -19,7 +19,7 @@ Uso previsto: jornalismo investigativo. Não consulta DETRAN, cartório, operado
 - Rede societária pelo nome do sócio (base aberta da Receita): empresas, QSA, CNAE, Simples/MEI, endereço e vistas Rede / Árvore / Split / Mapa
 - Expansão por profundidade (sócios → outras empresas → menções)
 - DJEN e DataJud como conectores de processo/publicação
-- TSE, Transparência, OpenCorporates, Wikidata, busca web (Brave/Google CSE) e checagem de URL pública
+- TSE, Transparência, OpenCorporates, Wikidata, busca web (SearXNG público, Brave ou Google CSE) e checagem de URL pública
 - Relatório HTML/PDF e monitoramento das sementes no cron
 - Mapa de ferramentas no modelo do [OSINT Framework](https://osintframework.com/) (árvore expansível + ramo Brasil / [OSINT Brazuca](https://github.com/osintbrazuca/osint-brazuca))
 - Anexo de PDF na investigação para ler metadados (estilo FOCA, só o arquivo que você envia)
@@ -65,7 +65,7 @@ pytest -q
 | `transparencia` | `TRANSPARENCIA_API_KEY` | CEIS / CNEP |
 | `opencorporates` | token opcional | empresas globais |
 | `wikidata` | não | ficha pública |
-| `web_search` | Brave ou Google CSE | só API oficial |
+| `web_search` | não (SearXNG) | instâncias públicas; opcional Brave / Google CSE / `SEARXNG_URL` |
 | `username_public` | não | GET em URL canônica pública (GitHub, X, YouTube…) |
 | `crtsh` | não | nomes em certificados públicos ([crt.sh](https://crt.sh/)) |
 
@@ -110,7 +110,7 @@ Mantenha o projeto que já tem Postgres e o domínio. Não crie outro.
 | `UI_SESSION_SECRET` | string longa (não deixe `change-me-ui-session-secret`) |
 | `EXPAND_SYNC` | `true` |
 
-Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `BRASIL_IO_API_TOKEN`.
+Opcionais: `DATAJUD_API_KEY`, `TRANSPARENCIA_API_KEY`, `SEARXNG_URL`, `SEARXNG_INSTANCES`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_CX`, `BRASIL_IO_API_TOKEN`. Menções web usam SearXNG público sem chave; `SEARXNG_URL` aponta a sua instância.
 
 5. Custom Start Command: `python -m osint4all.main serve --host 0.0.0.0` (sem `--port 8000`; o app usa `$PORT` e também escuta 8000 para o domínio antigo).
 6. Em **Settings → Networking**, no domínio `authenticadm.org`, a porta-alvo deve ser **8000** ou **8080** (as duas funcionam). Se o site mostrar "Application failed to respond" com healthcheck verde, mude essa porta para a mesma do log `serve host=0.0.0.0 port=...`.

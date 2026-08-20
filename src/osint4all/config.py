@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     brave_search_api_key: str = ""
     google_cse_api_key: str = ""
     google_cse_cx: str = ""
+    searxng_enable: bool = True
+    searxng_url: str = ""
+    searxng_instances: str = ""
     username_public_enable: bool = True
     crtsh_enable: bool = True
     plate_public_enable: bool = True

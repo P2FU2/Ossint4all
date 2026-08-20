@@ -8,7 +8,7 @@ from typing import Any
 
 from osint4all.config import Settings, get_settings
 from osint4all.connectors.crtsh import CrtshConnector, _DOMAIN_RE
-from osint4all.connectors.web_search import WebSearchConnector
+from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 from osint4all.consult import ConsultHit, ConsultResult, run_consult
 from osint4all.identifiers import parse_seed
 from osint4all.security import only_digits
@@ -60,10 +60,10 @@ EMBEDDED_TOOLS: tuple[EmbeddedTool, ...] = (
     EmbeddedTool(
         "web",
         "Menções web",
-        "Busca via Brave ou Google CSE, se configurados. Só API oficial.",
+        "SearXNG público (sem chave), Brave ou Google CSE.",
         "NAME",
         "termo público",
-        "busca web oficial",
+        "SearXNG / Brave / CSE",
     ),
     EmbeddedTool(
         "pdf",
@@ -258,16 +258,16 @@ def _consult_web(raw: str, settings: Settings, *, live: bool) -> ConsultResult:
             kind="NAME",
             query=text,
             title=text,
-            summary="Menções web exigem BRAVE_SEARCH_API_KEY ou Google CSE.",
+            summary="Menções web: SearXNG público, ou Brave / Google CSE se configurados.",
             notes=["A busca roda no servidor. Sem abrir o Google no navegador."],
         )
-    if not (settings.brave_search_api_key or (settings.google_cse_api_key and settings.google_cse_cx)):
+    if not web_search_ready(settings):
         return ConsultResult(
             kind="NAME",
             query=text,
             title=text,
-            summary="Configure uma chave oficial de busca para menções web.",
-            notes=["BRAVE_SEARCH_API_KEY ou GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX."],
+            summary="Nenhum backend de busca ativo.",
+            notes=["SEARXNG_URL, BRAVE_SEARCH_API_KEY ou GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX."],
         )
     conn = WebSearchConnector(settings)
     fake = SimpleNamespace(

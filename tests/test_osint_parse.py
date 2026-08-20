@@ -9,7 +9,8 @@ from osint4all.connectors.opencorporates import parse_opencorporates
 from osint4all.connectors.transparencia import parse_transparencia_rows
 from osint4all.connectors.tse import parse_tse_candidates
 from osint4all.connectors.username_public import parse_public_hits
-from osint4all.connectors.web_search import parse_web_hits
+from osint4all.connectors.web_search import parse_searxng_payload, parse_web_hits, searxng_bases, web_search_ready
+from osint4all.config import Settings
 from osint4all.connectors.wikidata import parse_wikidata_search
 
 
@@ -116,3 +117,28 @@ def test_web_hits_extract_plate_owner() -> None:
     )
     assert any(e.rel_type == "PROPRIETARIO" for e in web.edges)
     assert any(e.entity_type == "PERSON" for e in web.entities)
+
+
+def test_searxng_payload_and_ready() -> None:
+    parsed = parse_searxng_payload(
+        {
+            "results": [
+                {
+                    "url": "https://exemplo.org/ficha",
+                    "title": "Ficha pública",
+                    "content": "menção ao alvo",
+                    "engine": "google",
+                }
+            ]
+        },
+        origin_key="email:ana@exemplo.com",
+        instance="https://priv.au",
+    )
+    assert parsed.entities[0].entity_type == "PUBLICATION"
+    assert "SearXNG" in parsed.evidence[0].source_label
+    settings = Settings(searxng_enable=True, searxng_url="https://searx.local")
+    assert web_search_ready(settings)
+    bases = searxng_bases(settings)
+    assert bases[0] == "https://searx.local"
+    assert "https://priv.au" in bases
+    assert not web_search_ready(Settings(web_search_enable=False))

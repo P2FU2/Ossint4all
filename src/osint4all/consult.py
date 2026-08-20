@@ -21,7 +21,7 @@ from osint4all.connectors.plate_public import (
 from osint4all.connectors.socio_search import SocioSearchConnector
 from osint4all.connectors.transparencia import TransparenciaConnector
 from osint4all.connectors.username_public import UsernamePublicConnector
-from osint4all.connectors.web_search import WebSearchConnector
+from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 from osint4all.identifiers import detect_kind, parse_seed
 from osint4all.security import only_digits
 from osint4all.validators import format_plate, looks_like_plate, validate_cnpj, validate_cpf
@@ -775,16 +775,10 @@ def _expand_related_companies(
 
 
 def _safe_web_search(settings: Settings, query: str, origin_key: str) -> list[ConsultHit]:
-    if not settings.web_search_enable:
-        return []
-    if not (settings.brave_search_api_key or (settings.google_cse_api_key and settings.google_cse_cx)):
+    if not web_search_ready(settings):
         return []
     try:
-        conn = WebSearchConnector(settings)
-        if settings.brave_search_api_key:
-            parsed = conn._brave(query, origin_key)
-        else:
-            parsed = conn._google(query, origin_key)
+        parsed = WebSearchConnector(settings).search(query, origin_key)
     except Exception:
         return []
     hits = [

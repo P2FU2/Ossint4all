@@ -306,17 +306,14 @@ class SocioSearchConnector:
         )
 
     def _web_mentions(self, name: str, origin: str, ctx: ExpandContext) -> ConnectorResult:
-        from osint4all.connectors.web_search import WebSearchConnector
+        from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 
         search = WebSearchConnector(self.settings)
-        if not (self.settings.brave_search_api_key or (self.settings.google_cse_api_key and self.settings.google_cse_cx)):
-            return ConnectorResult(notes=["Configure busca web ou BRASIL_IO_API_TOKEN para achar empresas pelo nome"])
+        if not web_search_ready(self.settings):
+            return ConnectorResult(notes=["Configure SearXNG, busca web ou BRASIL_IO_API_TOKEN para achar empresas pelo nome"])
         query = f'"{name}" (sócio OR CNPJ OR "quadro societário")'
         try:
-            if self.settings.brave_search_api_key:
-                hits = search._brave(query, origin)
-            else:
-                hits = search._google(query, origin)
+            hits = search.search(query, origin)
         except Exception:
             return ConnectorResult()
         blob = " ".join(f"{ev.snippet or ''} {ev.url or ''}" for ev in hits.evidence)
