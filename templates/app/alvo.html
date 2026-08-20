@@ -150,6 +150,7 @@
         hx-target="#alvo-media"
         hx-swap="innerHTML"
         hx-indicator="#alvo-media-wait"
+        hx-timeout="90000"
         hx-disabled-elt="this"
         hx-on::after-settle="this.closest('details').open = true; document.getElementById('alvo-media')?.scrollIntoView({block:'nearest'})"
         data-tip="Consulta notícias e imagens públicas deste alvo"

@@ -61,6 +61,11 @@ def test_connectors_for_kinds_scopes_sources() -> None:
     assert processos is not None
     assert "djen" in processos
     assert "datajud" in processos
+    info = connectors_for_kinds(["INFO"])
+    assert info is not None
+    assert "djen" in info
+    assert "transparencia" in info
+    assert "socio_search" in info
     mixed = connectors_for_kinds(["EMAIL", "QSA"])
     assert mixed is not None
     assert "email_public" in mixed

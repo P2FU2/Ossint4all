@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=31" defer></script>
+<script src="/static/graph.js?v=32" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -462,6 +462,7 @@
       hx-target="#case-media"
       hx-swap="innerHTML"
       hx-indicator="#case-media-wait"
+      hx-timeout="90000"
       hx-disabled-elt="this"
       hx-on::after-settle="this.closest('details').open = true; document.getElementById('case-media')?.scrollIntoView({block:'nearest'})"
       data-tip="Consulta notícias e imagens públicas deste caso"

@@ -11,6 +11,7 @@ from osint4all.connectors.crtsh import CrtshConnector, _DOMAIN_RE
 from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 from osint4all.connectors.base import ConnectorResult, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.consult import ConsultHit, ConsultResult, run_consult
+from osint4all.graph.public_links import is_catalog_portal
 from osint4all.identifiers import parse_seed, seeds_from_kind_values
 from osint4all.security import only_digits
 
@@ -247,10 +248,24 @@ def _ingest_consult_part(result: ConnectorResult, part: ConsultResult, origin_ke
             break
         url = str(getattr(hit, "url", "") or "").strip()
         title = str(getattr(hit, "title", "") or "").strip()
+        hit_kind = str(getattr(hit, "kind", "") or "").strip().lower()
+        if hit_kind in {"fonte", "link"} or is_catalog_portal(url):
+            continue
         if url:
             url_seed = parse_seed(url, forced_kind="URL")
             if url_seed:
-                _add_found(result, url_seed, seen, display=title or url_seed.display_name, attrs={"snippet": getattr(hit, "meta", "") or ""})
+                _add_found(
+                    result,
+                    url_seed,
+                    seen,
+                    display=title or url_seed.display_name,
+                    attrs={
+                        "snippet": getattr(hit, "meta", "") or "",
+                        "fonte": url,
+                        "page_url": url,
+                        "tipo": hit_kind or "mencao",
+                    },
+                )
                 if origin_key and origin_key != url_seed.canonical_key:
                     result.edges.append(FoundEdge(origin_key, url_seed.canonical_key, "MENCAO", 0.55, {"fonte": "ferramenta"}))
                 result.evidence.append(

@@ -45,6 +45,7 @@
           {% if item.source %}<span class="muted">{{ item.source }}</span>{% endif %}
           {% if item.via %}<span class="muted">via {{ item.via }}</span>{% endif %}
           {% if item.snippet %}<p class="muted">{{ item.snippet }}</p>{% endif %}
+          <a class="media-fonte" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">abrir fonte oficial</a>
         </span>
       </label>
       <button type="button" class="btn ghost inspect-open" data-inspect='{{ {"title": item.title, "kind": "noticia", "meta": item.snippet, "url": item.url, "when": item.when, "facts": [["fonte", item.source], ["combinação", item.via]]}|tojson }}'>ficha</button>
@@ -69,7 +70,7 @@
         <img src="{{ item.thumb }}" alt="{{ item.title }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('li').hidden = true" />
         <span>{{ item.title }}</span>
         {% if item.via %}<span class="muted">via {{ item.via }}</span>{% endif %}
-        {% if item.page_url %}<span class="media-page-url">{{ item.page_url }}</span>{% endif %}
+        {% if item.page_url %}<a class="media-fonte" href="{{ item.page_url }}" target="_blank" rel="noopener noreferrer">abrir página</a>{% endif %}
       </label>
       <button type="button" class="btn ghost inspect-open" data-inspect='{{ {"title": item.title, "kind": "imagem", "meta": item.via or item.source, "url": item.page_url, "thumb": item.thumb, "facts": [["combinação", item.via], ["página", item.page_url]]}|tojson }}'>origem</button>
       <input type="hidden" name="image_url" value="{{ item.page_url }}" />

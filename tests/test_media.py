@@ -1,14 +1,30 @@
+from osint4all.graph.public_links import is_catalog_portal, is_site_chrome
 from osint4all.graph.media import (
     collect_target_media,
     fields_from_identifiers,
     media_picks_to_result,
     media_queries_from_fields,
     media_queries_from_identifiers,
+    parse_google_news_rss,
     parse_image_rows,
     parse_media_picks,
     parse_news_rows,
+    parse_wikimedia_pages,
+    parse_wikipedia_pageimages,
+    parse_wikipedia_search,
     plan_search_combos,
 )
+
+
+def test_catalog_portal_and_chrome() -> None:
+    assert is_catalog_portal("https://portaldatransparencia.gov.br/sancoes/consulta?cadastro=2")
+    assert is_catalog_portal("https://querido-diario.ok.org.br/")
+    assert not is_catalog_portal("https://portaldatransparencia.gov.br/sancoes/123456")
+    assert not is_catalog_portal("https://g1.globo.com/politica/noticia.html")
+    assert is_site_chrome(
+        "https://www.gstatic.com/images/branding/googlelogo/1x/googlelogo_color_white_background_272x92dp.png"
+    )
+    assert not is_site_chrome("https://img.exemplo/foto-alvo.jpg", "Eduardo em evento")
 
 
 def test_plan_skips_cpf_and_short_name() -> None:
@@ -42,9 +58,10 @@ def test_plan_pairs_name_and_company_without_overlap() -> None:
         }
     )
     labels = [combo.label for combo in combos]
+    assert "nome (notícia)" in labels
+    assert "nome (foto)" in labels
     assert "nome + empresa (notícia)" in labels
     assert "nome + @user (notícia)" in labels
-    assert "nome (notícia)" not in labels
     assert "CNPJ (notícia)" not in labels
     assert "@user (notícia)" not in labels
     queries = [combo.query for combo in combos]
@@ -61,7 +78,7 @@ def test_plan_complements_unpaired_image_after_email_news() -> None:
     assert "nome + domínio (notícia)" in labels
     assert "e-mail (notícia)" not in labels
     assert "nome (foto)" in labels
-    assert "nome (notícia)" not in labels
+    assert "nome (notícia)" in labels
     assert not any("gmail" in combo.query.lower() for combo in combos)
 
 
@@ -125,6 +142,96 @@ def test_fields_from_identifiers_add_company_not_cnpj() -> None:
     assert "COMPANY" not in skip
 
 
+def test_parse_google_news_and_wikimedia() -> None:
+    news = parse_news_rows(
+        parse_google_news_rss(
+            """<?xml version="1.0"?>
+            <rss><channel>
+              <item>
+                <title>Pedido de indulto - TRF4</title>
+                <link>https://news.google.com/rss/articles/abc</link>
+                <pubDate>Fri, 12 Jun 2020 00:00:00 GMT</pubDate>
+                <description>&lt;a href="https://www.trf4.jus.br/materia"&gt;Pedido de indulto&lt;/a&gt;</description>
+                <source url="https://www.trf4.jus.br">TRF4</source>
+              </item>
+            </channel></rss>"""
+        ),
+        source="nome (notícia)",
+    )
+    assert news[0].url == "https://www.trf4.jus.br/materia"
+    assert "indulto" in news[0].title.lower()
+    wiki = parse_news_rows(
+        parse_wikipedia_search({"query": {"search": [{"title": "Eduardo Hermelino Leite", "snippet": "executivo"}]}}, lang="pt"),
+        source="nome (notícia)",
+    )
+    assert wiki[0].url.startswith("https://pt.wikipedia.org/wiki/")
+    images = parse_image_rows(
+        parse_wikimedia_pages(
+            {
+                "query": {
+                    "pages": {
+                        "1": {
+                            "title": "File:Eduardo_Hermelino_Leite.jpg",
+                            "imageinfo": [
+                                {
+                                    "mime": "image/jpeg",
+                                    "url": "https://upload.wikimedia.org/wikipedia/commons/e/e1/foto.jpg",
+                                    "thumburl": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/foto.jpg/400px-foto.jpg",
+                                }
+                            ],
+                        },
+                        "2": {
+                            "title": "File:Site_logo.svg",
+                            "imageinfo": [{"mime": "image/svg+xml", "url": "https://upload.wikimedia.org/logo.svg"}],
+                        },
+                    }
+                }
+            }
+        ),
+        source="nome (foto)",
+    )
+    assert len(images) == 1
+    assert images[0].thumb.endswith("400px-foto.jpg")
+    assert "commons.wikimedia.org" in images[0].page_url
+    skipped = parse_wikimedia_pages(
+        {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:Almanach_1884.pdf",
+                        "imageinfo": [{"mime": "application/pdf", "url": "https://upload.wikimedia.org/x.pdf"}],
+                    }
+                }
+            }
+        },
+        query="Eduardo Hermelino Leite",
+    )
+    assert skipped == []
+    wiki_img = parse_image_rows(
+        parse_wikipedia_pageimages(
+            {
+                "query": {
+                    "pages": {
+                        "1": {
+                            "title": "Cássia Eller",
+                            "fullurl": "https://pt.wikipedia.org/wiki/C%C3%A1ssia_Eller",
+                            "thumbnail": {"source": "https://upload.wikimedia.org/wikipedia/pt/c/c7/cassia.png"},
+                        },
+                        "2": {
+                            "title": "Eduardo Hermelino Leite",
+                            "fullurl": "https://pt.wikipedia.org/wiki/Eduardo_Hermelino_Leite",
+                            "thumbnail": {"source": "https://upload.wikimedia.org/wikipedia/commons/e/e1/eduardo.jpg"},
+                        },
+                    }
+                }
+            },
+            query="Eduardo Hermelino Leite",
+        ),
+        source="nome (foto)",
+    )
+    assert [item.title for item in wiki_img] == ["Eduardo Hermelino Leite"]
+
+
 def test_parse_news_and_images() -> None:
     news = parse_news_rows(
         [
@@ -144,11 +251,17 @@ def test_parse_news_and_images() -> None:
                 "thumbnail_src": "https://img.exemplo/t.jpg",
             },
             {"title": "local", "thumbnail_src": "data:image/gif;base64,xx"},
+            {
+                "title": "Google",
+                "img_src": "https://www.gstatic.com/images/branding/googlelogo/1x/googlelogo_color_white_background_272x92dp.png",
+                "url": "https://www.google.com/",
+            },
         ],
         source="nome + empresa (foto)",
     )
     assert len(images) == 1
-    assert images[0].thumb.startswith("https://")
+    assert images[0].thumb.startswith("https://img.exemplo")
+    assert images[0].page_url == "https://exemplo.com/materia"
     assert images[0].via == "nome + empresa (foto)"
 
 

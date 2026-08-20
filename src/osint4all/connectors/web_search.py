@@ -10,17 +10,21 @@ from osint4all.connectors.plate_public import extract_owner_mentions, extract_ve
 from osint4all.db.models import Entity
 from osint4all.exceptions import FailedAuthentication, SkippedDisabled
 from osint4all.http_client import RateLimitedClient
+from osint4all.graph.public_links import is_catalog_portal
 from osint4all.identifiers import canonical_key
 from osint4all.validators import format_plate
 
 # Instâncias públicas que costumam expor /search?format=json. A lista muda; falha de uma não derruba a consulta.
 DEFAULT_SEARXNG_INSTANCES = (
-    "https://searx.be",
-    "https://priv.au",
     "https://searx.tiekoetter.com",
-    "https://search.ononoki.org",
+    "https://search.inetol.net",
+    "https://priv.au",
+    "https://search.hbubli.cc",
+    "https://searx.be",
     "https://opnxng.com",
     "https://search.sapti.me",
+    "https://baresearch.org",
+    "https://search.ononoki.org",
     "https://searxng.site",
 )
 
@@ -53,14 +57,14 @@ def parse_web_hits(hits: list[dict[str, Any]], *, origin_key: str, source: str =
         url = str(hit.get("url") or hit.get("link") or "")
         title = str(hit.get("title") or url)
         snippet = str(hit.get("description") or hit.get("snippet") or hit.get("content") or "")
-        if not url:
+        if not url or is_catalog_portal(url):
             continue
         found = FoundEntity(
             entity_type="PUBLICATION",
             kind="URL",
             value=url,
             display_name=title[:160],
-            attrs={"snippet": snippet, "engine": hit.get("engine") or ""},
+            attrs={"snippet": snippet, "engine": hit.get("engine") or "", "fonte": url, "page_url": url, "tipo": "mencao"},
             confidence=0.4,
         )
         out.entities.append(found)
@@ -131,7 +135,10 @@ class WebSearchConnector:
             source=self.name,
             max_concurrency=2,
             timeout=8.0,
-            default_headers={"Accept": "application/json", "User-Agent": "osint4all/0.1 (investigative journalism)"},
+            default_headers={
+                "Accept": "application/json",
+                "User-Agent": "osint4all/0.1 (+https://github.com/P2FU2/Ossint4all; public-source research)",
+            },
         )
 
     def health(self) -> dict[str, Any]:

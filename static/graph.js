@@ -42,6 +42,11 @@
   }
 
   function cardLabel(n) {
+    const attrs = n.attrs || {};
+    if (attrs.tipo === "imagem") {
+      const title = String(n.label || "Imagem").replace(/^https?:\/\/\S+/i, "Imagem").slice(0, 42);
+      return title + (n.seed ? " · alvo" : "");
+    }
     const title = n.seed ? n.label + " · alvo" : n.label + " · g" + (n.depth || 0);
     const extras = (n.ids || []).filter((item) => item.kind !== "NAME").slice(0, 4).map(formatCardId);
     return [title].concat(extras).join("\n");
@@ -62,6 +67,8 @@
         kind: (n.attrs || {}).kind || "",
         attrs: n.attrs || {},
         ids: n.ids || [],
+        thumb: (n.attrs || {}).thumb || "",
+        tipo: (n.attrs || {}).tipo || "",
         lines: 1 + Math.min(4, (n.ids || []).filter((item) => item.kind !== "NAME").length),
       },
     }));
@@ -118,6 +125,21 @@
       { selector: 'node[type = "ASSET"]', style: { "border-color": colors.ASSET } },
       { selector: 'node[type = "VEHICLE"]', style: { "border-color": colors.VEHICLE } },
       { selector: 'node[type = "PUBLICATION"]', style: { "border-color": colors.PUBLICATION } },
+      {
+        selector: 'node[tipo = "imagem"][?thumb]',
+        style: {
+          "background-image": "data(thumb)",
+          "background-fit": "cover",
+          "background-clip": "node",
+          width: 128,
+          height: 148,
+          "text-valign": "bottom",
+          "text-margin-y": 4,
+          "font-size": 9,
+          "text-max-width": 118,
+          "background-color": "#0c1410",
+        },
+      },
       { selector: 'node[type = "PERSON"]', style: { "border-color": colors.PERSON } },
       { selector: 'node[type = "NOTE"]', style: { "border-color": colors.NOTE, "background-color": "#1c1a10" } },
       { selector: 'node[kind = "diagram"]', style: { width: 210, height: 64, "border-color": "#d4b45a", "background-color": "#1c1810", "text-wrap": "wrap", "text-max-width": 190 } },
@@ -637,6 +659,11 @@
     tipo_conta: "tipo",
     pix: "PIX",
     fonte: "fonte",
+    page_url: "página",
+    snippet: "trecho",
+    via: "via",
+    tipo: "tipo",
+    quando: "quando",
     valor: "valor",
     ano: "ano",
     patrimonio_estimado: "patrimônio",
@@ -661,6 +688,17 @@
     dd.textContent = value;
     wrap.append(dt, dd);
     return wrap;
+  }
+
+  function officialUrl(rec, el) {
+    const bag = (rec && rec.attrs) || (el && el.data && el.data("attrs")) || {};
+    for (const key of ["page_url", "fonte"]) {
+      const val = String(bag[key] || "");
+      if (/^https?:\/\//i.test(val)) return val;
+    }
+    const key = (rec && rec.key) || (el && el.data && el.data("key")) || "";
+    if (String(key).indexOf("url:") === 0) return String(key).slice(4);
+    return "";
   }
 
   let nodeIndex = new Map();
@@ -722,33 +760,62 @@
     gbLead.textContent = labels[status] || "";
     gbFacts.replaceChildren();
     gbFacts.hidden = !full;
+    const sourceUrl = officialUrl(rec, el);
     if (full) {
-      if (rec.key || el.data("key")) gbFacts.appendChild(factRow("chave", rec.key || el.data("key")));
+      const thumb = String(attrs.thumb || el.data("thumb") || "");
+      if (thumb && /^https?:\/\//i.test(thumb)) {
+        const pic = document.createElement("img");
+        pic.className = "graph-balloon-thumb";
+        pic.src = thumb;
+        pic.alt = "";
+        pic.referrerPolicy = "no-referrer";
+        gbFacts.appendChild(pic);
+      }
+      const key = rec.key || el.data("key") || "";
+      if (key && key.indexOf("url:") !== 0) gbFacts.appendChild(factRow("chave", key));
+      if (sourceUrl) gbFacts.appendChild(factRow("fonte oficial", sourceUrl));
       gbFacts.appendChild(factRow("tipo", TYPE_LABEL[type] || type));
       gbFacts.appendChild(factRow("estado", labels[status] || status));
       gbFacts.appendChild(factRow("grau com o alvo", el.data("seed") ? "0 · alvo" : String(rec.depth ?? el.data("depth") ?? 0)));
-      if (rec.confidence != null) gbFacts.appendChild(factRow("confiança", Math.round(Number(rec.confidence) * 100) + "%"));
       (rec.ids || el.data("ids") || []).forEach((item) => {
         gbFacts.appendChild(factRow(item.kind || "dado", formatCardId(item)));
       });
-      Object.keys(ATTR_LABEL).forEach((key) => {
-        if (attrs[key] == null || attrs[key] === "") return;
-        gbFacts.appendChild(factRow(ATTR_LABEL[key], String(attrs[key])));
+      Object.keys(ATTR_LABEL).forEach((keyName) => {
+        if (["fonte", "page_url", "thumb", "tipo"].indexOf(keyName) >= 0) return;
+        if (attrs[keyName] == null || attrs[keyName] === "") return;
+        gbFacts.appendChild(factRow(ATTR_LABEL[keyName], String(attrs[keyName])));
       });
       if (neighbors.length) gbFacts.appendChild(factRow("ligado a", neighbors.slice(0, 8).join(", ") + (neighbors.length > 8 ? "…" : "")));
     }
     gbActions.hidden = !full;
     gbActions.replaceChildren();
     if (full) {
+      if (sourceUrl) {
+        const src = document.createElement("a");
+        src.className = "btn primary";
+        src.href = sourceUrl;
+        src.target = "_blank";
+        src.rel = "noopener noreferrer";
+        src.textContent = "Abrir fonte oficial";
+        src.addEventListener("click", (event) => event.stopPropagation());
+        gbActions.appendChild(src);
+      }
       const probe = document.createElement("button");
       probe.type = "button";
-      probe.className = "btn primary";
-      probe.textContent = type === "ORG" ? "Procurar empresas e QSA" : "Procurar informações";
+      probe.className = sourceUrl ? "btn" : "btn primary";
+      const isDoc = type === "PUBLICATION" || type === "PROFILE";
+      probe.textContent = type === "ORG" ? "Procurar empresas e QSA" : isDoc ? "Procurar no alvo" : "Procurar informações";
       probe.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         closeBalloon();
-        probeNode(el.id(), el.data("name") || rec.label || "", type === "ORG" ? "CNPJ" : "NAME");
+        if (type === "ORG") {
+          probeKinds(el.id(), ["CNPJ", "QSA", "PROCESSOS"], "empresa e processos");
+        } else if (isDoc) {
+          probeKinds(seedNodeId() || el.id(), ["INFO"], "dossiê");
+        } else {
+          probeKinds(el.id(), ["INFO"], "dossiê");
+        }
       });
       const open = document.createElement("a");
       open.className = "btn";
@@ -1550,12 +1617,13 @@
       QSA: "QSA / sócios",
       PROCESSOS: "Processos",
       CNJ: "Processo",
+      INFO: "Dossiê",
     })[kind] || kind;
   }
 
   function canProbe(kind) {
     return !!({
-      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1, PROCESSOS: 1, CNJ: 1,
+      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1, PROCESSOS: 1, CNJ: 1, INFO: 1,
     })[kind];
   }
 

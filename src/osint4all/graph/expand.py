@@ -25,6 +25,7 @@ PROBE_CONNECTORS = {
     "QSA": frozenset({"cnpj_receita", "socio_search"}),
     "PROCESSOS": frozenset({"djen", "datajud"}),
     "CNJ": frozenset({"djen", "datajud"}),
+    "INFO": frozenset({"socio_search", "djen", "transparencia", "web_search", "tse", "wikidata", "google_public"}),
 }
 
 

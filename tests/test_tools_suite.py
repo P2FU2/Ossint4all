@@ -148,6 +148,36 @@ def test_outcome_to_connector_adds_without_name_dump() -> None:
     assert any(edge.rel_type == "SOCIO" for edge in result.edges)
 
 
+def test_outcome_skips_catalog_portals() -> None:
+    result = outcome_to_connector(
+        ConsultResult(
+            kind="NEGATIVA",
+            query="Ana Silva Souza",
+            title="Ana Silva Souza",
+            summary="ok",
+            hits=[
+                ConsultHit(
+                    "CNEP — punições a pessoas jurídicas",
+                    "cadastro",
+                    "https://portaldatransparencia.gov.br/sancoes/consulta?cadastro=2",
+                    "fonte",
+                ),
+                ConsultHit(
+                    "Sanção na lista",
+                    "CGU",
+                    "https://portaldatransparencia.gov.br/sancoes/123456",
+                    "sancao",
+                ),
+            ],
+        ),
+        "name:ana silva souza",
+    )
+    urls = [found.value for found in result.entities if found.kind == "URL"]
+    assert not any("consulta?cadastro=2" in item for item in urls)
+    assert any("sancoes/123456" in item for item in urls)
+    assert all(found.attrs.get("fonte") for found in result.entities if found.kind == "URL")
+
+
 def test_consult_rejects_empty_mass() -> None:
     assert run_consult("", mode="massa").ok is False
 
