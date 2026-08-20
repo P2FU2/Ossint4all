@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from osint4all.db.models import Edge, Entity, Evidence, ExpansionJob, Identifier, Investigation
+from osint4all.graph.identity import entity_status
 from osint4all.identifiers import STRONG_ID_KINDS
 
 
@@ -122,6 +123,7 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
             "depth": e.depth,
             "confidence": e.confidence,
             "key": e.canonical_key,
+            "status": entity_status(e),
             "attrs": {
                 k: e.attrs.get(k)
                 for k in (
@@ -154,4 +156,30 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
         }
         for edge in edges
     ]
-    return {"nodes": nodes, "edges": links}
+    return {"nodes": nodes, "edges": links, "entity_count": len(nodes), "edge_count": len(links)}
+
+
+def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bool:
+    entity = session.scalar(
+        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
+    )
+    if not entity:
+        return False
+    session.execute(delete(ExpansionJob).where(ExpansionJob.entity_id == entity_id))
+    session.execute(
+        delete(Edge).where(or_(Edge.from_entity_id == entity_id, Edge.to_entity_id == entity_id))
+    )
+    session.execute(delete(Evidence).where(Evidence.entity_id == entity_id))
+    session.execute(delete(Identifier).where(Identifier.entity_id == entity_id))
+    session.delete(entity)
+    session.flush()
+    return True
+
+
+def confirm_entity(session: Session, entity: Entity, *, reason: str) -> Entity:
+    attrs = dict(entity.attrs or {})
+    attrs["status"] = "confirmed"
+    attrs["motivo"] = reason
+    entity.attrs = attrs
+    entity.confidence = max(entity.confidence, 0.85)
+    return entity

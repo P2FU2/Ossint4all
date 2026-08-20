@@ -27,7 +27,7 @@
 
   function toElements(data) {
     const nodes = (data.nodes || []).map((n) => ({
-      data: { id: n.id, label: n.label, type: n.type, seed: n.seed, attrs: n.attrs || {} },
+      data: { id: n.id, label: n.label, type: n.type, seed: n.seed, status: n.status || "confirmed", attrs: n.attrs || {} },
     }));
     const edges = (data.edges || []).map((e) => ({
       data: { id: e.id, source: e.source, target: e.target, label: e.type },
@@ -67,6 +67,7 @@
       { selector: 'node[type = "PUBLICATION"]', style: { "border-color": colors.PUBLICATION } },
       { selector: 'node[type = "PERSON"]', style: { "border-color": colors.PERSON } },
       { selector: "node[?seed]", style: { width: 148, height: 40, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
+      { selector: 'node[status = "unconfirmed"]', style: { "border-style": "dashed", "border-color": "#c4a35a", "opacity": 0.85 } },
       {
         selector: "edge",
         style: {
@@ -196,7 +197,8 @@
     const node = evt.target;
     const orig = evt.originalEvent || {};
     if (window.showAppTip) {
-      window.showAppTip(`${node.data("type")} · ${node.data("label")} — clique para a ficha`, orig.clientX || 0, orig.clientY || 0);
+      const hint = node.data("status") === "unconfirmed" ? "candidato — confirme ou desligue na ficha" : "clique para a ficha";
+      window.showAppTip(`${node.data("type")} · ${node.data("label")} — ${hint}`, orig.clientX || 0, orig.clientY || 0);
     }
   });
   cy.on("mousemove", (evt) => {
@@ -235,12 +237,16 @@
     btn.addEventListener("click", () => setView(btn.dataset.view));
   });
 
+  let lastShape = "";
   async function poll() {
     try {
       const res = await fetch(root.dataset.statusUrl, { credentials: "same-origin" });
       const jobs = await res.json();
       const pill = document.getElementById("job-pill");
       if (pill) pill.textContent = "fila " + ((jobs.PENDING || 0) + (jobs.RUNNING || 0));
+      const shape = `${jobs.entities || 0}:${jobs.edges || 0}`;
+      if (lastShape && shape !== lastShape) load();
+      lastShape = shape;
     } catch (_) {
       /* ignore */
     }

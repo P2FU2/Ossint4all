@@ -9,6 +9,7 @@ from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge,
 from osint4all.db.models import Entity
 from osint4all.exceptions import FailedSource, SkippedDisabled
 from osint4all.http_client import RateLimitedClient
+from osint4all.graph.identity import found_canonical_key
 from osint4all.identifiers import canonical_key
 
 
@@ -34,11 +35,19 @@ def parse_tse_candidates(items: list[dict[str, Any]], *, origin_key: str) -> Con
             kind="NAME",
             value=nome,
             display_name=nome,
-            attrs={"cargo": cargo, "partido": partido, "uf": uf, "ano": ano, "papel": "candidato"},
-            confidence=0.55,
+            attrs={
+                "cargo": cargo,
+                "partido": partido,
+                "uf": uf,
+                "ano": ano,
+                "papel": "candidato",
+                "status": "unconfirmed",
+                "candidate_key": f"tse:{nome}:{uf}:{ano}",
+            },
+            confidence=0.4,
         )
         result.entities.append(cand)
-        cand_key = canonical_key("NAME", nome)
+        cand_key = found_canonical_key(cand)
         if cand_key != origin_key:
             result.edges.append(
                 FoundEdge(from_ref=origin_key, to_ref=cand_key, rel_type="CANDIDATO", confidence=0.55)

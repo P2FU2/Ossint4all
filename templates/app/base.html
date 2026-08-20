@@ -6,9 +6,9 @@
   <title>{% block title %}{{ app_name }}{% endblock %} · {{ brand }}</title>
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/app.css?v=12" />
+  <link rel="stylesheet" href="/static/app.css?v=15" />
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="/static/app.js?v=14" defer></script>
+  <script src="/static/app.js?v=15" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -21,6 +21,7 @@
       <nav>
         <p class="nav-section">Fluxo</p>
         <a class="nav-link {% if nav == 'consultar' %}active{% endif %}" href="/app" data-tip="Consulta avulsa: placa, rede social, telefone, sócio…">Consultar</a>
+        <a class="nav-link {% if nav == 'alvo' %}active{% endif %}" href="/app/alvo" data-tip="Dossiê da pessoa: campos que você já tem, busca em camadas">Alvo</a>
         <a class="nav-link {% if nav == 'casos' %}active{% endif %}" href="/app/casos" data-tip="Só o que você guardou — grafo e histórico">Casos</a>
         <a class="nav-link {% if nav == 'nova' %}active{% endif %}" href="/app/nova" data-tip="Vários identificadores de uma vez, com profundidade">Montar caso</a>
         <a class="nav-link {% if nav == 'ferramentas' %}active{% endif %}" href="/app/ferramentas" data-tip="Suíte embutida: massa, redes, placa, PDF…">Ferramentas</a>

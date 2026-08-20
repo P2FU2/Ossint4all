@@ -146,12 +146,16 @@ def parse_cnpj_payload(data: dict[str, Any]) -> ConnectorResult:
                 attrs={
                     "papel": qual,
                     "documento_ausente": True,
+                    "status": "unconfirmed",
+                    "candidate_key": f"qsa:{cnpj}:{nome}",
                     "entrada": socio.get("data_entrada_sociedade"),
                     "faixa_etaria": socio.get("faixa_etaria"),
                 },
                 confidence=0.45,
             )
-            other_key = canonical_key("NAME", nome)
+            from osint4all.graph.identity import found_canonical_key
+
+            other_key = found_canonical_key(other)
         else:
             continue
         result.entities.append(other)

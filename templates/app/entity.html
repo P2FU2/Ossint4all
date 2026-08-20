@@ -4,15 +4,25 @@
 <a class="crumb" href="/app/casos/{{ inv.id }}" data-tip="Volta ao grafo deste caso">← Grafo · {{ inv.title }}</a>
 <header class="page-head">
   <div>
-    <p class="type-tag">{{ entity.entity_type }}{% if entity.is_seed %} · semente{% endif %}</p>
+    <p class="type-tag">{{ entity.entity_type }}{% if entity.is_seed %} · semente{% endif %}{% if entity.attrs.get("status") == "unconfirmed" %} · candidato{% endif %}</p>
     <h1>{{ entity.display_name }}</h1>
-    <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · profundidade {{ entity.depth }}</p>
+    <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · profundidade {{ entity.depth }}{% if entity.attrs.get("motivo") %} · {{ entity.attrs.get("motivo") }}{% endif %}</p>
   </div>
   <div class="graph-actions">
     <a class="btn" href="/app/ferramentas?tool={{ tool_id_for_kind(seed_kind) }}&amp;kind={{ seed_kind }}&amp;q={{ seed_q|urlencode }}" data-tip="Ferramentas públicas para este tipo">Mapa de ferramentas</a>
+    {% if entity.attrs.get("status") == "unconfirmed" %}
+    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/confirmar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn primary" type="submit" data-tip="Marca como a mesma pessoa/empresa do alvo e libera expansão">Confirmar vínculo</button>
+    </form>
+    {% endif %}
     <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn primary" type="submit" data-tip="Enfileira fontes a partir deste nó.">Expandir daqui</button>
+    </form>
+    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/desligar" onsubmit="return confirm('Desligar este nó e todas as ligações?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn danger" type="submit" data-tip="Remove o nó e todas as arestas ligadas a ele">Desligar nó</button>
     </form>
     <details class="more-menu">
       <summary class="btn" data-tip="Corrige o nome de exibição e anota a ficha">Editar</summary>

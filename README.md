@@ -12,6 +12,7 @@ Uso previsto: jornalismo investigativo. Não consulta DETRAN, cartório, operado
 
 ## O que faz
 
+- **Alvo**: dossiê em camadas (nome, CPF, CNPJ, placa…). Nome sozinho é candidato; QSA ou identificador forte confirma. Dá para desligar um nó e as ligações
 - Consulta avulsa e **busca em massa** (um dado → correlatos) sem criar caso; dá para atribuir o resultado ao caso corrente
 - Suíte embutida (Sherlock/WhatsMyName, crt.sh, FOCA/PDF, placa, sócio): roda no painel, sem abrir GitHub nem outro site
 - Grafo de pessoas, empresas, processos, perfis públicos, veículos (placa) e publicações

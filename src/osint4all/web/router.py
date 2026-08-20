@@ -13,12 +13,13 @@ from osint4all.documents.metadata import ingest_local_pdf
 from osint4all.config import ALL_CONNECTORS, get_settings
 from osint4all.paths import project_root
 from osint4all.connectors.registry import connector_health, enabled_connector_names
-from osint4all.db.chain import active_chain, chain_seeds, chain_view, ingest_outcome, reset_chain
+from osint4all.db.chain import active_chain, alvo_fields, chain_seeds, chain_view, ingest_outcome, reset_chain
 from osint4all.db.history import clear_searches, kind_label as history_kind_label, list_searches, record_search, replay_spec
 from osint4all.db.models import AuditLog, Edge, Entity, Evidence, ExpansionJob, Investigation, User
-from osint4all.db.repository import enqueue_expand, graph_payload, job_counts
+from osint4all.db.repository import confirm_entity, detach_entity, enqueue_expand, graph_payload, job_counts
 from osint4all.graph.expand import process_pending_jobs
 from osint4all.consult import MODES, ConsultResult, run_consult
+from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.seed import add_seed_entities, attach_plate_owner, create_investigation
 from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results, tool_id_for_kind
 from osint4all.identifiers import parse_seed, parse_seed_lines
@@ -309,6 +310,115 @@ def chain_to_graph(
     session.commit()
     request.session["current_case_id"] = inv.id
     request.session["flash"] = {"level": "ok", "message": f"Caso criado a partir da cadeia · {len(seeds)} identificador(es)."}
+    if get_settings().expand_sync:
+        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+def _alvo_page(request: Request, user: User, session: Session, *, fields: dict | None = None, layer=None) -> HTMLResponse:
+    ctx = template_context(request, user)
+    ctx.update({"nav": "alvo", "groups": ALVO_GROUPS, "fields": fields if fields is not None else alvo_fields(session, user)})
+    if layer is not None:
+        ctx["layer"] = layer
+    _with_cases(ctx, request, session)
+    return templates.TemplateResponse(request, "app/alvo.html", ctx)
+
+
+def _apply_alvo_layer(request: Request, session: Session, user: User, kind: str, value: str, *, live: bool = True):
+    fields = alvo_fields(session, user)
+    layer = run_alvo_layer(fields, kind=kind, value=value, live=live)
+    if layer.consult and layer.consult.ok:
+        ingest_outcome(session, user, layer.consult)
+    persisted = alvo_fields(session, user)
+    for key, stored in persisted.items():
+        if stored and not layer.fields.get(key):
+            layer.fields[key] = stored
+    request.session["alvo_qsa_match"] = bool(layer.qsa_match)
+    return layer
+
+
+@router.get("/app/alvo", response_class=HTMLResponse)
+def alvo_home(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    return _alvo_page(request, user, session)
+
+
+@router.post("/app/alvo", response_class=HTMLResponse)
+def alvo_run(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    kind: str = Form(""),
+    value: str = Form(""),
+) -> HTMLResponse:
+    require_csrf(request, csrf_token)
+    layer = _apply_alvo_layer(request, session, user, kind, value)
+    write_audit(session, "alvo.layer", username=user.username, details={"kind": kind, "ok": layer.ok, "qsa": layer.qsa_match})
+    return _alvo_page(request, user, session, fields=layer.fields, layer=layer)
+
+
+@router.post("/app/alvo/confirmar", response_class=HTMLResponse)
+def alvo_confirm(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    kind: str = Form(""),
+    value: str = Form(""),
+) -> HTMLResponse:
+    require_csrf(request, csrf_token)
+    layer = _apply_alvo_layer(request, session, user, kind, value, live=True)
+    write_audit(session, "alvo.confirm", username=user.username, details={"kind": kind, "ok": layer.ok, "qsa": layer.qsa_match})
+    request.session["flash"] = {"level": "ok", "message": f"Campo {kind} confirmado no alvo. Nova camada rodou."}
+    return _alvo_page(request, user, session, fields=layer.fields, layer=layer)
+
+
+@router.post("/app/alvo/grafo")
+def alvo_to_graph(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    investigation_id: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    fields = alvo_fields(session, user)
+    qsa_match = bool(request.session.get("alvo_qsa_match"))
+    if fields.get("NAME") and fields.get("CNPJ") and not qsa_match:
+        qsa_match = qsa_confirms_name(fields["CNPJ"], fields["NAME"])
+        request.session["alvo_qsa_match"] = qsa_match
+    seeds = confirmed_seeds(fields, qsa_match=qsa_match)
+    if not seeds:
+        request.session["flash"] = {
+            "level": "error",
+            "message": "Nada confirmado ainda. Nome sozinho não abre grafo — acrescente CPF, CNPJ, e-mail, telefone, placa ou @user.",
+        }
+        return RedirectResponse("/app/alvo", status_code=303)
+    target_id = investigation_id or request.session.get("current_case_id") or ""
+    inv = session.get(Investigation, target_id) if target_id else None
+    if inv:
+        add_seed_entities(session, inv, seeds, max_attempts=get_settings().job_max_attempts)
+        write_audit(session, "investigation.from_alvo", username=user.username, investigation_id=inv.id, details={"added": len(seeds)})
+    else:
+        name = fields.get("NAME") or seeds[0].display_name
+        inv = create_investigation(
+            session,
+            title=f"Alvo · {name}",
+            hypothesis="Dossiê do alvo em camadas. Vínculos por âncora forte ou QSA.",
+            seeds=seeds,
+            connectors=list(enabled_connector_names()),
+            max_depth=get_settings().default_max_depth,
+            monitor=False,
+            created_by=user.username,
+            max_attempts=get_settings().job_max_attempts,
+        )
+        write_audit(session, "investigation.from_alvo", username=user.username, investigation_id=inv.id, details={"seeds": len(seeds)})
+    session.commit()
+    request.session["current_case_id"] = inv.id
     if get_settings().expand_sync:
         process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
@@ -617,7 +727,11 @@ def job_status(
     user: User = Depends(current_user),
     session: Session = Depends(db_session),
 ) -> JSONResponse:
-    return JSONResponse(job_counts(session, investigation_id))
+    payload = graph_payload(session, investigation_id)
+    counts = job_counts(session, investigation_id)
+    counts["entities"] = payload.get("entity_count") or 0
+    counts["edges"] = payload.get("edge_count") or 0
+    return JSONResponse(counts)
 
 
 @router.get("/app/casos/{investigation_id}/entidades/{entity_id}", response_class=HTMLResponse)
@@ -767,6 +881,51 @@ def edit_entity(
     session.commit()
     request.session["flash"] = {"level": "ok", "message": "Ficha atualizada."}
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/entidades/{entity_id}/confirmar")
+def confirm_node(
+    investigation_id: str,
+    entity_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    entity = session.scalar(
+        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
+    )
+    if not entity:
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    confirm_entity(session, entity, reason="Confirmado na ficha do alvo.")
+    inv = session.get(Investigation, investigation_id)
+    if inv:
+        enqueue_expand(session, investigation=inv, entity=entity, depth=entity.depth, max_attempts=get_settings().job_max_attempts)
+    write_audit(session, "entity.confirm", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id})
+    session.commit()
+    if get_settings().expand_sync:
+        process_pending_jobs(investigation_id=investigation_id, limit=get_settings().expand_sync_limit)
+    request.session["flash"] = {"level": "ok", "message": "Nó confirmado. A próxima camada pode expandir daqui."}
+    return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/entidades/{entity_id}/desligar")
+def detach_node(
+    investigation_id: str,
+    entity_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    ok = detach_entity(session, investigation_id, entity_id)
+    if ok:
+        write_audit(session, "entity.detach", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id})
+        session.commit()
+        request.session["flash"] = {"level": "ok", "message": "Nó desligado e vínculos removidos."}
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
 @router.post("/app/casos/{investigation_id}/processar")

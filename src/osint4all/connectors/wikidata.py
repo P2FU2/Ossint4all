@@ -81,4 +81,23 @@ class WikidataConnector:
             return ConnectorResult(notes=[f"Wikidata HTTP {resp.status_code}"])
         data = resp.json()
         results = data.get("search") if isinstance(data, dict) else []
-        return parse_wikidata_search(results or [], origin_key=entity.canonical_key)
+        if not results:
+            fallback = self.http.request(
+                "GET",
+                "https://www.wikidata.org/w/api.php",
+                params={
+                    "action": "wbsearchentities",
+                    "search": entity.display_name,
+                    "language": "en",
+                    "uselang": "en",
+                    "format": "json",
+                    "limit": 8,
+                },
+            )
+            if fallback.status_code < 400:
+                extra = fallback.json()
+                results = extra.get("search") if isinstance(extra, dict) else []
+        parsed = parse_wikidata_search(results or [], origin_key=entity.canonical_key)
+        if not parsed.entities:
+            parsed.notes.append("Wikidata sem ficha pública para este nome.")
+        return parsed

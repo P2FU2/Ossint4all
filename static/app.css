@@ -976,6 +976,17 @@ button.inspect-open:hover { color: var(--ink); }
 .inspect-hint { cursor: help; }
 body.inspect-open-body { overflow: hidden; }
 
+.alvo-tree { display: flex; flex-direction: column; gap: 18px; margin-bottom: 22px; }
+.alvo-group {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+.alvo-group h2 { margin: 0 0 12px; font-size: 1rem; }
+.alvo-field { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-bottom: 10px; }
+.alvo-field:last-child { margin-bottom: 0; }
+
 @media (max-width: 800px) {
   .app-shell { flex-direction: column; }
   .sidebar { width: 100%; height: auto; position: static; }

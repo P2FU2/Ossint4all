@@ -61,6 +61,8 @@ def parse_socio_hits(
     origin_key: str,
     source_label: str,
     source_url: str | None = None,
+    rel_type: str = "SOCIO",
+    unconfirmed: bool = False,
 ) -> ConnectorResult:
     out = ConnectorResult()
     seen: set[str] = set()
@@ -102,17 +104,18 @@ def parse_socio_hits(
                     "uf": uf,
                     "cnae": cnae,
                     "from_socio_search": True,
+                    "status": "unconfirmed" if unconfirmed else "confirmed",
                 },
-                confidence=0.75,
+                confidence=0.45 if unconfirmed else 0.75,
             )
         )
         out.edges.append(
             FoundEdge(
                 from_ref=origin_key,
                 to_ref=org_key,
-                rel_type="SOCIO",
-                confidence=0.7,
-                attrs={"fonte": source_label},
+                rel_type=rel_type,
+                confidence=0.45 if unconfirmed else 0.7,
+                attrs={"fonte": source_label, "status": "unconfirmed" if unconfirmed else "confirmed"},
             )
         )
         bits = [razao, cnpj]
@@ -174,15 +177,19 @@ class SocioSearchConnector:
         if not name:
             return ConnectorResult()
         origin = entity.canonical_key
+        name_only = origin.startswith("name:")
         result = ConnectorResult()
-        result.merge(self._casadosdados(name, origin))
+        result.merge(self._casadosdados(name, origin, name_only=name_only))
         if self.settings.brasil_io_api_token:
-            result.merge(self._brasil_io(name, origin))
+            result.merge(self._brasil_io(name, origin, name_only=name_only))
         if not result.entities:
-            result.merge(self._web_mentions(name, origin, ctx))
+            result.merge(self._web_mentions(name, origin, ctx, name_only=name_only))
         return result
 
-    def _casadosdados(self, name: str, origin: str) -> ConnectorResult:
+    def _hit_flags(self, name_only: bool) -> dict[str, Any]:
+        return {"rel_type": "CANDIDATO" if name_only else "SOCIO", "unconfirmed": name_only}
+
+    def _casadosdados(self, name: str, origin: str, *, name_only: bool = True) -> ConnectorResult:
         payload = {
             "busca_textual": [
                 {
@@ -216,6 +223,7 @@ class SocioSearchConnector:
             origin_key=origin,
             source_label="Receita Federal (índice público Casa dos Dados)",
             source_url="https://casadosdados.com.br/",
+            **self._hit_flags(name_only),
         )
 
     def _casadosdados_cpf(self, digits: str, origin: str) -> ConnectorResult:
@@ -285,7 +293,7 @@ class SocioSearchConnector:
             source_url="https://brasil.io/dataset/socios-brasil/socios/",
         )
 
-    def _brasil_io(self, name: str, origin: str) -> ConnectorResult:
+    def _brasil_io(self, name: str, origin: str, *, name_only: bool = True) -> ConnectorResult:
         resp = self.http.request(
             "GET",
             "https://api.brasil.io/v1/dataset/socios-brasil/socios/data/",
@@ -303,10 +311,13 @@ class SocioSearchConnector:
             origin_key=origin,
             source_label="Receita Federal (Brasil.IO / dados abertos)",
             source_url="https://brasil.io/dataset/socios-brasil/socios/",
+            **self._hit_flags(name_only),
         )
 
-    def _web_mentions(self, name: str, origin: str, ctx: ExpandContext) -> ConnectorResult:
+    def _web_mentions(self, name: str, origin: str, ctx: ExpandContext, *, name_only: bool = True) -> ConnectorResult:
+        from osint4all.connectors.cnpj_receita import CnpjReceitaConnector, parse_cnpj_payload
         from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
+        from osint4all.graph.identity import names_match
 
         search = WebSearchConnector(self.settings)
         if not web_search_ready(self.settings):
@@ -315,13 +326,25 @@ class SocioSearchConnector:
         try:
             hits = search.search(query, origin)
         except Exception:
-            return ConnectorResult()
+            return ConnectorResult(notes=["Busca web não retornou menções."])
         blob = " ".join(f"{ev.snippet or ''} {ev.url or ''}" for ev in hits.evidence)
-        rows = [{"cnpj": cnpj} for cnpj in extract_cnpjs(blob)]
+        verified: list[dict[str, Any]] = []
+        receita = CnpjReceitaConnector(self.settings)
+        for cnpj in extract_cnpjs(blob)[:8]:
+            try:
+                parsed = parse_cnpj_payload(receita._fetch(cnpj))
+            except Exception:
+                continue
+            if any(e.entity_type == "PERSON" and names_match(e.display_name, name) for e in parsed.entities):
+                org = next((e for e in parsed.entities if e.kind == "CNPJ"), None)
+                verified.append({"cnpj": cnpj, "razao_social": (org.display_name if org else cnpj)})
+        if not verified:
+            return ConnectorResult(notes=["Menções web sem QSA que confirme o nome. Nada foi ligado."])
         out = parse_socio_hits(
-            rows,
+            verified,
             origin_key=origin,
-            source_label="Menção pública (busca web + CNPJ)",
+            source_label="Menção pública + QSA oficial",
+            **self._hit_flags(name_only),
         )
         out.merge(hits)
         return out

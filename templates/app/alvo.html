@@ -1,0 +1,142 @@
+{% extends "app/base.html" %}
+{% block title %}Alvo{% endblock %}
+{% block content %}
+<div class="consult-wrap tools-wrap">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">Dossiê em camadas</p>
+      <h1>O que você já sabe desta pessoa?</h1>
+      <p class="lede">Preencha um campo e busque. Nome sozinho vira candidato. CPF, e-mail, telefone, @user, placa ou CNPJ (com o nome no QSA) confirmam o vínculo.</p>
+    </div>
+    {% if current_case %}
+    <span class="kpi" data-tip="O grafo deste caso recebe o que for confirmado">Caso: {{ current_case.title }}</span>
+    {% endif %}
+  </header>
+
+  <div class="alvo-tree">
+    {% for group_id, group_label, items in groups %}
+    <section class="alvo-group">
+      <h2>{{ group_label }}</h2>
+      {% for kind, label in items %}
+      <form class="alvo-field" method="post" action="/app/alvo">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="kind" value="{{ kind }}" />
+        <label>{{ label }}
+          <input name="value" value="{{ fields.get(kind) or '' }}" autocomplete="off" placeholder="{{ label }}" data-tip="Edite e busque só neste campo. A camada seguinte usa o que já está no dossiê." />
+        </label>
+        <button class="btn primary" type="submit" data-tip="Roda a camada deste campo e cruza com o restante do alvo">Buscar nesta camada</button>
+      </form>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+
+  {% if layer %}
+  <article class="result-card {% if layer.qsa_match %}kind-cnpj{% elif layer.consult %}kind-{{ layer.consult.kind|lower }}{% endif %}">
+    <p class="type-tag">{% if layer.qsa_match %}QSA confirmou o nome{% else %}Camada {{ layer.added_kind }}{% endif %}</p>
+    <h2>{{ layer.consult.title if layer.consult and layer.consult.title else layer.added_value }}</h2>
+    {% if layer.error %}<div class="result-banner error">{{ layer.error }}</div>{% endif %}
+    {% if layer.consult and layer.consult.summary %}<p class="lede">{{ layer.consult.summary }}</p>{% endif %}
+    {% for note in layer.notes %}
+    <p class="muted">{{ note }}</p>
+    {% endfor %}
+
+    {% if layer.consult and layer.consult.facts %}
+    <p class="section-kicker">fatos desta camada</p>
+    <dl class="fact-grid">
+      {% for label, value in layer.consult.facts %}
+      <div>
+        <dt>{{ label }}</dt>
+        <dd><button type="button" class="inspect-open" data-inspect='{{ {"title": label, "kind": "fato", "meta": value, "url": "", "when": ""}|tojson }}'>{{ value }}</button></dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% endif %}
+
+    {% if layer.consult and layer.consult.graph_payload %}
+    <p class="section-kicker">árvore de vínculos</p>
+    <div class="mini-graph" data-graph='{{ layer.consult.graph_payload | tojson }}' aria-label="Árvore desta camada"></div>
+    {% endif %}
+
+    {% if layer.consult and layer.consult.timeline %}
+    <p class="section-kicker">linha do tempo</p>
+    <ol class="timeline">
+      {% for ev in layer.consult.timeline %}
+      <li class="tl-{{ ev.kind }}">
+        {% if ev.when %}<span class="tl-when">{{ ev.when }}</span>{% endif %}
+        <button type="button" class="inspect-open" data-inspect='{{ {"title": ev.title, "kind": ev.kind or "evento", "meta": ev.meta or "", "url": ev.url or "", "when": ev.when or ""}|tojson }}'>{{ ev.title }}</button>
+        {% if ev.meta %}<span class="muted">{{ ev.meta }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+
+    {% if layer.consult and layer.consult.hits %}
+    <p class="section-kicker">fontes e hits</p>
+    <ul class="hit-list">
+      {% for hit in layer.consult.hits %}
+      <li>
+        <button type="button" class="inspect-open" data-inspect='{{ {"title": hit.title, "kind": hit.kind or "fonte", "meta": hit.meta or "", "url": hit.url or "", "when": hit.when or ""}|tojson }}'>{{ hit.title }}</button>
+        <span class="muted">{{ hit.meta }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if layer.consult and layer.consult.notes %}
+    <ul class="note-list">
+      {% for note in layer.consult.notes %}
+      <li>{{ note }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if layer.confirmed %}
+    <h3>Confirmado no alvo</h3>
+    <ul class="hit-list">
+      {% for hit in layer.confirmed %}
+      <li>
+        <strong>{{ hit.title }}</strong>
+        <span class="muted">{{ hit.reason }}{% if hit.summary %} · {{ hit.summary }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if layer.candidates %}
+    <h3>Candidatos — não são a mesma pessoa até você confirmar</h3>
+    <ul class="hit-list">
+      {% for hit in layer.candidates %}
+      <li>
+        <strong>{{ hit.title }}</strong>
+        <span class="muted">{{ hit.reason }}{% if hit.summary %} · {{ hit.summary }}{% endif %}</span>
+        <form class="inline-plate" method="post" action="/app/alvo/confirmar">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="kind" value="{{ hit.kind }}" />
+          <input type="hidden" name="value" value="{{ hit.value }}" />
+          <button class="btn" type="submit" data-tip="Incorpora este valor ao alvo e roda a camada seguinte">Confirmar</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </article>
+  {% endif %}
+
+  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    {% if cases %}
+    <label class="save-extra">Caso
+      <select name="investigation_id">
+        <option value="">Novo caso</option>
+        {% for c in cases %}
+        <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <button class="btn primary" type="submit" data-tip="Só leva identificadores confirmados (não homônimos)">Abrir / atualizar grafo</button>
+    <a class="btn ghost" href="/app" data-tip="Consulta pontual, sem dossiê">Consulta rápida</a>
+  </form>
+</div>
+{% endblock %}

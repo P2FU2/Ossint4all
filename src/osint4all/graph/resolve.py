@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from osint4all.connectors.base import ConnectorResult, FoundEntity
 from osint4all.db.models import Edge, Entity, Evidence, Identifier, Investigation
 from osint4all.db.repository import add_identifier, enqueue_expand, find_entity_by_key, utcnow
+from osint4all.graph.identity import found_canonical_key, is_unconfirmed
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
 
 
@@ -23,7 +24,7 @@ def upsert_found_entity(
     depth: int,
     is_seed: bool = False,
 ) -> Entity:
-    key = canonical_key(found.kind, found.value)
+    key = found_canonical_key(found)
     existing = find_entity_by_key(session, investigation.id, key)
     if existing:
         existing.last_seen_at = utcnow()
@@ -104,9 +105,16 @@ def apply_result(
 
     for found in result.entities:
         entity = upsert_found_entity(session, investigation, found, depth=depth + 1)
+        ref_map[found_canonical_key(found)] = entity
         ref_map[canonical_key(found.kind, found.value)] = entity
         created.append(entity)
-        if enqueue_children and depth + 1 < investigation.max_depth and entity.id != origin.id:
+        if (
+            enqueue_children
+            and depth + 1 < investigation.max_depth
+            and entity.id != origin.id
+            and not is_unconfirmed(entity)
+            and not is_unconfirmed(found)
+        ):
             enqueue_expand(
                 session,
                 investigation=investigation,

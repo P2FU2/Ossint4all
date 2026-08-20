@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from osint4all.consult import run_consult
-from osint4all.db.chain import chain_view, identifiers_from_outcome, ingest_outcome, reset_chain
+from osint4all.db.chain import alvo_fields, chain_view, identifiers_from_outcome, ingest_outcome, reset_chain
 from osint4all.db.models import User
 from osint4all.web.auth import seed_admin_user
 
@@ -62,3 +62,11 @@ def test_reset_chain(db, settings) -> None:
     ingest_outcome(db, user, run_consult("@ana", mode="USERNAME"))
     reset_chain(db, user)
     assert chain_view(db, user) is None
+
+
+def test_alvo_fields_reads_username_from_email(db, settings) -> None:
+    user = _user(db, settings)
+    ingest_outcome(db, user, run_consult("pedromilani14@gmail.com", mode="EMAIL"))
+    fields = alvo_fields(db, user)
+    assert fields["EMAIL"] == "pedromilani14@gmail.com"
+    assert fields["USERNAME"] == "pedromilani14"

@@ -5,14 +5,14 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=6" defer></script>
+<script src="/static/graph.js?v=7" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
   <div>
     <a class="crumb" href="/app/casos" data-tip="Volta à lista de casos guardados">Casos</a>
     <h1>{{ inv.title }}</h1>
-    <p class="lede">{{ inv.hypothesis or "Explore o grafo. Passe o mouse nos nós · clique para a ficha." }}</p>
+    <p class="lede">{{ inv.hypothesis or "Nós tracejados são candidatos. Clique para a ficha · desligar remove o nó e as ligações." }}</p>
   </div>
   <div class="graph-actions">
     <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>

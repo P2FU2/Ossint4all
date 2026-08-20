@@ -115,3 +115,8 @@ def test_consult_tools_assign_edit(settings) -> None:
     )
     assert assigned.status_code == 200
     assert "adicionados" in assigned.text.lower() or "Caso editado" in assigned.text
+
+    alvo = client.get("/app/alvo")
+    assert alvo.status_code == 200
+    assert "desta pessoa" in alvo.text.lower()
+    assert "Buscar nesta camada" in alvo.text

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from osint4all.db.history import kind_label, replay_spec
 from osint4all.db.models import SearchChain, SearchChainStep, User
+from osint4all.graph.layers import ALVO_KINDS
 from osint4all.identifiers import parse_seed
 
 KEEP_CHAINS = 8
@@ -236,6 +237,23 @@ def active_chain(session: Session, user: User) -> SearchChain | None:
 
 def reset_chain(session: Session, user: User) -> None:
     session.execute(update(SearchChain).where(SearchChain.user_id == user.id, SearchChain.active.is_(True)).values(active=False))
+
+
+def alvo_fields(session: Session, user: User) -> dict[str, str]:
+    chain = active_chain(session, user)
+    fields: dict[str, str] = {}
+    if not chain:
+        return fields
+    for step in _chain_steps(session, chain.id):
+        kind = (step.kind or "").upper()
+        if kind in ALVO_KINDS and (step.query or "").strip():
+            fields[kind] = step.query.strip()
+        for ident in step.identifiers or []:
+            ident_kind = str(ident.get("kind") or "").upper()
+            ident_value = str(ident.get("value") or "").strip()
+            if ident_kind in ALVO_KINDS and ident_value and ident_kind not in fields:
+                fields[ident_kind] = ident_value
+    return fields
 
 
 def ingest_outcome(session: Session, user: User, outcome: object) -> SearchChain | None:

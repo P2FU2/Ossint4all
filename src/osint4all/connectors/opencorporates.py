@@ -84,8 +84,17 @@ class OpenCorporatesConnector:
             "https://api.opencorporates.com/v0.4/companies/search",
             params=params,
         )
+        if resp.status_code in {401, 403}:
+            return ConnectorResult(
+                notes=["OpenCorporates recusou (limite ou token). Sem OPENCORPORATES_API_TOKEN a API pública costuma falhar."]
+            )
+        if resp.status_code == 429:
+            return ConnectorResult(notes=["OpenCorporates: rate limit. Tente de novo em instantes."])
         if resp.status_code >= 400:
             return ConnectorResult(notes=[f"OpenCorporates HTTP {resp.status_code}"])
         data = resp.json()
         results = (((data or {}).get("results") or {}).get("companies")) or []
-        return parse_opencorporates(results, origin_key=entity.canonical_key)
+        parsed = parse_opencorporates(results, origin_key=entity.canonical_key)
+        if not parsed.entities:
+            parsed.notes.append("OpenCorporates sem empresa pública para este nome.")
+        return parsed
