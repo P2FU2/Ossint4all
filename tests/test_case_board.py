@@ -10,8 +10,11 @@ from osint4all.db.repository import (
     create_manual_edge,
     delete_case_note,
     delete_edge,
+    delete_edges,
     detach_entities,
     detach_entity,
+    enrich_entity,
+    entity_id_fields,
     graph_counts,
     graph_payload,
     purge_investigation,
@@ -225,6 +228,75 @@ def test_detach_entities_keeps_seed(settings, db) -> None:
     assert removed == 1
     assert db.get(Entity, person.id) is not None
     assert db.get(Entity, extra.id) is None
+
+
+def test_detach_entities_deletes_only_selected(settings, db) -> None:
+    inv = _case(db)
+    person = inv.entities[0]
+    company = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={"status": "unconfirmed"},
+        depth=1,
+    )
+    partner = Entity(
+        investigation_id=inv.id,
+        entity_type="PERSON",
+        canonical_key="name:joao pereira lima",
+        display_name="Joao Pereira Lima",
+        attrs={"status": "unconfirmed"},
+        depth=2,
+    )
+    db.add_all([company, partner])
+    db.flush()
+    db.add_all(
+        [
+            Edge(investigation_id=inv.id, from_entity_id=person.id, to_entity_id=company.id, rel_type="SOCIO"),
+            Edge(investigation_id=inv.id, from_entity_id=company.id, to_entity_id=partner.id, rel_type="SOCIO"),
+        ]
+    )
+    db.flush()
+    assert detach_entities(db, inv.id, [company.id], keep_seeds=True) == 1
+    assert db.get(Entity, company.id) is None
+    assert db.get(Entity, partner.id) is not None
+    assert db.get(Entity, person.id) is not None
+
+
+def test_enrich_entity_adds_cpf_for_precise_search(settings, db) -> None:
+    inv = _case(db)
+    person = inv.entities[0]
+    seed = parse_seed("529.982.247-25", forced_kind="CPF")
+    extra = parse_seed("ana@example.com", forced_kind="EMAIL")
+    kinds = enrich_entity(person, [seed, extra])
+    db.flush()
+    assert "CPF" in kinds
+    assert "EMAIL" in kinds
+    fields = entity_id_fields(person)
+    assert fields.get("EMAIL")
+    assert any(item.kind == "EMAIL" for item in person.identifiers)
+
+
+def test_delete_edges_batch(settings, db) -> None:
+    inv = _case(db)
+    person = inv.entities[0]
+    company = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={},
+        depth=1,
+    )
+    db.add(company)
+    db.flush()
+    edge = Edge(investigation_id=inv.id, from_entity_id=person.id, to_entity_id=company.id, rel_type="CANDIDATO")
+    db.add(edge)
+    db.flush()
+    assert delete_edges(db, inv.id, [edge.id]) == 1
+    assert db.get(Edge, edge.id) is None
+    assert db.get(Entity, company.id) is not None
 
 
 def test_add_company_links_to_target_without_becoming_seed(settings, db) -> None:

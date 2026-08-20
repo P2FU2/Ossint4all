@@ -33,13 +33,13 @@
       <button class="btn danger" type="submit" data-tip="Remove o nó e as pessoas/empresas que só existiam por ele">Desligar nó</button>
     </form>
     <details class="more-menu">
-      <summary class="btn" data-tip="Corrige o nome de exibição e anota a ficha">Editar</summary>
+      <summary class="btn" data-tip="Corrige o nome de exibição e anota a ficha">Nota</summary>
       <div class="more-panel">
         <form class="stack" method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/editar">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <label>Nome <input name="display_name" value="{{ entity.display_name }}" required /></label>
+          <input type="hidden" name="display_name" value="{{ entity.display_name }}" />
           <label>Nota <textarea name="note" rows="3">{{ entity.attrs.get("nota") or "" }}</textarea></label>
-          <button class="btn primary" type="submit">Salvar</button>
+          <button class="btn primary" type="submit" name="depois" value="gravar">Salvar nota</button>
         </form>
       </div>
     </details>
@@ -93,7 +93,31 @@
 {% endif %}
 
 <section class="panel">
-  <h2>Identificadores</h2>
+  <h2>Completar ficha</h2>
+  <p class="lede">CPF, e-mail, telefone e @ travam o nome. Sem isso a busca pelo nome puxa homônimo.</p>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/editar" data-busy="Gravando ficha…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <fieldset class="seed-grid compact">
+      <label>Nome <input name="display_name" value="{{ entity.display_name }}" required autocomplete="off" /></label>
+      {% if entity.entity_type != "ORG" %}
+      <label>CPF <input name="seed_cpf" value="{{ id_fields.CPF or '' }}" data-mask="cpf" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off" /></label>
+      {% endif %}
+      <label>E-mail <input name="seed_email" value="{{ id_fields.EMAIL or '' }}" placeholder="nome@dominio.com" autocomplete="off" /></label>
+      <label>Telefone <input name="seed_phone" value="{{ id_fields.PHONE or '' }}" data-mask="phone" inputmode="numeric" placeholder="11 99999-0000" autocomplete="off" /></label>
+      <label>Usuário <input name="seed_username" value="{{ id_fields.USERNAME or '' }}" placeholder="@usuario" autocomplete="off" /></label>
+      {% if entity.entity_type != "ORG" %}
+      <label>Nascimento <input name="seed_birth" value="{{ id_fields.BIRTHDATE or '' }}" data-mask="date" inputmode="numeric" placeholder="00/00/0000" autocomplete="off" /></label>
+      <label>Nome do pai <input name="seed_father" value="{{ id_fields.FATHER or '' }}" autocomplete="off" /></label>
+      <label>Nome da mãe <input name="seed_mother" value="{{ id_fields.MOTHER or '' }}" autocomplete="off" /></label>
+      {% endif %}
+    </fieldset>
+    <label>Nota <textarea name="note" rows="2">{{ entity.attrs.get("nota") or "" }}</textarea></label>
+    <div class="graph-actions">
+      <button class="btn" type="submit" name="depois" value="gravar">Só gravar</button>
+      <button class="btn primary" type="submit" name="depois" value="buscar" data-tip="Grava e busca só com estes dados">Salvar e buscar com estes dados</button>
+    </div>
+  </form>
+  <h3>Já na ficha</h3>
   <ul class="plain">
     {% for ident in entity.identifiers %}
     <li><strong>{{ ident.kind }}</strong> {{ mask_identifier(ident.kind, ident.value) }}{% if ident.strong %} · forte{% endif %}</li>
@@ -154,6 +178,22 @@
       {% endfor %}
     </tbody>
   </table>
+  <h3>Acrescentar pessoa</h3>
+  <p class="lede">Sócio ou nome que a busca trouxe incompleto. Grave CPF/e-mail/@ e só depois busque.</p>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/pessoa" data-busy="Ligando pessoa…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <fieldset class="seed-grid compact">
+      <label>Nome <input name="seed_name" required placeholder="Nome completo" autocomplete="off" /></label>
+      <label>CPF <input name="seed_cpf" data-mask="cpf" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off" /></label>
+      <label>E-mail <input name="seed_email" placeholder="nome@dominio.com" autocomplete="off" /></label>
+      <label>Telefone <input name="seed_phone" data-mask="phone" inputmode="numeric" placeholder="11 99999-0000" autocomplete="off" /></label>
+      <label>Usuário <input name="seed_username" placeholder="@usuario" autocomplete="off" /></label>
+    </fieldset>
+    <div class="graph-actions">
+      <button class="btn" type="submit" name="depois" value="gravar">Só ligar</button>
+      <button class="btn primary" type="submit" name="depois" value="buscar">Ligar e buscar</button>
+    </div>
+  </form>
 </section>
 {% endif %}
 
@@ -205,30 +245,41 @@
 
 <section class="panel">
   <h2>Vínculos</h2>
-  <table class="table">
-    <thead><tr><th>Relação</th><th>Outro nó</th><th>Confiança</th><th>Fonte</th><th></th></tr></thead>
-    <tbody>
-      {% for edge in edges %}
-      {% set other_id = edge.to_entity_id if edge.from_entity_id == entity.id else edge.from_entity_id %}
-      {% set other = neighbors.get(other_id) %}
-      <tr>
-        <td>{{ edge.rel_type }}{% if edge.attrs.get("nota") %}<span class="muted"> · {{ edge.attrs.get("nota") }}</span>{% endif %}</td>
-        <td>{% if other %}<a href="/app/casos/{{ inv.id }}/entidades/{{ other.id }}">{{ other.display_name }}</a>{% else %}{{ other_id }}{% endif %}</td>
-        <td>{{ '%.2f'|format(edge.confidence) }}</td>
-        <td>{{ edge.source_connector or "—" }}</td>
-        <td class="graph-actions">
-          <a class="btn" href="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}">Editar</a>
-          <form method="post" action="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}/apagar" onsubmit="return confirm('Remover só esta ligação?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <button class="btn danger" type="submit">Apagar</button>
-          </form>
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5">Sem vínculos ainda.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <p class="lede">Marque os falsos positivos e exclua de uma vez. O alvo não sai.</p>
+  <form id="ficha-batch" method="post" action="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-busy="Removendo…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="from_id" value="{{ entity.id }}" />
+    <input type="hidden" name="next" value="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}" />
+    <div class="graph-actions">
+      <button class="btn danger" type="submit" formaction="/app/casos/{{ inv.id }}/entidades/lote/desligar" onclick="return confirm('Excluir os nós marcados? O alvo permanece.');">Excluir nós marcados</button>
+      <button class="btn danger" type="submit" formaction="/app/casos/{{ inv.id }}/ligacoes/lote/apagar" onclick="return confirm('Apagar só as ligações marcadas? Os nós ficam.');">Apagar ligações marcadas</button>
+    </div>
+    <table class="table">
+      <thead><tr><th></th><th>Relação</th><th>Outro nó</th><th>Confiança</th><th>Fonte</th><th></th></tr></thead>
+      <tbody>
+        {% for edge in edges %}
+        {% set other_id = edge.to_entity_id if edge.from_entity_id == entity.id else edge.from_entity_id %}
+        {% set other = neighbors.get(other_id) %}
+        <tr>
+          <td>
+            {% if other and not other.is_seed %}
+            <label class="check"><input type="checkbox" name="entity_ids" value="{{ other.id }}" /> <span class="sr-only">selecionar</span></label>
+            {% else %}
+            <input type="checkbox" name="edge_ids" value="{{ edge.id }}" />
+            {% endif %}
+          </td>
+          <td>{{ edge.rel_type }}{% if edge.attrs.get("nota") %}<span class="muted"> · {{ edge.attrs.get("nota") }}</span>{% endif %}</td>
+          <td>{% if other %}<a href="/app/casos/{{ inv.id }}/entidades/{{ other.id }}">{{ other.display_name }}</a>{% else %}{{ other_id }}{% endif %}</td>
+          <td>{{ '%.2f'|format(edge.confidence) }}</td>
+          <td>{{ edge.source_connector or "—" }}</td>
+          <td><a class="btn" href="/app/casos/{{ inv.id }}/ligacoes/{{ edge.id }}">Editar</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">Sem vínculos ainda.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
 </section>
 
 <section class="panel">

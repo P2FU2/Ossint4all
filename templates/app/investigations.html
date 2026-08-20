@@ -7,8 +7,9 @@
     <h1>Casos guardados</h1>
     <p class="lede sr-only">Casos persistidos.</p>
   </div>
-  <div class="graph-actions">
-    <label class="save-extra">Buscar
+  <div class="graph-actions page-toolbar">
+    <label class="field-inline">
+      <span class="sr-only">Buscar</span>
       <input id="case-search" type="search" placeholder="título ou hipótese" data-tip="Filtra os cartões desta lista" />
     </label>
     <a class="btn" href="/app" data-tip="Placa, user, telefone, sócio — sem criar caso">Consultar</a>
@@ -30,11 +31,13 @@
     <a href="/app/casos/{{ inv.id }}" data-tip="Abrir o grafo deste caso">
       <div class="case-top">
         <strong>{{ inv.title }}</strong>
-        {% if current_case_id == inv.id %}<span class="pill">corrente</span>{% endif %}
-        {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
-        <span class="pill">{{ inv.status }}</span>
+        <div class="case-pills">
+          {% if current_case_id == inv.id %}<span class="pill is-current">corrente</span>{% endif %}
+          {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
+          <span class="pill">{{ inv.status }}</span>
+        </div>
       </div>
-      <p>{{ inv.hypothesis or "Sem hipótese." }}</p>
+      <p class="case-hypo">{{ inv.hypothesis or "Sem hipótese." }}</p>
       <p class="muted">{{ inv.assignee or inv.created_by or "" }} · {{ inv.created_at.strftime("%d/%m/%Y %H:%M") if inv.created_at else "" }} · {{ inv.id[:8] }}</p>
     </a>
     <div class="kpis">
@@ -42,10 +45,10 @@
       <span>{{ c.edges }} vínculos</span>
       <span>{{ c.jobs.PENDING + c.jobs.RUNNING }} na fila</span>
     </div>
-    <div class="graph-actions">
+    <div class="graph-actions case-actions">
       <form method="post" action="/app/casos/{{ inv.id }}/usar">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <button class="btn" type="submit" data-tip="Consultas e a suíte passam a gravar neste caso">Usar como corrente</button>
+        <button class="btn" type="submit" data-tip="Consultas e a suíte passam a gravar neste caso">Usar</button>
       </form>
       <a class="btn" href="/app/casos/{{ inv.id }}" data-tip="Editar no grafo">Editar</a>
       <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar este caso, o grafo e as anotações?');">

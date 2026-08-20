@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from osint4all.catalog.framework import load_framework_tree
@@ -42,6 +42,9 @@ from osint4all.db.repository import (
     delete_edge,
     detach_entities,
     detach_entity,
+    delete_edges,
+    enrich_entity,
+    entity_id_fields,
     enqueue_expand,
     find_entity_by_key,
     enqueue_qsa_network,
@@ -177,6 +180,14 @@ def _sync_expand(investigation_id: str, *, rounds: int = 1) -> int:
 def _wants_json(request: Request) -> bool:
     accept = (request.headers.get("accept") or "").lower()
     return "application/json" in accept and "text/html" not in accept.split(",")[0]
+
+
+def _safe_next(investigation_id: str, next_url: str, fallback: str) -> str:
+    prefix = f"/app/casos/{investigation_id}"
+    target = (next_url or "").strip()
+    if target.startswith(prefix + "/") or target == prefix:
+        return target
+    return fallback
 
 
 def _case_pulse(session: Session, investigation_id: str) -> dict:
@@ -1227,6 +1238,7 @@ def entity_page(
             "pii_class": entity_pii(entity),
             "stale": is_stale(entity),
             "cross_hits": [h for h in cross_case_hits(session, investigation_id) if h["key"] == entity.canonical_key],
+            "id_fields": entity_id_fields(entity),
         }
     )
     return templates.TemplateResponse(request, "app/entity.html", ctx)
@@ -1324,10 +1336,20 @@ def edit_entity(
     csrf_token: str = Form(""),
     display_name: str = Form(""),
     note: str = Form(""),
+    seed_cpf: str = Form(""),
+    seed_email: str = Form(""),
+    seed_phone: str = Form(""),
+    seed_username: str = Form(""),
+    seed_birth: str = Form(""),
+    seed_father: str = Form(""),
+    seed_mother: str = Form(""),
+    depois: str = Form("gravar"),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     entity = session.scalar(
-        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
+        select(Entity)
+        .options(selectinload(Entity.identifiers))
+        .where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
     )
     if not entity:
         _set_flash(request, "error", "Entidade não encontrada neste caso.")
@@ -1340,9 +1362,36 @@ def edit_entity(
     elif "nota" in attrs and not note.strip():
         attrs.pop("nota", None)
     entity.attrs = attrs
-    write_audit(session, "entity.edit", username=user.username, investigation_id=investigation_id, details={"entity_id": entity.id})
+    seeds = collect_form_seeds(
+        seed_cpf=seed_cpf,
+        seed_email=seed_email,
+        seed_phone=seed_phone,
+        seed_username=seed_username,
+        seed_birth=seed_birth,
+        seed_father=seed_father,
+        seed_mother=seed_mother,
+        seed_name=display_name,
+    )
+    kinds = enrich_entity(entity, seeds)
+    inv = session.get(Investigation, investigation_id)
+    if depois == "buscar" and inv:
+        probe = [item for item in kinds if item in {"EMAIL", "USERNAME", "PHONE", "CPF", "NAME", "CNPJ"}]
+        if probe:
+            attrs = dict(entity.attrs or {})
+            attrs["probe_kinds"] = probe
+            entity.attrs = attrs
+        enqueue_expand(session, investigation=inv, entity=entity, depth=entity.depth, max_attempts=get_settings().job_max_attempts, force=True)
+    write_audit(session, "entity.edit", username=user.username, investigation_id=investigation_id, details={"entity_id": entity.id, "kinds": kinds})
     session.commit()
-    request.session["flash"] = {"level": "ok", "message": "Ficha atualizada."}
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, kinds=kinds, queued=depois == "buscar")
+    _set_flash(
+        request,
+        "ok",
+        "Dados gravados na ficha. A próxima busca usa CPF/e-mail/@ e evita homônimo."
+        if depois != "buscar"
+        else "Dados gravados. Busca precisa na fila — o grafo atualiza sozinho.",
+    )
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
 
@@ -1438,6 +1487,7 @@ def detach_nodes(
     session: Session = Depends(db_session),
     csrf_token: str = Form(""),
     entity_ids: list[str] = Form(default=[]),
+    next: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
@@ -1449,10 +1499,122 @@ def detach_nodes(
     removed = detach_entities(session, investigation_id, [item for item in entity_ids if item], keep_seeds=True)
     write_audit(session, "entity.detach_batch", username=user.username, investigation_id=investigation_id, details={"removed": removed})
     session.commit()
+    dest = _safe_next(investigation_id, next, f"/app/casos/{investigation_id}")
     if _wants_json(request):
         return _json_case(session, investigation_id, ok=True, removed=removed)
     _set_flash(request, "ok", f"{removed} nó(s) removidos. O alvo permanece.")
-    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    return RedirectResponse(dest, status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/ligacoes/lote/apagar")
+def remove_links(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    edge_ids: list[str] = Form(default=[]),
+    entity_ids: list[str] = Form(default=[]),
+    from_id: str = Form(""),
+    next: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    wanted = [item for item in edge_ids if item]
+    peers = [item for item in entity_ids if item]
+    if from_id and peers:
+        wanted.extend(
+            str(item)
+            for item in session.scalars(
+                select(Edge.id).where(
+                    Edge.investigation_id == investigation_id,
+                    or_(
+                        and_(Edge.from_entity_id == from_id, Edge.to_entity_id.in_(peers)),
+                        and_(Edge.to_entity_id == from_id, Edge.from_entity_id.in_(peers)),
+                    ),
+                )
+            )
+        )
+    removed = delete_edges(session, investigation_id, wanted)
+    write_audit(session, "edge.delete_batch", username=user.username, investigation_id=investigation_id, details={"removed": removed})
+    session.commit()
+    dest = _safe_next(investigation_id, next, f"/app/casos/{investigation_id}")
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, removed=removed)
+    _set_flash(request, "ok", f"{removed} ligação(ões) apagadas. Os nós continuam no caso.")
+    return RedirectResponse(dest, status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/entidades/{entity_id}/pessoa")
+def add_person_to_node(
+    investigation_id: str,
+    entity_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    seed_name: str = Form(""),
+    seed_cpf: str = Form(""),
+    seed_email: str = Form(""),
+    seed_phone: str = Form(""),
+    seed_username: str = Form(""),
+    depois: str = Form("gravar"),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    host = session.scalar(
+        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
+    )
+    if not inv or not host:
+        _set_flash(request, "error", "Não foi possível acrescentar a pessoa.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    seeds = collect_form_seeds(
+        seed_name=seed_name,
+        seed_cpf=seed_cpf,
+        seed_email=seed_email,
+        seed_phone=seed_phone,
+        seed_username=seed_username,
+    )
+    person_seed = next((item for item in seeds if item.kind in {"CPF", "NAME"}), None)
+    if not person_seed:
+        _set_flash(request, "error", "Informe o nome ou o CPF da pessoa.")
+        return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
+    person = upsert_found_entity(
+        session,
+        inv,
+        FoundEntity(
+            entity_type="PERSON",
+            kind=person_seed.kind,
+            value=person_seed.value,
+            display_name=person_seed.display_name,
+            confidence=0.99 if person_seed.kind == "CPF" else 0.7,
+        ),
+        depth=max(1, (host.depth or 0) + 1),
+        is_seed=False,
+    )
+    person = session.scalar(select(Entity).options(selectinload(Entity.identifiers)).where(Entity.id == person.id))
+    kinds = enrich_entity(person, seeds) if person else []
+    if person and person.id != host.id:
+        create_manual_edge(session, inv, from_id=host.id, to_id=person.id, rel_type="SOCIO", note="Pessoa acrescentada na ficha")
+    if depois == "buscar" and person:
+        probe = [item for item in kinds if item in {"EMAIL", "USERNAME", "PHONE", "CPF", "NAME"}]
+        if probe:
+            attrs = dict(person.attrs or {})
+            attrs["probe_kinds"] = probe
+            person.attrs = attrs
+        enqueue_expand(session, investigation=inv, entity=person, depth=person.depth, max_attempts=get_settings().job_max_attempts, force=True)
+    write_audit(session, "entity.add_person", username=user.username, investigation_id=inv.id, details={"host": host.id, "person": person.id if person else ""})
+    session.commit()
+    dest = f"/app/casos/{investigation_id}/entidades/{person.id}" if person else f"/app/casos/{investigation_id}/entidades/{entity_id}"
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True, queued=depois == "buscar")
+    _set_flash(request, "ok", "Pessoa ligada. Complete CPF/e-mail/@ na ficha antes de buscar de novo.")
+    return RedirectResponse(dest, status_code=303)
 
 
 @router.post("/app/casos/{investigation_id}/empresas")

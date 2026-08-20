@@ -130,7 +130,7 @@
           <li>Ação de administrador sem permissão não te desloga: volta ao painel com aviso.</li>
           <li><strong>Sair</strong> está no rodapé da barra esquerda.</li>
         </ol>
-        <p>A faixa amarela/verde/vermelha no topo (<code>#action-status</code>) mostra o andamento das ações longas: consultar, explodir QSA, processar fila, criar caso.</p>
+        <p>A faixa amarela/verde/vermelha no topo (<code>#action-status</code>) mostra o andamento das ações longas: consultar, explodir QSA, processar fila, criar caso, remover nós.</p>
       </section>
 
       <section id="menus" class="manual-section">
@@ -180,8 +180,9 @@
           <li><strong>Âncora forte</strong> — CPF válido, CNPJ, e-mail, telefone, @user, placa ou CNJ. Aí o grafo pode expandir com confiança.</li>
           <li><strong>CNPJ + nome no QSA</strong> — se o nome do alvo bate com um sócio oficial daquela empresa, o vínculo confirma mesmo sem CPF.</li>
           <li><strong>Veredito</strong> — na ficha: confirmado, provável, não confirmado, contestado, falso. Sempre com motivo (fonte ou contradição). Falso e contestado não entram na fila.</li>
+          <li><strong>Completar ficha</strong> — pessoa que veio pelo QSA entra só com o nome. Grave CPF, e-mail, telefone ou @ na ficha e use <em>Salvar e buscar com estes dados</em>. A próxima busca usa a âncora e para de puxar homônimo.</li>
           <li><strong>Decay</strong> — cargo ou endereço com ano antigo (ex.: 2019) aparece como <em>reconfirmar</em>. Não trate como atual.</li>
-          <li><strong>Desligar nó</strong> — apaga o nó, as pessoas/empresas que só existiam por ele, e <em>bloqueia</em> as chaves. Explodir / processar não recria aqueles identificadores neste caso.</li>
+          <li><strong>Excluir / Desligar</strong> — um nó: some ele, o que só existia por ele, e bloqueia as chaves. Área ou lote na ficha: some só os marcados (o alvo fica). Explodir / processar não recria identificador bloqueado neste caso.</li>
         </ul>
         <p>CPF precisa dos dígitos verificadores da Receita. Celular de 11 dígitos (DDD + 9) não é lido como CPF. Número inválido no campo CPF é ignorado — não vira semente.</p>
       </section>
@@ -417,6 +418,7 @@
         <p class="section-kicker">barra do canvas</p>
         <p>Vale na Rede, Árvore, Split e Mapa. Ícones, sem texto:</p>
         <ul>
+          <li><strong>Selecionar área</strong> (retângulo tracejado) — arraste no quadro, marque vários nós e exclua de uma vez. O alvo não entra. <kbd>Esc</kbd> cancela.</li>
           <li><strong>Grade</strong> (9 pontos) — fundo pontilhado tipo canvas, ou liso. A escolha fica gravada no navegador.</li>
           <li><strong>+</strong> / <strong>−</strong> — zoom. No mapa, o mesmo controle.</li>
           <li><strong>Enquadrar</strong> (setas para os cantos) — cabe o grafo (ou os pins) na tela. Atalho <code>0</code>.</li>
@@ -425,13 +427,22 @@
         </ul>
         <p class="section-kicker">interação no canvas</p>
         <ul>
-          <li><strong>Hover</strong> — balão rápido. Nó candidato / provável / contestado / falso muda a borda.</li>
+          <li><strong>Hover</strong> — balão rápido. Nó candidato / provável / contestado / falso muda a borda (tracejada = ainda não validado).</li>
           <li><strong>Clique no nó</strong> — ficha maior no painel. Não navega sozinho.</li>
           <li><strong>Clique na aresta</strong> — tipo, força, período. <strong>Editar ligação</strong> abre o “por quê”.</li>
-          <li><strong>Esc</strong> ou clique no fundo — fecha o balão.</li>
-          <li><strong>Botão direito</strong> (Rede / Árvore / Split): <em>Procurar informações deste nome</em> busca empresas e dados e joga no caso; também anotação, diagrama, seta, ficha, expandir, desligar.</li>
+          <li><strong>Esc</strong> — fecha o balão, o menu e o modo de seleção.</li>
+          <li><strong>Botão direito</strong> — só o menu do painel. O menu do navegador não abre no grafo.</li>
           <li>Modo seta: clique origem, depois destino. Tipos <code>SETA</code> ou <code>HIPOTESE</code>.</li>
           <li><strong>+</strong> / <strong>−</strong> no teclado também dão zoom, se o foco não estiver num campo.</li>
+        </ul>
+        <p class="section-kicker">menu do botão direito</p>
+        <ul>
+          <li><strong>No alvo / pessoa</strong> — marque o que buscar (nome, e-mail, rede, telefone, CPF; um ou vários) e <em>Buscar dados selecionados</em>. <em>Buscar empresas deste alvo</em> puxa empresas ligadas a esses dados. <em>Adicionar empresa (CNPJ)</em> cria o nó, liga ao alvo e já enfileira o QSA.</li>
+          <li><strong>Na empresa</strong> — <em>Buscar sócios (QSA)</em> e <em>Buscar empresas relacionadas</em>.</li>
+          <li><strong>Validar este nó</strong> — confirma candidato (borda deixa de ser tracejada) para a próxima camada poder expandir daqui.</li>
+          <li><strong>Excluir</strong> — some o nó e bloqueia a chave. O alvo não tem esta opção.</li>
+          <li><strong>No fundo do quadro</strong> — adicionar empresa por CNPJ, selecionar área e excluir, anotação, diagrama ou seta.</li>
+          <li>Também: abrir ficha, anotação, diagrama, seta, expandir daqui, copiar nome.</li>
         </ul>
         <p class="section-kicker">quadro do caso</p>
         <p>Abaixo do grafo, o <strong>Quadro</strong> junta:</p>
@@ -441,7 +452,7 @@
           <li><strong>Fontes com falha</strong> — jobs que voltaram erro (API quebrada, bloqueio, vazio).</li>
           <li><strong>Tarefas</strong> — abrir, concluir, reabrir, com responsável.</li>
           <li><strong>Anotações</strong> — título, texto, ligar a um nó, responder a outra nota, opcionalmente <em>colocar no grafo</em> (vira nó NOTE + aresta ANOTACAO).</li>
-          <li><strong>Nova ligação</strong> — dois nós, tipo (SOCIO, ADMIN, MENCAO, RELACIONADO, SETA, HIPOTESE, PROPRIETARIO…) e uma nota. Não cria aresta de um nó para ele mesmo. Tipo duplicado entre os mesmos nós é recusado.</li>
+          <li><strong>Nova ligação</strong> — dois nós, tipo (SOCIO, ADMIN, MENCAO, RELACIONADO, SETA, HIPOTESE, PROPRIETARIO, EMPRESA…) e uma nota. Não cria aresta de um nó para ele mesmo. Tipo duplicado entre os mesmos nós é recusado.</li>
         </ul>
         <p>Apagar a anotação remove também o nó NOTE do grafo, se ela tinha sido pinada. Hipóteses, playbook e caminho ficam em <strong>Investigar</strong>, não no Quadro.</p>
       </section>
@@ -451,10 +462,13 @@
         <h2>Ficha da entidade e da ligação</h2>
         <p>A ficha do nó (<code>/app/casos/…/entidades/…</code>) mostra tipo, classe PII (PUBLIC / INTERNAL / PERSONAL / SENSITIVE), score de resolução, identificadores, evidências, sócios, timeline e versões.</p>
         <ul>
+          <li><strong>Completar ficha</strong> — grave CPF, e-mail, telefone, @, nascimento ou filiação. <em>Só gravar</em> atualiza o dossiê. <em>Salvar e buscar com estes dados</em> enfileira só as fontes desses campos — evita falso positivo pelo nome.</li>
+          <li><strong>Acrescentar pessoa</strong> (ficha de empresa) — liga um sócio pelo nome e, se já tiver, CPF/e-mail/@. Complete a âncora na ficha nova antes de buscar de novo.</li>
+          <li><strong>Vínculos em lote</strong> — marque as linhas e <em>Excluir nós marcados</em> (o alvo fica) ou <em>Apagar ligações marcadas</em> (os nós ficam). Serve para limpar várias linhas <code>CANDIDATO</code> iguais de uma vez.</li>
           <li><strong>Verificar</strong> — escolhe o veredito e o motivo. É o motor de verificação. Confirmar antigo ainda existe e marca confirmado.</li>
-          <li><strong>Expandir</strong> — reconsulta as fontes deste nó (mesmo se já rodou).</li>
-          <li><strong>Desligar</strong> — tira o nó, o que só existia por ele, e bloqueia as chaves neste caso.</li>
-          <li><strong>Editar</strong> — nome de exibição e nota da ficha. Mudança de nome, cargo ou endereço vira versão no tempo.</li>
+          <li><strong>Procurar informações / Expandir</strong> — reconsulta as fontes deste nó (mesmo se já rodou).</li>
+          <li><strong>Desligar</strong> — tira este nó, o que só existia por ele, e bloqueia as chaves neste caso.</li>
+          <li><strong>Nota</strong> — texto livre da ficha. Mudança de nome, cargo ou endereço vira versão no tempo.</li>
           <li><strong>Mapa de ferramentas</strong> — abre a suíte já no tipo deste identificador.</li>
           <li><strong>Captura</strong> — abre o HTML preservado da evidência, se houver.</li>
           <li><strong>Memória institucional</strong> — a mesma chave em outro caso. Não mistura os grafos; só avisa.</li>
@@ -640,13 +654,15 @@
         <h2>Atalhos, fila e erros comuns</h2>
         <ul>
           <li><kbd>/</kbd> na consulta — foca o campo.</li>
-          <li><kbd>Esc</kbd> — fecha ficha / balão / modal.</li>
+          <li><kbd>Esc</kbd> — fecha ficha / balão / menu / seleção em área.</li>
           <li>Fila &gt; 0 — clique <strong>Processar</strong> (ou espere o sync, se o servidor processa sozinho).</li>
           <li>“Nenhum identificador válido” — o valor não passou na validação (CPF checksum, placa, etc.).</li>
           <li>“Sessão expirada” — recarregue e envie de novo.</li>
-          <li>Grafo vazio depois de nome — falta âncora; volte ao Alvo.</li>
+          <li>Grafo vazio depois de nome — falta âncora; volte ao Alvo ou complete CPF/e-mail/@ na ficha.</li>
+          <li>Muitos <code>CANDIDATO</code> iguais — na ficha, marque e apague as ligações; ou no grafo, selecione a área e exclua os nós.</li>
+          <li>Menu do Chrome/Edge no grafo — recarregue com Ctrl+F5. O botão direito só abre o menu do painel.</li>
           <li>CPF sem empresas — esperado sem Brasil.IO, ou o documento não está no QSA público.</li>
-          <li>Nó que volta depois de apagar — você precisa <strong>Desligar</strong> (bloqueia a chave). Só apagar a nota não bloqueia pessoa/empresa.</li>
+          <li>Nó que volta depois de apagar — use <strong>Excluir / Desligar</strong> (bloqueia a chave). Só apagar a nota não bloqueia pessoa/empresa.</li>
           <li>Qualidade baixa / lacuna de QSA — Explodir QSA e Processar, depois volte a Investigar.</li>
           <li>Sem caminho entre dois nós — a relação ainda não foi coletada ou ligada à mão.</li>
           <li>Consulta vazia no log — não encontrado nesta fonte; não apague a hipótese por isso.</li>

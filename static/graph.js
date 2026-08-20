@@ -1062,6 +1062,7 @@
   let lastShape = "";
   let lastPhase = "";
   let mutating = false;
+  let selectMode = false;
   let pollTimer = 0;
 
   function schedulePoll(ms) {
@@ -1121,7 +1122,7 @@
           info = applyPulse(jobs);
         }
       }
-      if (info.changed) {
+      if (info.changed && !selectMode) {
         try {
           await load();
         } catch (_) {
@@ -1147,7 +1148,6 @@
   const selectBtn = document.getElementById("ct-select");
   let linkFrom = null;
   let composerMode = "";
-  let selectMode = false;
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -1281,6 +1281,17 @@
     if (first) first.focus();
   }
 
+  function removeNodesLocal(ids) {
+    const gone = new Set((ids || []).filter(Boolean));
+    if (!gone.size) return;
+    gone.forEach((id) => {
+      const el = cy.getElementById(id);
+      if (el && el.length) el.remove();
+    });
+    payload.nodes = (payload.nodes || []).filter((node) => !gone.has(node.id));
+    payload.edges = (payload.edges || []).filter((edge) => !gone.has(edge.source) && !gone.has(edge.target));
+  }
+
   async function postBoard(url, fields, status) {
     const body = new URLSearchParams();
     body.set("csrf_token", csrfToken());
@@ -1290,7 +1301,10 @@
     });
     const loading = (status && status.loading) || "Gravando no quadro…";
     const done = (status && status.done) || "Quadro atualizado.";
+    const removeIds = (status && status.removeIds) || [];
+    const skipReload = !!(status && status.skipReload);
     mutating = true;
+    if (removeIds.length) removeNodesLocal(removeIds);
     if (window.setActionStatus) window.setActionStatus("loading", loading);
     try {
       const res = await fetch(url, {
@@ -1308,12 +1322,17 @@
         if (data) applyPulse(data);
       }
       if (window.setActionStatus) window.setActionStatus("ok", done);
-      try {
-        await load();
-      } catch (_) {
-        if (window.setActionStatus) window.setActionStatus("error", "Ação feita. Recarregue se o grafo não mudou.");
+      if (!skipReload) {
+        try {
+          await load();
+        } catch (_) {
+          if (window.setActionStatus) window.setActionStatus("error", "Ação feita. Recarregue se o grafo não mudou.");
+        }
       }
     } catch (_) {
+      if (removeIds.length) {
+        try { await load(); } catch (err) { /* próximo poll tenta */ }
+      }
       if (window.setActionStatus) window.setActionStatus("error", "Não concluiu nesta passagem. O grafo tenta de novo sozinho.");
     } finally {
       mutating = false;
@@ -1453,6 +1472,47 @@
     });
   }
 
+  const lassoHost = document.querySelector(".graph-canvas") || stage || root;
+  const lasso = document.createElement("div");
+  lasso.className = "graph-lasso";
+  lasso.hidden = true;
+  if (lassoHost) lassoHost.appendChild(lasso);
+  let lassoStart = null;
+
+  function hideLasso() {
+    lasso.hidden = true;
+    lassoStart = null;
+  }
+
+  function lassoRect(event) {
+    const box = root.getBoundingClientRect();
+    return { x: event.clientX - box.left, y: event.clientY - box.top };
+  }
+
+  function placeLasso(a, b) {
+    const left = Math.min(a.x, b.x);
+    const top = Math.min(a.y, b.y);
+    lasso.hidden = false;
+    lasso.style.left = left + "px";
+    lasso.style.top = top + "px";
+    lasso.style.width = Math.abs(b.x - a.x) + "px";
+    lasso.style.height = Math.abs(b.y - a.y) + "px";
+  }
+
+  function selectInBox(a, b) {
+    const left = Math.min(a.x, b.x);
+    const right = Math.max(a.x, b.x);
+    const top = Math.min(a.y, b.y);
+    const bottom = Math.max(a.y, b.y);
+    if (right - left < 6 && bottom - top < 6) return;
+    cy.nodes(":visible").forEach((node) => {
+      if (node.data("seed")) return;
+      const bb = node.renderedBoundingBox({ includeLabels: false });
+      if (bb.x1 < right && bb.x2 > left && bb.y1 < bottom && bb.y2 > top) node.select();
+    });
+    refreshSelectBar();
+  }
+
   function selectedRemovable() {
     return cy.nodes(":selected").filter((node) => !node.data("seed"));
   }
@@ -1477,13 +1537,16 @@
     if (stage) stage.classList.toggle("is-selecting", selectMode);
     if (selectBtn) selectBtn.setAttribute("aria-pressed", selectMode ? "true" : "false");
     if (selectBar) selectBar.hidden = !selectMode;
-    cy.boxSelectionEnabled(selectMode);
+    cy.boxSelectionEnabled(false);
     cy.userPanningEnabled(!selectMode);
     cy.autoungrabify(selectMode);
+    cy.autounselectify(!selectMode);
     if (!selectMode) {
       cy.nodes().unselect();
-    } else if (window.setActionStatus) {
-      window.setActionStatus("loading", "Arraste para marcar uma área. O alvo não sai.");
+      hideLasso();
+    } else {
+      cy.nodes().unselect();
+      if (window.setActionStatus) window.setActionStatus("loading", "Arraste no quadro para marcar. O alvo não sai.");
     }
     refreshSelectBar();
   }
@@ -1498,6 +1561,8 @@
     postBoard(root.dataset.batchUrl, { entity_ids: ids }, {
       loading: "Removendo a área…",
       done: ids.length + " nó(s) excluídos.",
+      skipReload: true,
+      removeIds: ids,
     });
     setSelectMode(false);
   }
@@ -1569,6 +1634,8 @@
             postBoard(root.dataset.entityBase + node.id() + "/desligar", {}, {
               loading: "Removendo…",
               done: "Nó excluído.",
+              skipReload: true,
+              removeIds: [node.id()],
             });
           }
         }));
@@ -1640,10 +1707,21 @@
   if (selectDelete) selectDelete.addEventListener("click", deleteSelectedArea);
   if (selectCancel) selectCancel.addEventListener("click", () => setSelectMode(false));
   if (selectBar) selectBar.addEventListener("click", (event) => event.stopPropagation());
-  cy.on("boxend", () => {
-    if (!selectMode) return;
-    cy.nodes(":selected").filter((node) => node.data("seed")).unselect();
-    refreshSelectBar();
+  root.addEventListener("mousedown", (event) => {
+    if (!selectMode || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    lassoStart = lassoRect(event);
+    placeLasso(lassoStart, lassoStart);
+  }, true);
+  window.addEventListener("mousemove", (event) => {
+    if (!selectMode || !lassoStart) return;
+    placeLasso(lassoStart, lassoRect(event));
+  });
+  window.addEventListener("mouseup", (event) => {
+    if (!selectMode || !lassoStart) return;
+    selectInBox(lassoStart, lassoRect(event));
+    hideLasso();
   });
   cy.on("select unselect", "node", () => {
     if (selectMode) refreshSelectBar();

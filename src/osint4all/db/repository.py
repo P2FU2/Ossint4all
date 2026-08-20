@@ -865,23 +865,73 @@ def _delete_entity_local(session: Session, investigation_id: str, entity: Entity
     session.flush()
 
 
+def _purge_entity_ids(session: Session, investigation_id: str, entity_ids: list[str], *, block: bool = True) -> int:
+    ids = [str(item) for item in dict.fromkeys(entity_ids) if item]
+    if not ids:
+        return 0
+    rows = session.scalars(
+        select(Entity).where(Entity.id.in_(ids), Entity.investigation_id == investigation_id)
+    ).all()
+    real_ids = [row.id for row in rows]
+    if not real_ids:
+        return 0
+    if block:
+        for row in rows:
+            block_key(session, investigation_id, row.canonical_key)
+    ev_ids = list(session.scalars(select(Evidence.id).where(Evidence.entity_id.in_(real_ids))))
+    if ev_ids:
+        session.execute(delete(HypothesisStance).where(HypothesisStance.evidence_id.in_(ev_ids)))
+    edge_ids = list(
+        session.scalars(
+            select(Edge.id).where(
+                Edge.investigation_id == investigation_id,
+                or_(Edge.from_entity_id.in_(real_ids), Edge.to_entity_id.in_(real_ids)),
+            )
+        )
+    )
+    if edge_ids:
+        session.execute(delete(Evidence).where(Evidence.edge_id.in_(edge_ids)))
+    session.execute(delete(CaseEvent).where(CaseEvent.entity_id.in_(real_ids)))
+    session.execute(delete(EntityVersion).where(EntityVersion.entity_id.in_(real_ids)))
+    session.execute(delete(QueryLog).where(QueryLog.entity_id.in_(real_ids)))
+    session.execute(delete(NegativeFinding).where(NegativeFinding.entity_id.in_(real_ids)))
+    session.execute(delete(CaseComment).where(CaseComment.entity_id.in_(real_ids)))
+    session.execute(delete(ExpansionJob).where(ExpansionJob.entity_id.in_(real_ids)))
+    session.execute(
+        delete(VerificationRecord).where(
+            VerificationRecord.investigation_id == investigation_id,
+            VerificationRecord.target_type == "entity",
+            VerificationRecord.target_id.in_(real_ids),
+        )
+    )
+    if edge_ids:
+        session.execute(delete(Edge).where(Edge.id.in_(edge_ids)))
+    session.execute(delete(Evidence).where(Evidence.entity_id.in_(real_ids)))
+    session.execute(delete(CaseNote).where(CaseNote.entity_id.in_(real_ids)))
+    session.execute(delete(Identifier).where(Identifier.entity_id.in_(real_ids)))
+    session.execute(delete(Entity).where(Entity.id.in_(real_ids)))
+    session.flush()
+    return len(real_ids)
+
+
 def detach_entities(
     session: Session,
     investigation_id: str,
     entity_ids: list[str],
     *,
     keep_seeds: bool = True,
+    cascade: bool = False,
 ) -> int:
     seeds = seed_entity_ids(session, investigation_id) if keep_seeds else set()
-    removed = 0
-    seen: set[str] = set()
-    for entity_id in entity_ids:
-        if not entity_id or entity_id in seen or entity_id in seeds:
-            continue
-        seen.add(entity_id)
-        if detach_entity(session, investigation_id, entity_id):
-            removed += 1
-    return removed
+    wanted = [str(item) for item in dict.fromkeys(entity_ids) if item and item not in seeds]
+    if not wanted:
+        return 0
+    if cascade:
+        extra: set[str] = set()
+        for entity_id in wanted:
+            extra |= derived_entity_ids(session, investigation_id, entity_id)
+        wanted = [item for item in extra if item not in seeds]
+    return _purge_entity_ids(session, investigation_id, wanted, block=True)
 
 
 def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bool:
@@ -892,13 +942,91 @@ def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bo
         return False
     victims = derived_entity_ids(session, investigation_id, entity_id)
     keep = seed_entity_ids(session, investigation_id) - {entity_id}
-    for vid in victims:
-        if vid in keep:
+    return _purge_entity_ids(session, investigation_id, [vid for vid in victims if vid not in keep], block=True) > 0
+
+
+def enrich_entity(entity: Entity, seeds: list) -> list[str]:
+    """Grava CPF/e-mail/telefone/@ na ficha para a próxima busca não cair em homônimo."""
+    kinds: list[str] = []
+    attrs = dict(entity.attrs or {})
+    for seed in seeds or []:
+        kind = str(getattr(seed, "kind", "") or "").upper()
+        value = str(getattr(seed, "value", "") or "").strip()
+        key = str(getattr(seed, "canonical_key", "") or "").strip()
+        label = str(getattr(seed, "display_name", "") or value).strip()
+        if not kind:
             continue
-        row = session.get(Entity, vid)
-        if row and row.investigation_id == investigation_id:
-            _delete_entity_local(session, investigation_id, row, block=True)
-    return True
+        if kind == "CNPJ" and entity.entity_type != "ORG":
+            continue
+        if kind == "NAME" and label:
+            entity.display_name = label[:512]
+            kinds.append(kind)
+            continue
+        if kind == "BIRTHDATE" and label:
+            attrs["nascimento"] = label
+            add_identifier(entity, "BIRTHDATE", value or label, key or f"birthdate:{label}")
+            kinds.append(kind)
+            continue
+        if kind == "FATHER" and label:
+            attrs["nome_pai"] = label
+            kinds.append(kind)
+            continue
+        if kind == "MOTHER" and label:
+            attrs["nome_mae"] = label
+            kinds.append(kind)
+            continue
+        if not value or not key:
+            continue
+        add_identifier(entity, kind, value, key)
+        if kind == "CPF" and not str(entity.canonical_key or "").startswith("cpf:"):
+            entity.canonical_key = key
+        if kind == "CNPJ" and entity.entity_type == "ORG" and not str(entity.canonical_key or "").startswith("cnpj:"):
+            entity.canonical_key = key
+        if kind == "USERNAME":
+            attrs["username"] = label
+        if kind == "EMAIL":
+            attrs["email"] = label
+        if kind == "PHONE":
+            attrs["telefone"] = label
+        kinds.append(kind)
+    entity.attrs = attrs
+    return list(dict.fromkeys(kinds))
+
+
+def entity_id_fields(entity: Entity) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for ident in entity.identifiers or []:
+        kind = str(ident.kind or "").upper()
+        if kind and kind not in fields:
+            fields[kind] = str(ident.value or "")
+    attrs = entity.attrs or {}
+    if attrs.get("nascimento") and "BIRTHDATE" not in fields:
+        fields["BIRTHDATE"] = str(attrs.get("nascimento") or "")
+    if attrs.get("username") and "USERNAME" not in fields:
+        fields["USERNAME"] = str(attrs.get("username") or "")
+    if attrs.get("email") and "EMAIL" not in fields:
+        fields["EMAIL"] = str(attrs.get("email") or "")
+    if attrs.get("telefone") and "PHONE" not in fields:
+        fields["PHONE"] = str(attrs.get("telefone") or "")
+    if attrs.get("nome_pai") and "FATHER" not in fields:
+        fields["FATHER"] = str(attrs.get("nome_pai") or "")
+    if attrs.get("nome_mae") and "MOTHER" not in fields:
+        fields["MOTHER"] = str(attrs.get("nome_mae") or "")
+    return fields
+
+
+def delete_edges(session: Session, investigation_id: str, edge_ids: list[str]) -> int:
+    ids = [str(item) for item in dict.fromkeys(edge_ids) if item]
+    if not ids:
+        return 0
+    rows = session.scalars(select(Edge.id).where(Edge.id.in_(ids), Edge.investigation_id == investigation_id)).all()
+    real = [str(item) for item in rows]
+    if not real:
+        return 0
+    session.execute(delete(Evidence).where(Evidence.edge_id.in_(real)))
+    session.execute(delete(Edge).where(Edge.id.in_(real)))
+    session.flush()
+    return len(real)
 
 
 def blocked_key_set(session: Session, investigation_id: str) -> set[str]:
