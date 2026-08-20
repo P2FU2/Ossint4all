@@ -137,6 +137,39 @@ function doneLabel(form, ok) {
   return "Concluído.";
 }
 
+function isCasePurgeForm(form) {
+  return /\/app\/casos\/[^/]+\/apagar$/.test(formAction(form));
+}
+
+document.addEventListener("submit", (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !isCasePurgeForm(form)) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const card = form.closest(".case-card");
+  if (card) {
+    card.classList.add("is-removing");
+    card.hidden = true;
+  }
+  setActionStatus("ok", "Caso fora da lista. A limpeza segue sem travar a tela.");
+  const body = new FormData(form);
+  fetch(form.action, {
+    method: "POST",
+    body,
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  }).then((res) => {
+    if (!res.ok) throw new Error("http");
+    if (!card) window.location.href = "/app/casos";
+  }).catch(() => {
+    if (card) {
+      card.hidden = false;
+      card.classList.remove("is-removing");
+    }
+    setActionStatus("error", "Não deu para apagar. Tente de novo.");
+  });
+}, true);
+
 document.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
@@ -160,6 +193,10 @@ document.addEventListener("submit", (event) => {
     btn.dataset.original = btn.textContent || "";
     btn.textContent = label;
   }
+  const card = form.closest(".case-card");
+  if (card && formAction(form).includes("/apagar")) {
+    card.classList.add("is-removing");
+  }
 });
 
 document.body.addEventListener("htmx:beforeRequest", (event) => {
@@ -174,6 +211,17 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
 });
 document.body.addEventListener("htmx:sendError", () => {
   setActionStatus("error", "Falha de rede. Tente de novo.");
+});
+
+document.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-media-check]");
+  if (!btn) return;
+  const form = btn.closest("form.media-picker");
+  if (!form) return;
+  const on = btn.getAttribute("data-media-check") === "all";
+  form.querySelectorAll('input[type="checkbox"][name="news_pick"], input[type="checkbox"][name="image_pick"]').forEach((box) => {
+    box.checked = on;
+  });
 });
 
 window.addEventListener("pageshow", () => {
@@ -645,6 +693,34 @@ window.addEventListener("pageshow", () => {
 })();
 
 (function chainAndHistoryUX() {
+  const historyMinKey = "osint4all.history.min";
+
+  function applyHistoryMin() {
+    const box = document.getElementById("search-history");
+    const btn = document.getElementById("history-min");
+    if (!box) return;
+    const on = window.localStorage.getItem(historyMinKey) === "1";
+    box.classList.toggle("is-min", on);
+    if (btn) {
+      btn.textContent = on ? "expandir" : "minimizar";
+      btn.setAttribute("data-tip", on ? "Mostra de novo o log de consultas" : "Recolhe o log sem apagar as consultas");
+    }
+  }
+
+  applyHistoryMin();
+  document.body.addEventListener("htmx:afterSwap", (event) => {
+    const t = event.detail && event.detail.target;
+    if (t && (t.id === "search-history" || (t.querySelector && t.querySelector("#search-history")))) {
+      applyHistoryMin();
+    }
+  });
+  document.body.addEventListener("click", (event) => {
+    const btn = event.target.closest("#history-min");
+    if (!btn) return;
+    const on = window.localStorage.getItem(historyMinKey) === "1";
+    window.localStorage.setItem(historyMinKey, on ? "0" : "1");
+    applyHistoryMin();
+  });
   document.body.addEventListener("input", (event) => {
     const box = event.target;
     if (!box || box.id !== "history-search") return;

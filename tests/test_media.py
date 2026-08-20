@@ -1,9 +1,11 @@
 from osint4all.graph.media import (
     collect_target_media,
     fields_from_identifiers,
+    media_picks_to_result,
     media_queries_from_fields,
     media_queries_from_identifiers,
     parse_image_rows,
+    parse_media_picks,
     parse_news_rows,
     plan_search_combos,
 )
@@ -170,6 +172,32 @@ def test_collect_explains_dead_instances(monkeypatch, settings) -> None:
     assert any("não provam identidade" in note for note in hit.notes)
 
 
+def test_parse_media_picks_builds_publications() -> None:
+    news, images = parse_media_picks(
+        news_pick=["0", "2", "x"],
+        news_url=["https://g1.exemplo/a", "https://ignorada.exemplo/b", "https://folha.exemplo/c"],
+        news_title=["Matéria A", "Ignorada", "Matéria C"],
+        news_snippet=["trecho a", "trecho b", "trecho c"],
+        news_source=["g1", "x", "folha"],
+        news_when=["hoje", "", "ontem"],
+        news_via=["nome + empresa (notícia)", "", "nome (notícia)"],
+        image_pick=["0"],
+        image_url=["https://exemplo.com/materia"],
+        image_title=["Sede"],
+        image_thumb=["https://img.exemplo/t.jpg"],
+        image_via=["nome + empresa (foto)"],
+    )
+    assert [item.url for item in news] == ["https://g1.exemplo/a", "https://folha.exemplo/c"]
+    assert images[0].thumb.startswith("https://")
+    result = media_picks_to_result("name:maria silva", news, images)
+    assert len(result.entities) == 3
+    assert all(item.entity_type == "PUBLICATION" and item.kind == "URL" for item in result.entities)
+    assert any(item.attrs.get("tipo") == "noticia" for item in result.entities)
+    assert any(item.attrs.get("thumb") == "https://img.exemplo/t.jpg" for item in result.entities)
+    assert all(edge.rel_type == "MENCAO" for edge in result.edges)
+    assert all(edge.from_ref == "name:maria silva" for edge in result.edges)
+
+
 def test_collect_media_stays_offline_in_pytest(settings) -> None:
     bundle = collect_target_media(["Maria Silva Souza"], settings=settings)
     assert bundle.news == []
@@ -179,3 +207,113 @@ def test_collect_media_stays_offline_in_pytest(settings) -> None:
     empty = collect_target_media([], settings=settings)
     assert empty.ok is False
     assert any("CPF" in note for note in empty.notes)
+
+
+def test_add_selected_media_creates_publication_nodes(monkeypatch, settings) -> None:
+    import re
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from osint4all.api import create_app
+    from osint4all.db.models import Edge, Entity
+    from osint4all.db.session import session_scope
+    from osint4all.graph.media import ImageItem, MediaBundle, NewsItem
+    from osint4all.web.auth import seed_admin_user
+
+    def fake_collect(*_a, **_k):
+        return MediaBundle(
+            queries=["nome (notícia)"],
+            news=[
+                NewsItem(
+                    title="Empresa no jornal",
+                    url="https://g1.exemplo/a",
+                    snippet="menção pública",
+                    source="g1",
+                    when="hoje",
+                    via="nome + empresa (notícia)",
+                )
+            ],
+            images=[
+                ImageItem(
+                    title="Sede",
+                    page_url="https://exemplo.com/materia",
+                    thumb="https://img.exemplo/t.jpg",
+                    via="nome + empresa (foto)",
+                )
+            ],
+            notes=["Marque e adicione."],
+        )
+
+    monkeypatch.setattr("osint4all.web.router.collect_target_media", fake_collect)
+    with session_scope() as session:
+        seed_admin_user(session, settings)
+
+    client = TestClient(create_app())
+    login_html = client.get("/login").text
+    token = re.search(r'name="csrf_token" value="([^"]+)"', login_html).group(1)
+    client.post("/login", data={"username": "admin", "password": "secret", "csrf_token": token}, follow_redirects=True)
+    tools = client.get("/app/ferramentas")
+    token = re.search(r'name="csrf_token" value="([^"]+)"', tools.text).group(1)
+    created = client.post(
+        "/app/nova",
+        data={
+            "csrf_token": token,
+            "title": "Caso mídia",
+            "hypothesis": "Picker",
+            "seed_name": "Maria Silva Souza",
+            "max_depth": "1",
+        },
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    case_id = created.url.path.split("/")[3]
+    panel = client.get(f"/app/casos/{case_id}/midia")
+    assert panel.status_code == 200
+    assert 'name="news_pick"' in panel.text
+    assert 'name="image_pick"' in panel.text
+    assert "Adicionar selecionadas" in panel.text
+    assert "menção pública" in panel.text
+    token = re.search(r'name="csrf_token" value="([^"]+)"', panel.text).group(1)
+    added = client.post(
+        f"/app/casos/{case_id}/midia/adicionar",
+        data={
+            "csrf_token": token,
+            "dest_case_id": case_id,
+            "news_pick": "0",
+            "news_url": "https://g1.exemplo/a",
+            "news_title": "Empresa no jornal",
+            "news_snippet": "menção pública",
+            "news_source": "g1",
+            "news_when": "hoje",
+            "news_via": "nome + empresa (notícia)",
+            "image_pick": "0",
+            "image_url": "https://exemplo.com/materia",
+            "image_title": "Sede",
+            "image_thumb": "https://img.exemplo/t.jpg",
+            "image_via": "nome + empresa (foto)",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert added.status_code == 200
+    assert "adicionada" in added.text.lower()
+    with session_scope() as session:
+        pubs = list(
+            session.scalars(
+                select(Entity).where(Entity.investigation_id == case_id, Entity.entity_type == "PUBLICATION")
+            )
+        )
+        assert len(pubs) == 2
+        assert {item.display_name for item in pubs} == {"Empresa no jornal", "Sede"}
+        target = session.scalar(select(Entity).where(Entity.investigation_id == case_id, Entity.is_seed.is_(True)))
+        assert target is not None
+        links = list(
+            session.scalars(
+                select(Edge).where(
+                    Edge.investigation_id == case_id,
+                    Edge.rel_type == "MENCAO",
+                    Edge.from_entity_id == target.id,
+                )
+            )
+        )
+        assert len(links) == 2

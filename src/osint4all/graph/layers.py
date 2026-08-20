@@ -11,6 +11,7 @@ from osint4all.connectors.cnpj_receita import CnpjReceitaConnector, parse_cnpj_p
 from osint4all.connectors.socio_search import SocioSearchConnector
 from osint4all.consult import ConsultResult, run_consult
 from osint4all.graph.identity import is_weak_name, names_match
+from osint4all.graph.match import infer_place, score_identity, snap_from_fields
 from osint4all.identifiers import dedupe_seeds, parse_seed
 from osint4all.security import only_digits
 from osint4all.validators import validate_cnpj
@@ -36,6 +37,7 @@ class AlvoHit:
     confirmed: bool
     reason: str
     url: str | None = None
+    match: int | None = None
 
 
 @dataclass
@@ -196,6 +198,17 @@ def _layer_name_candidates(out: AlvoLayerResult, settings: Settings, name: str) 
         if entity.entity_type != "ORG":
             continue
         cnpj = only_digits(entity.value)
+        attrs = entity.attrs or {}
+        place = infer_place(
+            municipio=str(attrs.get("municipio") or ""),
+            uf=str(attrs.get("uf") or ""),
+            role="empresa",
+            source=entity.display_name,
+        )
+        scored = score_identity(
+            snap_from_fields(out.fields),
+            snap_from_fields({"NAME": name}, places=[place] if place else [], companies=[entity.display_name]),
+        )
         out.candidates.append(
             AlvoHit(
                 "CNPJ",
@@ -204,14 +217,15 @@ def _layer_name_candidates(out: AlvoLayerResult, settings: Settings, name: str) 
                 " · ".join(
                     bit
                     for bit in (
-                        str((entity.attrs or {}).get("situacao") or ""),
-                        f"{(entity.attrs or {}).get('municipio') or ''}/{(entity.attrs or {}).get('uf') or ''}".strip("/"),
+                        str(attrs.get("situacao") or ""),
+                        f"{attrs.get('municipio') or ''}/{attrs.get('uf') or ''}".strip("/"),
                     )
                     if bit and bit != "/"
                 ),
                 False,
                 "Empresa pelo nome do sócio. Confirme ou informe o CNPJ para validar no QSA.",
                 f"https://minhareceita.org/{cnpj}" if cnpj else None,
+                scored.identity_match,
             )
         )
     out.notes.extend(found.notes)

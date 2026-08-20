@@ -17,7 +17,9 @@ from osint4all.db.repository import (
     entity_id_fields,
     graph_counts,
     graph_payload,
+    live_investigations,
     purge_investigation,
+    retire_investigation,
     requeue_stale_running_jobs,
     save_graph_layout,
     update_edge,
@@ -367,15 +369,18 @@ def test_same_person_stays_in_one_block(settings, db) -> None:
     assert consolidate_identities(db, inv.id) >= 1
     db.expire_all()
     people = [e for e in db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON"))]
-    assert len(people) == 1
-    kinds = {i.kind for i in people[0].identifiers}
-    assert "USERNAME" in kinds or (people[0].canonical_key or "").startswith("username:") or any(
-        (people[0].attrs or {}).get("username")
+    assert len(people) == 2
+    seed = next(e for e in people if e.is_seed)
+    twin_row = next(e for e in people if not e.is_seed)
+    assert (twin_row.attrs or {}).get("status") == "unconfirmed"
+    kinds = {i.kind for i in seed.identifiers}
+    assert "USERNAME" in kinds or (seed.canonical_key or "").startswith("username:") or any(
+        (seed.attrs or {}).get("username")
     )
     payload = graph_payload(db, inv.id)
     labels = [n["label"] for n in payload["nodes"] if n["type"] == "PERSON"]
-    assert labels.count("Eduardo Hermelino Leite") == 1
-    edu = next(n for n in payload["nodes"] if n["type"] == "PERSON")
+    assert labels.count("Eduardo Hermelino Leite") == 2
+    edu = next(n for n in payload["nodes"] if n["type"] == "PERSON" and n.get("seed"))
     assert any(i["kind"] == "USERNAME" for i in edu["ids"])
 
 
@@ -391,9 +396,15 @@ def test_collapse_graph_view_merges_duplicate_name() -> None:
     ]
     kept, edges = collapse_graph_view(nodes, links)
     people = [n for n in kept if n["type"] == "PERSON"]
-    assert len(people) == 1
-    assert len(edges) == 1
-    assert edges[0]["source"] == "a"
+    assert len(people) == 2
+    assert len(edges) == 2
+    same_cpf = [
+        {"id": "a", "label": "Eduardo Hermelino Leite", "type": "PERSON", "seed": True, "key": "name:edu", "ids": [{"kind": "CPF", "value": "52998224725"}], "status": "confirmed"},
+        {"id": "b", "label": "Eduardo Hermelino Leite", "type": "PERSON", "seed": False, "key": "cpf:52998224725", "ids": [{"kind": "CPF", "value": "52998224725"}], "status": "probable"},
+    ]
+    folded, folded_edges = collapse_graph_view(same_cpf, [{"id": "1", "source": "a", "target": "c", "type": "ADMIN"}, {"id": "2", "source": "b", "target": "c", "type": "ADMIN"}])
+    assert len([n for n in folded if n["type"] == "PERSON"]) == 1
+    assert folded_edges[0]["source"] == "a"
 
 
 def test_diagram_note_lands_on_graph(settings, db) -> None:
@@ -462,6 +473,19 @@ def test_purge_investigation_removes_children(settings, db) -> None:
     assert db.scalars(select(CaseNote).where(CaseNote.investigation_id == case_id)).all() == []
     assert db.scalars(select(BlockedKey).where(BlockedKey.investigation_id == case_id)).all() == []
     assert db.scalars(select(Identifier).where(Identifier.entity_id == person.id)).all() == []
+
+
+def test_retire_hides_case_before_purge(settings, db) -> None:
+    inv = _case(db)
+    db.add(ExpansionJob(investigation_id=inv.id, entity_id=inv.entities[0].id, depth=0, status="PENDING"))
+    db.flush()
+    assert retire_investigation(db, inv.id)
+    db.flush()
+    assert inv.status == "DELETED"
+    assert [row.id for row in live_investigations(db)] == []
+    jobs = db.scalars(select(ExpansionJob).where(ExpansionJob.investigation_id == inv.id)).all()
+    assert jobs and all(job.status == "FAILED" for job in jobs)
+    assert db.get(Investigation, inv.id) is not None
 
 
 def test_graph_layout_persists_on_case(settings, db) -> None:

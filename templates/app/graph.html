@@ -386,6 +386,47 @@
   </div>
 </details>
 
+<details class="case-board identity-board" id="identity-board" open>
+  <summary data-tip="O motor sugere; você confirma. Score abaixo de 75 não entra no dossiê sozinho">Correspondências de identidade</summary>
+  <p class="muted">Três perguntas: é a mesma pessoa? a fonte é confiável? a afirmação está corroborada? Cidade diferente não é contradição — processo ou imóvel em outro Estado é lugar associado.</p>
+  <div class="identity-queue">
+    {% for bucket in identity_queue or [] %}
+    <section class="identity-col identity-{{ bucket.key }}">
+      <h3>{{ bucket.label }} · {{ bucket.rows|length }}</h3>
+      {% if bucket.rows %}
+      <ul>
+        {% for row in bucket.rows %}
+        <li>
+          <a href="/app/casos/{{ inv.id }}/entidades/{{ row.id }}">{{ row.name }}</a>
+          {% if row.match %}<span class="tl-when">{{ row.match }}%</span>{% endif %}
+          {% if row.seed %}<span class="muted">alvo</span>{% endif %}
+          {% for why in row.reasons[:2] %}<p class="muted">{{ why }}</p>{% endfor %}
+          {% if not row.seed and bucket.key != 'confirmed' %}
+          <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/entidades/{{ row.id }}/verificar">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <input type="hidden" name="reason" value="Fila de identidade." />
+            {% if bucket.key != 'probable' %}
+            <button class="btn ghost" type="submit" name="verdict" value="probable">Provável</button>
+            {% endif %}
+            {% if bucket.key != 'false' %}
+            <button class="btn ghost" type="submit" name="verdict" value="false">Descartar</button>
+            {% endif %}
+            {% if bucket.key != 'confirmed' %}
+            <button class="btn ghost" type="submit" name="verdict" value="confirmed">Confirmar</button>
+            {% endif %}
+          </form>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Ninguém nesta faixa.</p>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+</details>
+
 <details class="case-board media-board" id="media-board">
   <summary data-tip="Cruza os identificadores do caso em consultas especializadas">Notícias e galeria do alvo</summary>
   <div class="media-toolbar">

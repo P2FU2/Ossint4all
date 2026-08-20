@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -86,7 +87,9 @@ def seed_fits_profile(kind: str, value: str, display_name: str, profile: TargetP
 
 
 def collapse_name(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
+    text = unicodedata.normalize("NFKD", value or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", text.strip()).casefold()
 
 
 def name_tokens(value: str) -> list[str]:

@@ -7,7 +7,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from osint4all.config import Settings, get_settings
+from osint4all.connectors.base import ConnectorResult, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.connectors.web_search import WebSearchConnector, searxng_bases, web_search_ready
+from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
 from osint4all.validators import format_plate, looks_like_plate, validate_cnpj, validate_cpf
 
@@ -211,7 +213,7 @@ def plan_search_combos(fields: dict[str, str], *, extra: str = "") -> list[Searc
         if img_q and key not in paired_images:
             add(img_label, img_q, "images", term)
 
-    return combos[:8]
+    return combos[:14]
 
 
 def fields_from_identifiers(rows: list[dict[str, Any]], *, company: str = "", name: str = "") -> dict[str, str]:
@@ -260,7 +262,7 @@ def parse_news_rows(rows: list[dict[str, Any]], *, source: str) -> list[NewsItem
         items.append(
             NewsItem(title=title[:220], url=url, snippet=snippet[:400], source=engine or source, when=when[:40], via=source)
         )
-        if len(items) >= 10:
+        if len(items) >= 16:
             break
     return items
 
@@ -295,7 +297,7 @@ def parse_image_rows(rows: list[dict[str, Any]], *, source: str) -> list[ImageIt
                 via=source,
             )
         )
-        if len(items) >= 12:
+        if len(items) >= 16:
             break
     return items
 
@@ -368,10 +370,10 @@ def collect_target_media(
                     continue
                 seen_img.add(item.thumb)
                 out.images.append(item)
-        if len(out.news) >= 10 and len(out.images) >= 12:
+        if len(out.news) >= 24 and len(out.images) >= 24:
             break
-    out.news = out.news[:10]
-    out.images = out.images[:12]
+    out.news = out.news[:24]
+    out.images = out.images[:24]
     if not out.news and not out.images:
         if empty_runs == len(combos):
             out.notes.append(
@@ -384,7 +386,8 @@ def collect_target_media(
     else:
         out.notes.append(
             "Cada combinação especializa a anterior (nome+empresa, nome+@user…). "
-            "Só menções e miniaturas públicas — foto e título não provam identidade."
+            "Só menções e miniaturas públicas — foto e título não provam identidade. "
+            "Marque o que quiser e adicione ao caso; nada entra no grafo sozinho."
         )
     return out
 
@@ -506,3 +509,148 @@ def _google_images(conn: WebSearchConnector, query: str) -> list[dict[str, Any]]
     if not isinstance(rows, list):
         return []
     return [row for row in rows if isinstance(row, dict)]
+
+
+def _pick_indexes(raw: list[str] | None) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for item in raw or []:
+        try:
+            idx = int(str(item).strip())
+        except ValueError:
+            continue
+        if idx < 0 or idx in seen:
+            continue
+        seen.add(idx)
+        out.append(idx)
+    return out
+
+
+def _cell(rows: list[str] | None, idx: int) -> str:
+    if not rows or idx < 0 or idx >= len(rows):
+        return ""
+    return str(rows[idx] or "").strip()
+
+
+def parse_media_picks(
+    *,
+    news_pick: list[str] | None = None,
+    news_url: list[str] | None = None,
+    news_title: list[str] | None = None,
+    news_snippet: list[str] | None = None,
+    news_source: list[str] | None = None,
+    news_when: list[str] | None = None,
+    news_via: list[str] | None = None,
+    image_pick: list[str] | None = None,
+    image_url: list[str] | None = None,
+    image_title: list[str] | None = None,
+    image_thumb: list[str] | None = None,
+    image_via: list[str] | None = None,
+) -> tuple[list[NewsItem], list[ImageItem]]:
+    news: list[NewsItem] = []
+    seen_news: set[str] = set()
+    for idx in _pick_indexes(news_pick):
+        url = _cell(news_url, idx)
+        title = _cell(news_title, idx) or url
+        if not url.startswith("http") or url in seen_news:
+            continue
+        seen_news.add(url)
+        news.append(
+            NewsItem(
+                title=title[:220],
+                url=url,
+                snippet=_cell(news_snippet, idx)[:400],
+                source=_cell(news_source, idx),
+                when=_cell(news_when, idx)[:40],
+                via=_cell(news_via, idx),
+            )
+        )
+    images: list[ImageItem] = []
+    seen_img: set[str] = set()
+    for idx in _pick_indexes(image_pick):
+        page = _cell(image_url, idx)
+        thumb = _cell(image_thumb, idx)
+        title = _cell(image_title, idx) or page or thumb
+        if not page.startswith("http") and not thumb.startswith("http"):
+            continue
+        key = page or thumb
+        if key in seen_img:
+            continue
+        seen_img.add(key)
+        images.append(
+            ImageItem(
+                title=title[:220],
+                page_url=page if page.startswith("http") else "",
+                thumb=thumb if thumb.startswith("http") else "",
+                via=_cell(image_via, idx),
+            )
+        )
+    return news, images
+
+
+def media_picks_to_result(origin_key: str, news: list[NewsItem], images: list[ImageItem]) -> ConnectorResult:
+    out = ConnectorResult()
+    for item in news:
+        url = (item.url or "").strip()
+        if not url.startswith("http"):
+            continue
+        ref = canonical_key("URL", url)
+        out.entities.append(
+            FoundEntity(
+                entity_type="PUBLICATION",
+                kind="URL",
+                value=url,
+                display_name=(item.title or url)[:160],
+                attrs={
+                    "snippet": item.snippet,
+                    "fonte": item.source,
+                    "quando": item.when,
+                    "via": item.via,
+                    "tipo": "noticia",
+                },
+                confidence=0.4,
+            )
+        )
+        out.edges.append(FoundEdge(from_ref=origin_key, to_ref=ref, rel_type="MENCAO", confidence=0.4))
+        out.evidence.append(
+            FoundEvidence(
+                source_label=item.source or item.via or "Notícia pública",
+                url=url,
+                snippet=item.snippet or item.title,
+                payload={"title": item.title, "via": item.via, "quando": item.when, "tipo": "noticia"},
+                entity_ref=ref,
+            )
+        )
+    for item in images:
+        page = (item.page_url or "").strip()
+        thumb = (item.thumb or "").strip()
+        url = page if page.startswith("http") else thumb
+        if not url.startswith("http"):
+            continue
+        ref = canonical_key("URL", url)
+        out.entities.append(
+            FoundEntity(
+                entity_type="PUBLICATION",
+                kind="URL",
+                value=url,
+                display_name=(item.title or url)[:160],
+                attrs={
+                    "thumb": thumb if thumb.startswith("http") else "",
+                    "page_url": page if page.startswith("http") else "",
+                    "via": item.via,
+                    "tipo": "imagem",
+                },
+                confidence=0.4,
+            )
+        )
+        out.edges.append(FoundEdge(from_ref=origin_key, to_ref=ref, rel_type="MENCAO", confidence=0.4))
+        out.evidence.append(
+            FoundEvidence(
+                source_label=item.via or "Imagem pública",
+                url=url,
+                snippet=item.title or url,
+                payload={"title": item.title, "thumb": thumb, "page_url": page, "via": item.via, "tipo": "imagem"},
+                entity_ref=ref,
+            )
+        )
+    return out

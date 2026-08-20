@@ -14,10 +14,10 @@ VERDICTS = ("confirmed", "probable", "unconfirmed", "contested", "false")
 VERDICT_LABELS = {
     "confirmed": "Confirmado",
     "probable": "Provável",
-    "unconfirmed": "Não confirmado",
+    "unconfirmed": "Revisar",
     "contested": "Contestado",
-    "false": "Falso",
-    "rejected": "Falso",
+    "false": "Descartado",
+    "rejected": "Descartado",
 }
 
 _CONFIDENCE = {
@@ -31,7 +31,7 @@ _CONFIDENCE = {
 
 
 def verdict_label(verdict: str) -> str:
-    return VERDICT_LABELS.get((verdict or "").strip().lower(), "Não confirmado")
+    return VERDICT_LABELS.get((verdict or "").strip().lower(), "Revisar")
 
 
 def normalize_verdict(value: str) -> str:
@@ -78,5 +78,15 @@ def latest_verdict(records: list[VerificationRecord], target_id: str) -> Verific
 
 def dossier_include(obj: Any) -> bool:
     from osint4all.graph.identity import entity_status
+    from osint4all.graph.match import DOSSIER_MATCH_MIN
 
-    return entity_status(obj) not in {"false", "rejected"}
+    status = entity_status(obj)
+    if status in {"false", "rejected"}:
+        return False
+    if getattr(obj, "is_seed", False) or status == "confirmed":
+        return True
+    attrs = obj if isinstance(obj, dict) else getattr(obj, "attrs", None) or {}
+    match = attrs.get("identity_match")
+    if match is not None and int(match) < DOSSIER_MATCH_MIN:
+        return False
+    return status != "unconfirmed"

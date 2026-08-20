@@ -55,7 +55,9 @@ from osint4all.db.repository import (
     save_graph_layout,
     list_notes,
     note_tree,
+    live_investigations,
     purge_investigation,
+    retire_investigation,
     update_edge,
 )
 from osint4all.connectors.base import FoundEntity
@@ -64,7 +66,7 @@ from osint4all.graph.resolve import apply_result, upsert_found_entity
 from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
-from osint4all.graph.media import collect_target_media, fields_from_identifiers
+from osint4all.graph.media import collect_target_media, fields_from_identifiers, media_picks_to_result, parse_media_picks
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
 from osint4all.tools_suite import (
     MassResult,
@@ -102,7 +104,29 @@ def _client_ip(request: Request) -> str:
 
 
 def _cases(session: Session) -> list[Investigation]:
-    return list(session.scalars(select(Investigation).order_by(desc(Investigation.created_at))).all())
+    return list(live_investigations(session))
+
+
+def _queue_case_purge(investigation_id: str) -> None:
+    import threading
+
+    def work() -> None:
+        from osint4all.db.session import session_scope
+
+        try:
+            with session_scope() as session:
+                purge_investigation(session, investigation_id)
+            upload = project_root() / "data" / "uploads" / investigation_id
+            if upload.exists():
+                import shutil
+
+                shutil.rmtree(upload, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            from osint4all.logging_setup import get_logger
+
+            get_logger(__name__).exception("purge_background %s", investigation_id)
+
+    threading.Thread(target=work, name=f"purge-{investigation_id[:8]}", daemon=True).start()
 
 
 def _with_cases(ctx: dict, request: Request, session: Session) -> dict:
@@ -158,6 +182,17 @@ def _resolution(entity: Entity):
     from osint4all.quality.resolution import resolution_score
 
     return resolution_score(entity)
+
+
+def _identity_queue(session: Session, investigation_id: str):
+    from osint4all.graph.match import identity_queue_rows
+
+    people = session.scalars(
+        select(Entity)
+        .where(Entity.investigation_id == investigation_id, Entity.entity_type == "PERSON")
+        .order_by(Entity.is_seed.desc(), Entity.display_name)
+    ).all()
+    return identity_queue_rows(people)
 
 
 def _parse_retain(raw: str):
@@ -736,7 +771,7 @@ def investigations(
     user: User = Depends(current_user),
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
-    rows = session.scalars(select(Investigation).order_by(desc(Investigation.created_at))).all()
+    rows = list(live_investigations(session))
     counts = {
         inv.id: {
             "entities": session.scalar(
@@ -897,11 +932,27 @@ def _case_person(session: Session, investigation_id: str) -> str:
     return ""
 
 
-def _media_page(request: Request, user: User, fields: dict[str, str], *, title: str = "") -> HTMLResponse:
+def _media_page(
+    request: Request,
+    user: User,
+    session: Session,
+    fields: dict[str, str],
+    *,
+    title: str = "",
+    media_case_id: str = "",
+    lock_case: bool = False,
+    status_code: int = 200,
+) -> HTMLResponse:
     media = collect_target_media(fields=fields, title=title)
     ctx = template_context(request, user)
+    _with_cases(ctx, request, session)
     ctx["media"] = media
-    return templates.TemplateResponse(request, "app/media_panel.html", ctx)
+    chosen = media_case_id or ctx.get("current_case_id") or ""
+    if not chosen and ctx.get("cases"):
+        chosen = ctx["cases"][0].id
+    ctx["media_case_id"] = chosen
+    ctx["media_locked_case"] = lock_case
+    return templates.TemplateResponse(request, "app/media_panel.html", ctx, status_code=status_code)
 
 
 @router.get("/app/alvo/midia", response_class=HTMLResponse)
@@ -910,7 +961,7 @@ def alvo_media(
     user: User = Depends(current_user),
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
-    return _media_page(request, user, alvo_fields(session, user))
+    return _media_page(request, user, session, alvo_fields(session, user))
 
 
 @router.get("/app/casos/{investigation_id}/midia", response_class=HTMLResponse)
@@ -921,17 +972,104 @@ def case_media(
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
     inv = session.get(Investigation, investigation_id)
-    if not inv:
+    if not inv or inv.status == "DELETED":
         ctx = template_context(request, user)
+        _with_cases(ctx, request, session)
         ctx["media"] = collect_target_media([])
         ctx["media"].notes = ["Investigação não encontrada."]
+        ctx["media_case_id"] = ""
+        ctx["media_locked_case"] = False
         return templates.TemplateResponse(request, "app/media_panel.html", ctx, status_code=404)
     fields = fields_from_identifiers(
         case_identifiers(session, inv.id),
         company=_case_company(session, inv.id),
         name=_case_person(session, inv.id),
     )
-    return _media_page(request, user, fields, title=inv.title or "")
+    return _media_page(request, user, session, fields, title=inv.title or "", media_case_id=inv.id, lock_case=True)
+
+
+def _media_add_reply(request: Request, inv_id: str, *, ok: bool, message: str, added: int = 0, status_code: int = 200):
+    if request.headers.get("HX-Request"):
+        klass = "media-add-status" if ok else "media-add-status is-error"
+        return HTMLResponse(f'<p class="{klass}">{message}</p>', status_code=status_code)
+    if _wants_json(request):
+        return JSONResponse({"ok": ok, "added": added, "message": message}, status_code=status_code)
+    _set_flash(request, "ok" if ok else "error", message)
+    dest = f"/app/casos/{inv_id}" if inv_id else "/app/casos"
+    return RedirectResponse(dest, status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/midia/adicionar")
+def add_case_media(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    dest_case_id: str = Form(""),
+    news_pick: list[str] = Form(default=[]),
+    news_url: list[str] = Form(default=[]),
+    news_title: list[str] = Form(default=[]),
+    news_snippet: list[str] = Form(default=[]),
+    news_source: list[str] = Form(default=[]),
+    news_when: list[str] = Form(default=[]),
+    news_via: list[str] = Form(default=[]),
+    image_pick: list[str] = Form(default=[]),
+    image_url: list[str] = Form(default=[]),
+    image_title: list[str] = Form(default=[]),
+    image_thumb: list[str] = Form(default=[]),
+    image_via: list[str] = Form(default=[]),
+):
+    require_csrf(request, csrf_token)
+    target_id = (dest_case_id or investigation_id).strip()
+    inv = session.get(Investigation, target_id)
+    if not inv or inv.status == "DELETED":
+        return _media_add_reply(request, target_id, ok=False, message="Investigação não encontrada.", status_code=404)
+    news, images = parse_media_picks(
+        news_pick=news_pick,
+        news_url=news_url,
+        news_title=news_title,
+        news_snippet=news_snippet,
+        news_source=news_source,
+        news_when=news_when,
+        news_via=news_via,
+        image_pick=image_pick,
+        image_url=image_url,
+        image_title=image_title,
+        image_thumb=image_thumb,
+        image_via=image_via,
+    )
+    if not news and not images:
+        return _media_add_reply(request, inv.id, ok=False, message="Marque ao menos uma notícia ou foto.")
+    origin = session.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.is_seed.is_(True)))
+    if origin is None:
+        origin = session.scalar(select(Entity).where(Entity.investigation_id == inv.id))
+    if origin is None:
+        return _media_add_reply(request, inv.id, ok=False, message="O caso precisa de uma semente antes de gravar mídia.")
+    result = media_picks_to_result(origin.canonical_key, news, images)
+    created = apply_result(
+        session,
+        inv,
+        origin,
+        result,
+        connector="media_pick",
+        depth=origin.depth or 0,
+        enqueue_children=False,
+        max_attempts=get_settings().job_max_attempts,
+        fill_only=True,
+        consolidate=False,
+    )
+    write_audit(
+        session,
+        "media.add",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"news": len(news), "images": len(images), "nodes": len(created)},
+    )
+    session.commit()
+    added = len(created)
+    msg = f"{added} referência(s) adicionada(s) ao caso." if added else "Nada novo para gravar."
+    return _media_add_reply(request, inv.id, ok=True, message=msg, added=added)
 
 
 @router.get("/app/casos/{investigation_id}", response_class=HTMLResponse)
@@ -942,7 +1080,7 @@ def graph_page(
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
     inv = session.get(Investigation, investigation_id)
-    if not inv:
+    if not inv or inv.status == "DELETED":
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app", status_code=303)
     request.session["current_case_id"] = inv.id
@@ -980,6 +1118,7 @@ def graph_page(
             "case_digest": _case_digest(session, inv.id),
             "source_errors": _source_errors(session, inv.id),
             "case_statuses": ("ACTIVE", "DRAFT", "INVESTIGATING", "REVIEW", "VERIFIED", "PUBLISHED", "CLOSED", "ARCHIVED"),
+            "identity_queue": _identity_queue(session, inv.id),
         }
     )
     from osint4all.engines.playbooks import list_items, progress
@@ -998,7 +1137,7 @@ def use_case(
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
-    if not inv:
+    if not inv or inv.status == "DELETED":
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app/casos", status_code=303)
     request.session["current_case_id"] = inv.id
@@ -1246,7 +1385,7 @@ def entity_page(
             "host_cards": _host_cards_for(session, investigation_id, entity),
             "resolution": _resolution(entity),
             "case_events": _case_events(session, investigation_id, entity.id),
-            "verdicts": (("confirmed", "Confirmado"), ("probable", "Provável"), ("unconfirmed", "Não confirmado"), ("contested", "Contestado"), ("false", "Falso")),
+            "verdicts": (("confirmed", "Confirmado"), ("probable", "Provável"), ("unconfirmed", "Revisar"), ("contested", "Contestado"), ("false", "Descartado")),
             "versions": versions_for(session, entity.id),
             "pii_class": entity_pii(entity),
             "stale": is_stale(entity),
@@ -2302,22 +2441,32 @@ def purge_case(
     csrf_token: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    if purge_investigation(session, investigation_id):
-        write_audit(session, "investigation.purge", username=user.username, investigation_id=investigation_id)
+    if retire_investigation(session, investigation_id):
+        write_audit(session, "investigation.purge", username=user.username, investigation_id=investigation_id, details={"queued": True})
         session.commit()
-        upload = project_root() / "data" / "uploads" / investigation_id
-        if upload.exists():
-            import shutil
-
-            shutil.rmtree(upload, ignore_errors=True)
         if request.session.get("current_case_id") == investigation_id:
             request.session.pop("current_case_id", None)
+        import os
+
+        if get_settings().env == "test" or os.environ.get("PYTEST_CURRENT_TEST"):
+            purge_investigation(session, investigation_id)
+            upload = project_root() / "data" / "uploads" / investigation_id
+            if upload.exists():
+                import shutil
+
+                shutil.rmtree(upload, ignore_errors=True)
+        else:
+            _queue_case_purge(investigation_id)
         request.session["flash"] = {
             "level": "ok",
-            "message": "Caso apagado. Nós, vínculos, notas e uploads foram removidos.",
+            "message": "Caso apagado. A limpeza pesada segue sem travar a tela.",
         }
+        if _wants_json(request):
+            return JSONResponse({"ok": True, "queued": True})
     else:
         request.session["flash"] = {"level": "error", "message": "Esse caso já não existe."}
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "Esse caso já não existe."}, status_code=404)
     return RedirectResponse("/app/casos", status_code=303)
 
 

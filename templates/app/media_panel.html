@@ -6,33 +6,100 @@
 </ul>
 {% endif %}
 
-{% if media.news %}
-<p class="section-kicker">notícias · {{ media.news|length }}</p>
-<ul class="media-news">
-  {% for item in media.news %}
-  <li>
-    <button type="button" class="inspect-open" data-inspect='{{ {"title": item.title, "kind": "noticia", "meta": item.snippet, "url": item.url, "when": item.when, "facts": [["fonte", item.source], ["combinação", item.via]]}|tojson }}'>{{ item.title }}</button>
-    {% if item.when %}<span class="tl-when">{{ item.when }}</span>{% endif %}
-    {% if item.via %}<span class="muted">via {{ item.via }}</span>{% elif item.source %}<span class="muted">{{ item.source }}</span>{% endif %}
-    {% if item.snippet %}<p class="muted">{{ item.snippet }}</p>{% endif %}
-  </li>
-  {% endfor %}
-</ul>
-{% endif %}
+<form
+  class="media-picker"
+  method="post"
+  {% if media_case_id %}
+  action="/app/casos/{{ media_case_id }}/midia/adicionar"
+  hx-post="/app/casos/{{ media_case_id }}/midia/adicionar"
+  hx-target="#media-add-status"
+  hx-swap="innerHTML"
+  hx-disabled-elt="button.media-add"
+  data-busy="Gravando no caso…"
+  data-done="Selecionadas no grafo."
+  {% endif %}
+>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  {% if media_locked_case %}
+  <input type="hidden" name="dest_case_id" value="{{ media_case_id }}" />
+  {% elif cases %}
+  <label class="media-case-pick">Caso
+    <select name="dest_case_id">
+      {% for c in cases %}
+      <option value="{{ c.id }}" {% if c.id == media_case_id %}selected{% endif %}>{{ c.title }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
 
-{% if media.images %}
-<p class="section-kicker">galeria · {{ media.images|length }}</p>
-<ul class="media-gallery">
-  {% for item in media.images %}
-  <li>
-    <button type="button" class="media-tile inspect-open" data-inspect='{{ {"title": item.title, "kind": "imagem", "meta": item.via or item.source, "url": item.page_url, "thumb": item.thumb, "facts": [["combinação", item.via]]}|tojson }}'>
-      <img src="{{ item.thumb }}" alt="{{ item.title }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('li').hidden = true" />
-      <span>{{ item.title }}</span>
-    </button>
-  </li>
-  {% endfor %}
-</ul>
-{% endif %}
+  {% if media.news %}
+  <p class="section-kicker">notícias · {{ media.news|length }}</p>
+  <ul class="media-news">
+    {% for item in media.news %}
+    <li class="media-pick">
+      <label class="media-check">
+        <input type="checkbox" name="news_pick" value="{{ loop.index0 }}" />
+        <span class="media-pick-body">
+          <strong>{{ item.title }}</strong>
+          {% if item.when %}<span class="tl-when">{{ item.when }}</span>{% endif %}
+          {% if item.source %}<span class="muted">{{ item.source }}</span>{% endif %}
+          {% if item.via %}<span class="muted">via {{ item.via }}</span>{% endif %}
+          {% if item.snippet %}<p class="muted">{{ item.snippet }}</p>{% endif %}
+        </span>
+      </label>
+      <button type="button" class="btn ghost inspect-open" data-inspect='{{ {"title": item.title, "kind": "noticia", "meta": item.snippet, "url": item.url, "when": item.when, "facts": [["fonte", item.source], ["combinação", item.via]]}|tojson }}'>ficha</button>
+      <input type="hidden" name="news_url" value="{{ item.url }}" />
+      <input type="hidden" name="news_title" value="{{ item.title }}" />
+      <input type="hidden" name="news_snippet" value="{{ item.snippet }}" />
+      <input type="hidden" name="news_source" value="{{ item.source }}" />
+      <input type="hidden" name="news_when" value="{{ item.when }}" />
+      <input type="hidden" name="news_via" value="{{ item.via }}" />
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if media.images %}
+  <p class="section-kicker">galeria · {{ media.images|length }}</p>
+  <ul class="media-gallery">
+    {% for item in media.images %}
+    <li class="media-pick media-pick-img">
+      <label class="media-tile-pick">
+        <input type="checkbox" name="image_pick" value="{{ loop.index0 }}" />
+        <img src="{{ item.thumb }}" alt="{{ item.title }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('li').hidden = true" />
+        <span>{{ item.title }}</span>
+        {% if item.via %}<span class="muted">via {{ item.via }}</span>{% endif %}
+        {% if item.page_url %}<span class="media-page-url">{{ item.page_url }}</span>{% endif %}
+      </label>
+      <button type="button" class="btn ghost inspect-open" data-inspect='{{ {"title": item.title, "kind": "imagem", "meta": item.via or item.source, "url": item.page_url, "thumb": item.thumb, "facts": [["combinação", item.via], ["página", item.page_url]]}|tojson }}'>origem</button>
+      <input type="hidden" name="image_url" value="{{ item.page_url }}" />
+      <input type="hidden" name="image_title" value="{{ item.title }}" />
+      <input type="hidden" name="image_thumb" value="{{ item.thumb }}" />
+      <input type="hidden" name="image_via" value="{{ item.via }}" />
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <div class="media-picker-actions">
+    {% if media.news or media.images %}
+    <button type="button" class="btn ghost" data-media-check="all">Marcar todas</button>
+    <button type="button" class="btn ghost" data-media-check="none">Nenhuma</button>
+    {% endif %}
+    <button
+      class="btn primary media-add"
+      type="submit"
+      {% if not media_case_id or not (media.news or media.images) %}disabled{% endif %}
+      data-tip="Grava só o que está marcado, sem baixar arquivo"
+    >Adicionar selecionadas ao caso</button>
+    {% if not media_case_id %}
+    <p class="muted">Abra ou crie um caso para gravar as escolhidas no grafo.</p>
+    {% elif not media.news and not media.images %}
+    <p class="muted">Quando aparecerem matérias e fotos, marque e clique Adicionar selecionadas ao caso.</p>
+    {% endif %}
+  </div>
+  <div id="media-add-status" class="media-add-status" aria-live="polite"></div>
+</form>
 
 {% if media.notes %}
 <div class="media-notes {% if not media.news and not media.images %}is-empty{% endif %}">

@@ -23,6 +23,7 @@
         <li><a href="#menus">Menus da barra</a></li>
         <li><a href="#conceitos">Consulta, alvo, caso</a></li>
         <li><a href="#identidade">Nome vs âncora</a></li>
+        <li><a href="#resolucao">Resolução de identidade</a></li>
         <li><a href="#consultar">Consultar</a></li>
         <li><a href="#buscas">Todas as buscas</a></li>
         <li><a href="#cadeia">Histórico e cadeia</a></li>
@@ -92,7 +93,7 @@
             <tr><td>Evidence graph</td><td>Nós + vínculos + evidências. Borda muda com o veredito (candidato, provável, contestado, falso).</td></tr>
             <tr><td>Timeline</td><td>Quadro e ficha: evidência, veredito, tarefa, monitor.</td></tr>
             <tr><td>Case management</td><td>Título, hipótese, responsável, tarefas, notas, estado do caso.</td></tr>
-            <tr><td>Verification</td><td>Confirmado / provável / não confirmado / contestado / falso, com motivo. Falso e contestado não expandem.</td></tr>
+            <tr><td>Verification</td><td>Confirmado / provável / revisar / contestado / descartado, com motivo. Descartado e contestado não expandem.</td></tr>
             <tr><td>Snapshot</td><td>HTML do host já conhecido em <code>data/captures/</code>. Snapshot do dossiê em Investigar (o que mudou).</td></tr>
             <tr><td>Change detection</td><td>Quadro → O que mudou. Monitor registra o digest.</td></tr>
             <tr><td>AI analyst</td><td>Síntese do relatório só com citações <code>[n]</code>.</td></tr>
@@ -176,15 +177,29 @@
         <h2>Nome não confirma pessoa</h2>
         <p>Homônimo é o erro mais caro. A plataforma trata assim:</p>
         <ul>
-          <li><strong>Só o nome</strong> — o nó fica <em>candidato / não confirmado</em>. Empresas que aparecerem pelo nome entram como <code>CANDIDATO</code>, não como sócio fechado.</li>
+          <li><strong>Só o nome</strong> — o nó fica <em>candidato / revisar</em>. Empresas que aparecerem pelo nome entram como <code>CANDIDATO</code>, não como sócio fechado.</li>
           <li><strong>Âncora forte</strong> — CPF válido, CNPJ, e-mail, telefone, @user, placa ou CNJ. Aí o grafo pode expandir com confiança.</li>
           <li><strong>CNPJ + nome no QSA</strong> — se o nome do alvo bate com um sócio oficial daquela empresa, o vínculo confirma mesmo sem CPF.</li>
-          <li><strong>Veredito</strong> — na ficha: confirmado, provável, não confirmado, contestado, falso. Sempre com motivo (fonte ou contradição). Falso e contestado não entram na fila.</li>
+          <li><strong>Veredito</strong> — na ficha e na fila: confirmado, provável, revisar, contestado, descartado. Sempre com motivo. Descartado e contestado não expandem.</li>
           <li><strong>Completar ficha</strong> — pessoa que veio pelo QSA entra só com o nome. Grave CPF, e-mail, telefone ou @ na ficha e use <em>Salvar e buscar com estes dados</em>. A próxima busca usa a âncora e para de puxar homônimo.</li>
           <li><strong>Decay</strong> — cargo ou endereço com ano antigo (ex.: 2019) aparece como <em>reconfirmar</em>. Não trate como atual.</li>
           <li><strong>Excluir / Desligar</strong> — um nó: some ele, o que só existia por ele, e bloqueia as chaves. Área ou lote na ficha: some só os marcados (o alvo fica). Explodir / processar não recria identificador bloqueado neste caso.</li>
         </ul>
         <p>CPF precisa dos dígitos verificadores da Receita. Celular de 11 dígitos (DDD + 9) não é lido como CPF. Número inválido no campo CPF é ignorado — não vira semente.</p>
+      </section>
+
+      <section id="resolucao" class="manual-section">
+        <p class="type-tag">motor</p>
+        <h2>Resolução de identidade</h2>
+        <p>O produto não é “buscar tudo”. É decidir, com evidência, se dois registros são a mesma pessoa — e o que ainda é homônimo.</p>
+        <ul>
+          <li><strong>Três scores</strong> — identidade (é a mesma pessoa?), confiabilidade da fonte, e confiança da afirmação. Não são a mesma pergunta.</li>
+          <li><strong>Evidência negativa</strong> — nascimento incompatível ou duas residências permanentes no mesmo período baixam o score. Processo no RJ, imóvel em SC ou empresa em MG <em>não</em> são contradição de cidade.</li>
+          <li><strong>Lugares tipados</strong> — residência, associado e histórico. O perfil geográfico mede intensidade de associação com a UF, não “chance de morar”.</li>
+          <li><strong>Limiar 75</strong> — abaixo disso o nó não entra no dossiê principal e não é fundido por nome. Vai para <em>Revisar</em>.</li>
+          <li><strong>O motor não confirma</strong> — mesmo 97% só sugere. Confirmado no dossiê é clique do analista, com motivo.</li>
+          <li>Na página do caso, a fila <strong>Confirmado / Provável / Revisar / Descartado</strong> lista as pessoas e as razões do score.</li>
+        </ul>
       </section>
 
       <section id="consultar" class="manual-section">
@@ -342,14 +357,16 @@
         <ol>
           <li>Preencha o alvo ou abra o caso. Cada campo novo <em>refina</em> a busca — não repete a mesma consulta genérica.</li>
           <li>Clique <strong>Buscar notícias e imagens</strong>.</li>
-          <li>A coluna de <strong>notícias</strong> lista matérias e menções. Clique no título para a ficha interna (combinação usada, copiar URL).</li>
-          <li>A <strong>galeria</strong> mostra miniaturas públicas. Clique na foto para ver a miniatura maior e o endereço da página de origem.</li>
+          <li>A coluna de <strong>notícias</strong> lista matérias com snippet, fonte, data e a combinação usada. Marque as que quiser.</li>
+          <li>A <strong>galeria</strong> mostra miniaturas públicas e a URL da página de origem. Marque as fotos; o servidor não baixa o arquivo.</li>
+          <li>Clique <strong>Adicionar selecionadas ao caso</strong>. Só o que você marcou vira nó <em>PUBLICATION</em> no grafo, ligado ao alvo. Na página Alvo, escolha o caso se ainda não houver um corrente.</li>
         </ol>
         <ul>
           <li>Combinações automáticas, nesta ordem de especialização: nome+empresa/CNPJ, nome+@user, nome+placa, nome+e-mail (e domínio se não for Gmail/Hotmail/Outlook), nome+processo. Sem nome, cruza CNPJ+@user ou CNPJ+placa.</li>
           <li>Termo sozinho (só o CNPJ, só o @user…) só entra se aquele dado ainda não foi usado num par — complemento, sem sobreposição.</li>
           <li>Nome da empresa no grafo entra como termo de firma; CPF <em>nunca</em> vai ao buscador web.</li>
-          <li>O servidor não baixa nem guarda as fotos — só exibe a URL da miniatura.</li>
+          <li>O servidor não baixa nem guarda as fotos — só exibe a URL da miniatura e, se você marcar, grava essa URL no grafo.</li>
+          <li>A busca não liga sozinha o que achou. Só entra no caso o que você marcar e adicionar.</li>
           <li>Título e imagem <em>não</em> confirmam que a pessoa da foto é o alvo. Homônimo vale aqui também.</li>
           <li>Dez matérias iguais não são dez confirmações. Em Investigar, independência de fonte agrupa o eco.</li>
           <li>Se a busca pública não responder, a área diz se as instâncias falharam ou se rodaram sem menção. Tente de novo ou configure <code>SEARXNG_URL</code> / Brave / CSE.</li>

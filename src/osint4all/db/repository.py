@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import delete, func, or_, select, update
+
+_SYNC_OFF = {"synchronize_session": False}
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from osint4all.db.models import (
@@ -65,6 +67,11 @@ EDGE_REL_TYPES = (
     "MAE",
     "EMPRESA",
 )
+
+
+def _bulk_delete(session: Session, stmt) -> None:
+    """DELETE em SQL puro — sem puxar as linhas para a sessão ORM."""
+    session.execute(stmt, execution_options=_SYNC_OFF)
 
 
 def utcnow() -> datetime:
@@ -463,7 +470,11 @@ def consolidate_identities(session: Session, investigation_id: str) -> int:
                 continue
             bucket.sort(key=lambda row: (not row.is_seed, 0 if person_cpf(row) else 1, row.depth or 0))
             keeper = bucket[0]
+            keeper_cpf = person_cpf(keeper)
             for extra in bucket[1:]:
+                extra_cpf = person_cpf(extra)
+                if not keeper_cpf or not extra_cpf or extra_cpf != keeper_cpf:
+                    continue
                 absorb_entity(session, investigation_id, keeper, extra)
                 merged += 1
     return merged
@@ -689,7 +700,11 @@ def collapse_graph_view(nodes: list[dict[str, Any]], links: list[dict[str, Any]]
         if len(cpfs) > 1:
             continue
         keeper = group[0]
+        keeper_cpf = cpf_of(keeper)
         for extra in group[1:]:
+            extra_cpf = cpf_of(extra)
+            if not keeper_cpf or not extra_cpf or extra_cpf != keeper_cpf:
+                continue
             alias[extra["id"]] = keeper["id"]
             have = {(i.get("kind"), i.get("value")) for i in (keeper.get("ids") or [])}
             keeper["ids"] = list(keeper.get("ids") or []) + [
@@ -760,6 +775,8 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "nome_pai",
                     "nome_mae",
                     "username",
+                    "identity_match",
+                    "places",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
             },
@@ -914,7 +931,7 @@ def _purge_entity_ids(session: Session, investigation_id: str, entity_ids: list[
         block_keys(session, investigation_id, to_block | extra)
     ev_ids = list(session.scalars(select(Evidence.id).where(Evidence.entity_id.in_(real_ids))))
     if ev_ids:
-        session.execute(delete(HypothesisStance).where(HypothesisStance.evidence_id.in_(ev_ids)))
+        _bulk_delete(session, delete(HypothesisStance).where(HypothesisStance.evidence_id.in_(ev_ids)))
     edge_ids = list(
         session.scalars(
             select(Edge.id).where(
@@ -924,26 +941,35 @@ def _purge_entity_ids(session: Session, investigation_id: str, entity_ids: list[
         )
     )
     if edge_ids:
-        session.execute(delete(Evidence).where(Evidence.edge_id.in_(edge_ids)))
-    session.execute(delete(CaseEvent).where(CaseEvent.entity_id.in_(real_ids)))
-    session.execute(delete(EntityVersion).where(EntityVersion.entity_id.in_(real_ids)))
-    session.execute(delete(QueryLog).where(QueryLog.entity_id.in_(real_ids)))
-    session.execute(delete(NegativeFinding).where(NegativeFinding.entity_id.in_(real_ids)))
-    session.execute(delete(CaseComment).where(CaseComment.entity_id.in_(real_ids)))
-    session.execute(delete(ExpansionJob).where(ExpansionJob.entity_id.in_(real_ids)))
-    session.execute(
+        _bulk_delete(session, delete(Evidence).where(Evidence.edge_id.in_(edge_ids)))
+    _bulk_delete(session, delete(CaseEvent).where(CaseEvent.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(EntityVersion).where(EntityVersion.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(QueryLog).where(QueryLog.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(NegativeFinding).where(NegativeFinding.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(CaseComment).where(CaseComment.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(ExpansionJob).where(ExpansionJob.entity_id.in_(real_ids)))
+    _bulk_delete(
+        session,
         delete(VerificationRecord).where(
             VerificationRecord.investigation_id == investigation_id,
             VerificationRecord.target_type == "entity",
             VerificationRecord.target_id.in_(real_ids),
-        )
+        ),
     )
     if edge_ids:
-        session.execute(delete(Edge).where(Edge.id.in_(edge_ids)))
-    session.execute(delete(Evidence).where(Evidence.entity_id.in_(real_ids)))
-    session.execute(delete(CaseNote).where(CaseNote.entity_id.in_(real_ids)))
-    session.execute(delete(Identifier).where(Identifier.entity_id.in_(real_ids)))
-    session.execute(delete(Entity).where(Entity.id.in_(real_ids)))
+        _bulk_delete(session, delete(Edge).where(Edge.id.in_(edge_ids)))
+    _bulk_delete(session, delete(Evidence).where(Evidence.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(CaseNote).where(CaseNote.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(Identifier).where(Identifier.entity_id.in_(real_ids)))
+    _bulk_delete(session, delete(Entity).where(Entity.id.in_(real_ids)))
+    gone = set(real_ids)
+    if edge_ids:
+        gone.update(edge_ids)
+    for obj in list(session.identity_map.values()):
+        oid = getattr(obj, "id", None)
+        related = getattr(obj, "entity_id", None)
+        if obj in session and (oid in gone or related in gone):
+            session.expunge(obj)
     session.flush()
     return len(real_ids)
 
@@ -1250,42 +1276,94 @@ def add_case_note(
     return note
 
 
-def purge_investigation(session: Session, investigation_id: str) -> bool:
-    """Apaga o caso e todos os filhos. Evita IntegrityError do cascade ORM."""
+def live_investigations(session: Session):
+    return session.scalars(
+        select(Investigation)
+        .where(Investigation.status != "DELETED")
+        .order_by(Investigation.created_at.desc())
+    ).all()
+
+
+def retire_investigation(session: Session, investigation_id: str) -> bool:
+    """Tira o caso da lista na hora e para a fila. A limpeza pesada vem depois."""
     inv = session.get(Investigation, investigation_id)
     if not inv:
         return False
-    entity_ids = list(session.scalars(select(Entity.id).where(Entity.investigation_id == investigation_id)))
-    hyp_ids = list(session.scalars(select(Hypothesis.id).where(Hypothesis.investigation_id == investigation_id)))
-    if hyp_ids:
-        session.execute(delete(HypothesisStance).where(HypothesisStance.hypothesis_id.in_(hyp_ids)))
-    claim_ids = list(session.scalars(select(Claim.id).where(Claim.investigation_id == investigation_id)))
-    if claim_ids:
-        session.execute(delete(ClaimApproval).where(ClaimApproval.claim_id.in_(claim_ids)))
-    session.execute(delete(Hypothesis).where(Hypothesis.investigation_id == investigation_id))
-    session.execute(delete(Claim).where(Claim.investigation_id == investigation_id))
-    session.execute(delete(PlaybookItem).where(PlaybookItem.investigation_id == investigation_id))
-    session.execute(delete(EntityVersion).where(EntityVersion.investigation_id == investigation_id))
-    session.execute(delete(QueryLog).where(QueryLog.investigation_id == investigation_id))
-    session.execute(delete(NegativeFinding).where(NegativeFinding.investigation_id == investigation_id))
-    session.execute(delete(CaseComment).where(CaseComment.investigation_id == investigation_id))
-    session.execute(delete(ResearchPlan).where(ResearchPlan.investigation_id == investigation_id))
-    session.execute(delete(CaseSnapshot).where(CaseSnapshot.investigation_id == investigation_id))
-    session.execute(delete(CaseEvent).where(CaseEvent.investigation_id == investigation_id))
-    session.execute(delete(CaseTask).where(CaseTask.investigation_id == investigation_id))
-    session.execute(delete(VerificationRecord).where(VerificationRecord.investigation_id == investigation_id))
-    session.execute(delete(ChangeLog).where(ChangeLog.investigation_id == investigation_id))
-    session.execute(delete(HostIntel).where(HostIntel.investigation_id == investigation_id))
-    session.execute(delete(Evidence).where(Evidence.investigation_id == investigation_id))
-    session.execute(delete(ExpansionJob).where(ExpansionJob.investigation_id == investigation_id))
-    session.execute(delete(Edge).where(Edge.investigation_id == investigation_id))
-    if entity_ids:
-        session.execute(delete(Identifier).where(Identifier.entity_id.in_(entity_ids)))
-    session.execute(delete(CaseNote).where(CaseNote.investigation_id == investigation_id))
-    session.execute(delete(BlockedKey).where(BlockedKey.investigation_id == investigation_id))
-    session.execute(delete(Entity).where(Entity.investigation_id == investigation_id))
-    session.execute(delete(Investigation).where(Investigation.id == investigation_id))
-    session.expire_all()
+    if inv.status == "DELETED":
+        return True
+    inv.status = "DELETED"
+    inv.monitor = False
+    session.execute(
+        update(ExpansionJob)
+        .where(
+            ExpansionJob.investigation_id == investigation_id,
+            ExpansionJob.status.in_(("PENDING", "RUNNING")),
+        )
+        .values(status="FAILED", last_error="caso apagado"),
+        execution_options=_SYNC_OFF,
+    )
+    session.flush()
+    return True
+
+
+def _expunge_case(session: Session, investigation_id: str) -> None:
+    for obj in list(session.identity_map.values()):
+        drop = isinstance(obj, Investigation) and obj.id == investigation_id
+        drop = drop or getattr(obj, "investigation_id", None) == investigation_id
+        if drop and obj in session:
+            session.expunge(obj)
+
+
+def purge_investigation(session: Session, investigation_id: str) -> bool:
+    """Apaga o caso em SQL direto. Não carrega nós/vínculos na sessão."""
+    found = session.scalar(select(Investigation.id).where(Investigation.id == investigation_id))
+    if not found:
+        return False
+    _expunge_case(session, investigation_id)
+    entities = select(Entity.id).where(Entity.investigation_id == investigation_id)
+    _bulk_delete(
+        session,
+        delete(HypothesisStance).where(
+            HypothesisStance.hypothesis_id.in_(select(Hypothesis.id).where(Hypothesis.investigation_id == investigation_id))
+        ),
+    )
+    _bulk_delete(
+        session,
+        delete(HypothesisStance).where(
+            HypothesisStance.evidence_id.in_(select(Evidence.id).where(Evidence.investigation_id == investigation_id))
+        ),
+    )
+    _bulk_delete(
+        session,
+        delete(ClaimApproval).where(
+            ClaimApproval.claim_id.in_(select(Claim.id).where(Claim.investigation_id == investigation_id))
+        ),
+    )
+    for model in (
+        Hypothesis,
+        Claim,
+        PlaybookItem,
+        EntityVersion,
+        QueryLog,
+        NegativeFinding,
+        CaseComment,
+        ResearchPlan,
+        CaseSnapshot,
+        CaseEvent,
+        CaseTask,
+        VerificationRecord,
+        ChangeLog,
+        HostIntel,
+        Evidence,
+        ExpansionJob,
+        Edge,
+        CaseNote,
+        BlockedKey,
+    ):
+        _bulk_delete(session, delete(model).where(model.investigation_id == investigation_id))
+    _bulk_delete(session, delete(Identifier).where(Identifier.entity_id.in_(entities)))
+    _bulk_delete(session, delete(Entity).where(Entity.investigation_id == investigation_id))
+    _bulk_delete(session, delete(Investigation).where(Investigation.id == investigation_id))
     return True
 
 

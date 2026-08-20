@@ -26,7 +26,11 @@ def _case(session: Session, case_id: str) -> Investigation | None:
 
 @api_router.get("/cases")
 def api_cases(user: User = Depends(current_user), session: Session = Depends(db_session)):
-    rows = session.scalars(select(Investigation).order_by(Investigation.created_at.desc()).limit(80)).all()
+    rows = [
+        inv
+        for inv in session.scalars(select(Investigation).order_by(Investigation.created_at.desc()).limit(80)).all()
+        if inv.status != "DELETED"
+    ]
     return [
         {
             "id": inv.id,
@@ -43,7 +47,7 @@ def api_cases(user: User = Depends(current_user), session: Session = Depends(db_
 @api_router.get("/cases/{case_id}")
 def api_case(case_id: str, user: User = Depends(current_user), session: Session = Depends(db_session)):
     inv = _case(session, case_id)
-    if not inv:
+    if not inv or inv.status == "DELETED":
         return JSONResponse({"detail": "caso não encontrado"}, status_code=404)
     return {
         "id": inv.id,

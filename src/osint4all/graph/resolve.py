@@ -21,7 +21,7 @@ from osint4all.db.repository import (
     find_person_by_name,
     utcnow,
 )
-from osint4all.graph.identity import bind_found_to_profile, found_canonical_key, should_enqueue_child
+from osint4all.graph.identity import bind_found_to_profile, found_canonical_key, is_unconfirmed, should_enqueue_child
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
 
 
@@ -36,7 +36,7 @@ def upsert_found_entity(
 ) -> Entity:
     key = found_canonical_key(found)
     existing = find_entity_by_key(session, investigation.id, key)
-    if existing is None and found.entity_type == "PERSON" and found.kind == "NAME":
+    if existing is None and found.entity_type == "PERSON" and found.kind == "NAME" and not is_unconfirmed(found):
         existing = find_person_by_name(session, investigation.id, found.display_name or found.value)
     if existing is None and found.kind in {"CPF", "EMAIL", "PHONE", "USERNAME", "BIRTHDATE"}:
         host = find_person_by_name(session, investigation.id, found.display_name or "")
@@ -268,6 +268,8 @@ def apply_result(
         )
         _index_host_payload(session, investigation, ev_target, connector, ev.payload)
 
+    _annotate_identity(session, investigation, created)
+
     if consolidate:
         consolidate_identities(session, investigation.id)
     return created
@@ -402,3 +404,93 @@ def _index_host_payload(
     obs = observation_from_payload(payload, source=connector)
     if obs:
         upsert_host_intel(session, investigation, entity.id, obs)
+
+
+def _person_snap(session: Session, investigation_id: str, entity: Entity):
+    from osint4all.graph.identity import collapse_name
+    from osint4all.graph.match import PersonSnap, infer_place, places_from_attrs
+    from osint4all.security import only_digits
+
+    attrs = dict(entity.attrs or {})
+    emails: set[str] = set()
+    phones: set[str] = set()
+    users: set[str] = set()
+    for ident in entity.identifiers or []:
+        kind = str(ident.kind or "").upper()
+        value = str(ident.value or "").strip()
+        if kind == "EMAIL" and value:
+            emails.add(value.lower())
+        elif kind == "PHONE":
+            digits = only_digits(value)
+            if len(digits) >= 8:
+                phones.add(digits)
+        elif kind == "USERNAME" and value:
+            users.add(value.lstrip("@").casefold())
+    places = places_from_attrs(attrs)
+    relatives = {collapse_name(attrs[k]) for k in ("nome_pai", "nome_mae") if attrs.get(k)}
+    companies: set[str] = set()
+    edges = session.scalars(
+        select(Edge).where(
+            Edge.investigation_id == investigation_id,
+            (Edge.from_entity_id == entity.id) | (Edge.to_entity_id == entity.id),
+        )
+    ).all()
+    other_ids = {e.from_entity_id if e.to_entity_id == entity.id else e.to_entity_id for e in edges}
+    others = {
+        row.id: row
+        for row in session.scalars(select(Entity).where(Entity.id.in_(other_ids or {"_"}))).all()
+    }
+    for edge in edges:
+        other = others.get(edge.to_entity_id if edge.from_entity_id == entity.id else edge.from_entity_id)
+        if other is None:
+            continue
+        if other.entity_type == "ORG":
+            companies.add(collapse_name(other.display_name))
+            role = "processo" if edge.rel_type == "PARTE" else "empresa"
+            place = infer_place(
+                municipio=str((other.attrs or {}).get("municipio") or ""),
+                uf=str((other.attrs or {}).get("uf") or ""),
+                role=role,
+                source=other.display_name,
+                kind="associated",
+            )
+            if place is not None:
+                places.append(place)
+        elif other.entity_type == "PERSON" and edge.rel_type in {"PAI", "MAE"}:
+            relatives.add(collapse_name(other.display_name))
+    labels = [str(ev.source_label or "") for ev in (entity.evidence or []) if ev.source_label]
+    return PersonSnap(
+        name=entity.display_name or "",
+        emails=emails,
+        phones=phones,
+        usernames=users,
+        birth=str(attrs.get("nascimento") or attrs.get("birth") or ""),
+        companies=companies,
+        cargo=str(attrs.get("cargo") or attrs.get("papel") or ""),
+        places=places,
+        relatives=relatives,
+        sources=labels,
+        independent_origins=len({item for item in labels if item}),
+    )
+
+
+def _annotate_identity(session: Session, investigation: Investigation, created: list[Entity]) -> None:
+    from osint4all.graph.match import apply_match_attrs, score_identity
+
+    people = [row for row in created if row.entity_type == "PERSON"]
+    if not people:
+        return
+    target = next((row for row in people if row.is_seed), None)
+    if target is None:
+        target = session.scalar(
+            select(Entity).where(Entity.investigation_id == investigation.id, Entity.is_seed.is_(True), Entity.entity_type == "PERSON")
+        )
+    if target is None:
+        return
+    target_snap = _person_snap(session, investigation.id, target)
+    apply_match_attrs(target, score_identity(target_snap, target_snap), target_snap.places)
+    for person in people:
+        if person.id == target.id:
+            continue
+        cand = _person_snap(session, investigation.id, person)
+        apply_match_attrs(person, score_identity(target_snap, cand), cand.places)

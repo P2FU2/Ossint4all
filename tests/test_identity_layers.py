@@ -99,6 +99,7 @@ def test_qsa_name_only_is_unconfirmed() -> None:
 
 def test_names_match_is_exact() -> None:
     assert names_match("Maria Silva Souza", "MARIA  SILVA   SOUZA")
+    assert names_match("João Antônio de Oliveira", "Joao Antonio de Oliveira")
     assert not names_match("Maria Silva", "Maria Silva Souza")
     assert names_same_person("Pedro Milani Neves", "PEDRO MILANI MARINHO QUEIROZ NEVES")
     assert not names_same_person("Pedro Neves", "Pedro Milani Marinho Queiroz Neves")

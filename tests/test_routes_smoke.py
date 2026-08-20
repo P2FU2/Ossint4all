@@ -111,6 +111,20 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "PENDING" in body
     assert "label" in body
     assert "Caso corrente" in created.text
+    assert "Correspondências de identidade" in created.text
+    assert "Revisar" in created.text
+    assert "Descartado" in created.text
+    assert "Provável" in created.text
+    graph_json = client.get(f"/app/casos/{case_id}/grafo.json")
+    assert graph_json.status_code == 200
+    node_id = next((n["id"] for n in graph_json.json().get("nodes") or [] if n.get("id")), None)
+    assert node_id
+    ficha = client.get(f"/app/casos/{case_id}/entidades/{node_id}")
+    assert ficha.status_code == 200
+    assert "Por que este score" in ficha.text
+    assert "Identidade" in ficha.text
+    assert "Fonte" in ficha.text
+    assert "Afirmação" in ficha.text
     assert "criado" in created.text.lower()
     assert "Editar" in created.text
     assert "Buscar" in created.text
@@ -171,9 +185,12 @@ def test_consult_tools_assign_edit(settings) -> None:
     midia = client.get(f"/app/casos/{created.url.path.split('/')[3]}/midia")
     assert midia.status_code == 200
     assert "CPF" in midia.text or "notícia" in midia.text.lower() or "menção" in midia.text.lower()
+    assert "Adicionar selecionadas" in midia.text
+    assert 'name="news_pick"' in midia.text or "marque" in midia.text.lower()
 
     alvo_media = client.get("/app/alvo/midia")
     assert alvo_media.status_code == 200
+    assert "Adicionar selecionadas" in alvo_media.text
 
     manual = client.get("/app/manual")
     assert manual.status_code == 200
@@ -183,6 +200,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Detectar" in manual.text
     assert "Cinco motores" in manual.text
     assert "Investigar" in manual.text
+    assert "Resolução de identidade" in manual.text
     assert "Playbooks" in manual.text
     assert "/api/v1" in manual.text
 

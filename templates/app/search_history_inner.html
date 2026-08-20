@@ -3,12 +3,15 @@
     <p class="eyebrow">log</p>
     <h2>histórico</h2>
   </div>
-  {% if history %}
-  <form method="post" action="/app/historico/limpar" hx-post="/app/historico/limpar" hx-target="#search-history" hx-swap="outerHTML" hx-confirm="Apagar todo o histórico desta conta?">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-    <button class="btn ghost history-clear" type="submit" data-tip="Remove só o seu histórico de consultas">limpar</button>
-  </form>
-  {% endif %}
+  <div class="history-actions">
+    <button type="button" class="btn ghost history-clear" id="history-min" data-tip="Recolhe o log sem apagar as consultas">minimizar</button>
+    {% if history %}
+    <form method="post" action="/app/historico/limpar" hx-post="/app/historico/limpar" hx-target="#search-history" hx-swap="outerHTML" hx-confirm="Apagar todo o histórico desta conta?">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn ghost history-clear" type="submit" data-tip="Remove só o seu histórico de consultas">limpar</button>
+    </form>
+    {% endif %}
+  </div>
 </header>
 {% if history %}
 <label class="sr-only" for="history-search">Filtrar histórico</label>

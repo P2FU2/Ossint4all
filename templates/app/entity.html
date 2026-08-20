@@ -47,9 +47,42 @@
 </header>
 
 {% if resolution %}
-<section class="panel">
-  <h2>Resolução</h2>
+<section class="panel match-card">
+  <h2>Por que este score</h2>
   <p>Score {{ resolution.score }} · {{ resolution.rule }}{% if resolution.strong %} · âncoras {{ resolution.strong|join(", ") }}{% endif %}</p>
+  <dl class="fact-grid">
+    <div><dt>Identidade</dt><dd>{{ resolution.identity_match }}% · {{ resolution.band }}</dd></div>
+    <div><dt>Fonte</dt><dd>{{ '%.0f'|format((resolution.source_reliability or 0) * 100) }}%</dd></div>
+    <div><dt>Afirmação</dt><dd>{{ '%.0f'|format((resolution.claim_confidence or 0) * 100) }}%</dd></div>
+  </dl>
+  {% if resolution.reasons %}
+  <p class="section-kicker">evidências</p>
+  <ul class="plain">{% for why in resolution.reasons %}<li>{{ why }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if resolution.contradictions %}
+  <p class="section-kicker">contradições</p>
+  <ul class="plain">{% for why in resolution.contradictions %}<li>{{ why }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if resolution.neutrals %}
+  <p class="section-kicker">associações (não contradizem)</p>
+  <ul class="plain">{% for why in resolution.neutrals %}<li>{{ why }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if resolution.places %}
+  <p class="section-kicker">perfil geográfico</p>
+  <ul class="plain">
+    {% for place in resolution.places %}
+    <li>{{ place.kind }}{% if place.role %} · {{ place.role }}{% endif %} · {{ place.municipio }}{% if place.uf %}/{{ place.uf }}{% endif %}{% if place.start or place.end %} · {{ place.start }}–{{ place.end }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if resolution.geo %}
+  <p class="muted">Intensidade de associação por UF — não é chance de morar.</p>
+  <ul class="plain">
+    {% for row in resolution.geo %}
+    <li>{{ row.uf }} · {{ row.share }}%</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
   {% if stale %}<p class="muted">Há cargo/endereço antigo nesta ficha. Decay: não trate como atual sem reconfirmar.</p>{% endif %}
 </section>
 {% endif %}

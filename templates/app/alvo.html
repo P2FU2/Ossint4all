@@ -110,7 +110,7 @@
       {% for hit in layer.candidates %}
       <li>
         <strong>{{ hit.title }}</strong>
-        <span class="muted">{{ hit.reason }}{% if hit.summary %} · {{ hit.summary }}{% endif %}</span>
+        <span class="muted">{{ hit.reason }}{% if hit.summary %} · {{ hit.summary }}{% endif %}{% if hit.match is not none %} · match {{ hit.match }}%{% endif %}</span>
         <form class="inline-plate" method="post" action="/app/alvo/confirmar">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="hidden" name="kind" value="{{ hit.kind }}" />
