@@ -53,6 +53,50 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SearchHistory(Base):
+    __tablename__ = "search_history"
+    __table_args__ = (Index("ix_search_history_user_created", "user_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    username: Mapped[str] = mapped_column(String(80), index=True)
+    mode: Mapped[str] = mapped_column(String(32), default="auto")
+    kind: Mapped[str] = mapped_column(String(32), default="")
+    query: Mapped[str] = mapped_column(String(512))
+    title: Mapped[str] = mapped_column(String(255), default="")
+    summary: Mapped[str] = mapped_column(String(400), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SearchChain(Base):
+    __tablename__ = "search_chains"
+    __table_args__ = (Index("ix_search_chains_user_active", "user_id", "active"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SearchChainStep(Base):
+    __tablename__ = "search_chain_steps"
+    __table_args__ = (Index("ix_search_chain_steps_chain", "chain_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    chain_id: Mapped[str] = mapped_column(ForeignKey("search_chains.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="")
+    query: Mapped[str] = mapped_column(String(512))
+    title: Mapped[str] = mapped_column(String(255), default="")
+    summary: Mapped[str] = mapped_column(String(400), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    identifiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    findings: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Investigation(Base):
     __tablename__ = "investigations"
 

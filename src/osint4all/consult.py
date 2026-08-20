@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -15,7 +16,8 @@ from osint4all.connectors.plate_public import (
     _DETRAN_PORTAL,
     describe_plate,
     extract_owner_mentions,
-    extract_vehicle_mentions,
+    extract_vehicle_card,
+    merge_vehicle_cards,
     parse_plate_enrichment,
 )
 from osint4all.connectors.socio_search import SocioSearchConnector
@@ -96,17 +98,22 @@ class GraphEdge:
     source: str
     target: str
     label: str = ""
+    explain: str = ""
 
 
 @dataclass
 class ConsultGraph:
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
+    caption: str = ""
 
     def to_payload(self) -> dict[str, Any]:
         return {
+            "caption": self.caption,
             "nodes": [{"id": n.id, "label": n.label, "kind": n.kind, "meta": n.meta} for n in self.nodes],
-            "edges": [{"source": e.source, "target": e.target, "label": e.label} for e in self.edges],
+            "edges": [
+                {"source": e.source, "target": e.target, "label": e.label, "explain": e.explain} for e in self.edges
+            ],
         }
 
 
@@ -210,16 +217,9 @@ def _consult_plate(raw: str, settings: Settings | None = None, *, quick: bool = 
         ConsultHit(ev.source_label, ev.snippet or "", ev.url, "fonte")
         for ev in parsed.evidence
     ]
-    facts = [
-        ("Padrão", info["padrao"]),
-        ("Série (1º emplacamento)", f"{uf} · {uf_name}" if uf else "—"),
-        ("Placa compacta", compact),
-        ("Formato", pretty),
-        ("Mercosul", "sim" if compact[4:5].isalpha() else "não (cinza)"),
-    ]
     notes = [
-        "O DETRAN/SENATRAN não publicam o proprietário só com a placa. Cadastro de dono exige Renavam + gov.br.",
-        "Abaixo: série histórica, portais oficiais e menções públicas (leilões, diários, notícias) se existirem.",
+        "Modelo, cor e ano vêm de menção pública (leilão, diário, classificado, notícia). Não há API aberta do DETRAN só com a placa.",
+        "O cadastro de dono oficial exige Renavam + gov.br.",
     ]
     timeline: list[TimelineEvent] = [
         TimelineEvent("Série DENATRAN", info.get("serie_nota") or info["padrao"], when="histórico", kind="plate"),
@@ -236,25 +236,28 @@ def _consult_plate(raw: str, settings: Settings | None = None, *, quick: bool = 
         )
 
     owners: list[str] = []
-    models: list[str] = []
+    vehicle = {}
     if _live_ok(settings, quick):
-        web = _safe_web_search(
-            settings,
-            f'"{compact}" OR "{pretty}" (placa OR veículo OR proprietário OR leilão OR "em nome")',
-            f"plate:{compact}",
-        )
-        blob = " ".join(f"{h.title} {h.meta}" for h in web)
-        owners = extract_owner_mentions(blob)
-        models = extract_vehicle_mentions(blob)
-        hits.extend(web[:8])
-        for ev in web[:6]:
+        vehicle, owners, web = _lookup_plate_vehicle(settings, compact, pretty)
+        hits.extend(web[:10])
+        for ev in web[:8]:
             timeline.append(TimelineEvent(ev.title, ev.meta, ev.url, when="menção web", kind="web"))
 
+    facts = [
+        ("Modelo", vehicle.get("modelo") or vehicle.get("label") or "não citado em fonte pública nesta busca"),
+        ("Marca", vehicle.get("marca") or "—"),
+        ("Ano", vehicle.get("ano") or "—"),
+        ("Cor", vehicle.get("cor") or "—"),
+        ("Padrão", info["padrao"]),
+        ("Série (1º emplacamento)", f"{uf} · {uf_name}" if uf else "—"),
+        ("Placa compacta", compact),
+        ("Mercosul", "sim" if compact[4:5].isalpha() else "não (cinza)"),
+    ]
+    models = [vehicle["label"]] if vehicle.get("label") else []
     if models:
-        facts.append(("Modelo (menção pública)", "; ".join(models)))
         timeline.insert(
             1,
-            TimelineEvent("Veículo citado", "; ".join(models), when="menção pública", kind="vehicle"),
+            TimelineEvent("Veículo citado", vehicle["label"], when="menção pública", kind="vehicle"),
         )
     if owners:
         facts.append(("Possível dono (menção pública)", "; ".join(owners)))
@@ -269,24 +272,27 @@ def _consult_plate(raw: str, settings: Settings | None = None, *, quick: bool = 
     graph = ConsultGraph(
         nodes=[GraphNode("plate", pretty, "vehicle", info["padrao"])],
         edges=[],
+        caption="Árvore da placa: série histórica no centro. Modelo e possível dono só entram se o texto público citar explicitamente.",
     )
     for idx, name in enumerate(owners):
         nid = f"owner-{idx}"
-        graph.nodes.append(GraphNode(nid, name, "person", "menção pública"))
-        graph.edges.append(GraphEdge(nid, "plate", "possível dono"))
+        graph.nodes.append(GraphNode(nid, name, "person", "citado em texto público"))
+        graph.edges.append(
+            GraphEdge(nid, "plate", "possível dono", "Nome extraído de menção pública — não é o cadastro do DETRAN.")
+        )
     for idx, model in enumerate(models):
         nid = f"model-{idx}"
-        graph.nodes.append(GraphNode(nid, model, "vehicle", "modelo citado"))
-        graph.edges.append(GraphEdge("plate", nid, "menciona"))
+        graph.nodes.append(GraphNode(nid, model, "vehicle", "modelo citado na web"))
+        graph.edges.append(GraphEdge("plate", nid, "modelo", "Marca/modelo encontrados no mesmo trecho que a placa."))
 
     return ConsultResult(
         kind="PLATE",
         query=pretty,
         title=pretty,
         summary=(
-            f"{info['padrao']}. {info['serie_nota']}"
-            + (f" Modelo citado: {models[0]}." if models else "")
-            + (f" Dono em menção pública: {owners[0]}." if owners else " Sem dono em fonte pública nesta busca.")
+            (f"{vehicle['label']}. " if vehicle.get("label") else "Modelo não apareceu em fonte pública. ")
+            + f"{info['padrao']}. {info['serie_nota']}"
+            + (f" Dono em menção pública: {owners[0]}." if owners else "")
         ),
         facts=facts,
         hits=hits,
@@ -299,18 +305,26 @@ def _consult_plate(raw: str, settings: Settings | None = None, *, quick: bool = 
 def _consult_username(raw: str, settings: Settings, *, quick: bool = False) -> ConsultResult:
     user = raw.strip().lstrip("@").lower()
     conn = UsernamePublicConnector(settings)
-    fake = SimpleNamespace(canonical_key=f"username:{user}", display_name=user, entity_type="PROFILE", identifiers=[])
-    result = conn.collect(fake, SimpleNamespace(core_only=quick))
-    hits = [ConsultHit(e.display_name, e.value, e.value, "perfil") for e in result.entities]
+    hits: list[ConsultHit] = []
+    if _live_ok(settings, quick) and settings.username_public_enable:
+        fake = SimpleNamespace(canonical_key=f"username:{user}", display_name=user, entity_type="PROFILE", identifiers=[])
+        result = conn.collect(fake, SimpleNamespace(core_only=quick))
+        hits = [ConsultHit(e.display_name, e.value, e.value, "perfil") for e in result.entities]
     timeline = [
         TimelineEvent(h.title, h.meta, h.url, when="perfil ativo", kind="social")
         for h in hits
     ]
-    graph = ConsultGraph(nodes=[GraphNode("user", f"@{user}", "profile", "semente")], edges=[])
+    graph = ConsultGraph(
+        nodes=[GraphNode("user", f"@{user}", "profile", "username consultado")],
+        edges=[],
+        caption="Árvore do @user: cada caixa é uma URL canônica pública que respondeu HTTP 200. Ausência não prova que a conta não existe.",
+    )
     for idx, hit in enumerate(hits):
         nid = f"net-{idx}"
-        graph.nodes.append(GraphNode(nid, hit.title, "profile", hit.meta))
-        graph.edges.append(GraphEdge("user", nid, "perfil"))
+        graph.nodes.append(GraphNode(nid, hit.title, "profile", hit.meta or "HTTP 200"))
+        graph.edges.append(
+            GraphEdge("user", nid, "perfil público", f"GET em URL canônica de {hit.title} devolveu HTTP 200.")
+        )
     return ConsultResult(
         kind="USERNAME",
         query=f"@{user}",
@@ -463,7 +477,11 @@ def _consult_cpf(raw: str, settings: Settings | None = None, *, quick: bool = Fa
     timeline = [
         TimelineEvent("Número válido", "Dígitos verificadores da Receita batem", when="validação", kind="id"),
     ]
-    graph = ConsultGraph(nodes=[GraphNode("cpf", masked, "person", formatted)], edges=[])
+    graph = ConsultGraph(
+        nodes=[GraphNode("cpf", masked, "person", formatted)],
+        edges=[],
+        caption="Árvore do CPF: o documento no topo; abaixo, empresas do quadro societário público (Receita / Casa dos Dados).",
+    )
     notes = [
         "A Receita não publica o nome pelo CPF em API aberta. O que aparece abaixo veio de bases públicas (QSA, sanções, menções).",
     ]
@@ -495,8 +513,10 @@ def _consult_cpf(raw: str, settings: Settings | None = None, *, quick: bool = Fa
                     )
                 )
                 nid = f"cnpj-{cnpj or companies}"
-                graph.nodes.append(GraphNode(nid, entity.display_name, "org", cnpj))
-                graph.edges.append(GraphEdge("cpf", nid, "sócio"))
+                graph.nodes.append(GraphNode(nid, entity.display_name, "org", cnpj or "CNPJ"))
+                graph.edges.append(
+                    GraphEdge("cpf", nid, "sócio no QSA", "Este CPF aparece no quadro societário público desta empresa.")
+                )
                 timeline.append(
                     TimelineEvent(
                         entity.display_name,
@@ -572,9 +592,15 @@ def _consult_email(raw: str, settings: Settings | None = None, *, quick: bool = 
         TimelineEvent("Domínio", domain, when="derivado", kind="id"),
     ]
     facts = [("Local", local), ("Domínio", domain), ("User derivado", f"@{local}")]
-    graph = ConsultGraph(nodes=[GraphNode("email", email, "email", domain)], edges=[])
-    graph.nodes.append(GraphNode("user", f"@{local}", "profile", "local-part"))
-    graph.edges.append(GraphEdge("email", "user", "deriva"))
+    graph = ConsultGraph(
+        nodes=[GraphNode("email", email, "email", f"domínio {domain}")],
+        edges=[],
+        caption="Árvore do e-mail: o endereço no topo; o @user vem do local-part; cada rede é uma URL pública com HTTP 200. Sem caixa e sem vazamento.",
+    )
+    graph.nodes.append(GraphNode("user", f"@{local}", "profile", "local-part usado como username"))
+    graph.edges.append(
+        GraphEdge("email", "user", "deriva @user", "A parte antes do @ foi testada como identificador em redes públicas.")
+    )
 
     gravatar_url = f"https://www.gravatar.com/{hashlib.md5(email.encode('utf-8'), usedforsecurity=False).hexdigest()}"
     hits.append(ConsultHit("Gravatar (hash público)", "Perfil se o dono cadastrou foto/bio", gravatar_url, "perfil"))
@@ -588,16 +614,20 @@ def _consult_email(raw: str, settings: Settings | None = None, *, quick: bool = 
                 hits.append(hit)
                 timeline.append(TimelineEvent(hit.title, hit.meta or "HTTP 200", hit.url, when="perfil ativo", kind="social"))
                 nid = f"social-{profiles}"
-                graph.nodes.append(GraphNode(nid, hit.title, "profile", hit.meta))
-                graph.edges.append(GraphEdge("user", nid, "perfil"))
+                graph.nodes.append(GraphNode(nid, hit.title, "profile", hit.meta or "HTTP 200"))
+                graph.edges.append(
+                    GraphEdge("user", nid, "perfil público", f"URL canônica de {hit.title} respondeu HTTP 200 para @{local}.")
+                )
         except Exception:
             pass
         gravatar = _safe_gravatar(email)
         if gravatar:
             hits.insert(1, gravatar)
             timeline.insert(1, TimelineEvent(gravatar.title, gravatar.meta, gravatar.url, when="identidade", kind="social"))
-            graph.nodes.append(GraphNode("gravatar", "Gravatar", "profile", gravatar.meta))
-            graph.edges.append(GraphEdge("email", "gravatar", "avatar"))
+            graph.nodes.append(GraphNode("gravatar", "Gravatar", "profile", gravatar.meta or "avatar público"))
+            graph.edges.append(
+                GraphEdge("email", "gravatar", "identidade", "O hash MD5 do e-mail tem avatar público no Gravatar.")
+            )
         web = _safe_web_search(settings, f'"{email}"', f"email:{email}")
         hits.extend(web[:6])
         for ev in web[:5]:
@@ -649,11 +679,17 @@ def _consult_name(raw: str, settings: Settings) -> ConsultResult:
         )
         for e in orgs
     ]
-    graph = ConsultGraph(nodes=[GraphNode("person", raw.strip(), "person", "sócio")], edges=[])
+    graph = ConsultGraph(
+        nodes=[GraphNode("person", raw.strip(), "person", "nome consultado")],
+        edges=[],
+        caption="Árvore do sócio: o nome no topo; abaixo, empresas em que esse nome aparece no QSA público.",
+    )
     for idx, org in enumerate(orgs):
         nid = f"org-{idx}"
         graph.nodes.append(GraphNode(nid, org.display_name, "org", only_digits(org.value)))
-        graph.edges.append(GraphEdge("person", nid, "sócio"))
+        graph.edges.append(
+            GraphEdge("person", nid, "sócio no QSA", "Nome encontrado no quadro societário público desta empresa.")
+        )
     return ConsultResult(
         kind="NAME",
         query=raw.strip(),
@@ -695,12 +731,19 @@ def _format_cnpj(digits: str) -> str:
 
 
 def _graph_from_cnpj(root_digits: str, root_label: str, partners: list[Any]) -> ConsultGraph:
-    graph = ConsultGraph(nodes=[GraphNode(f"cnpj-{root_digits}", root_label, "org", _format_cnpj(root_digits))], edges=[])
+    graph = ConsultGraph(
+        nodes=[GraphNode(f"cnpj-{root_digits}", root_label, "org", _format_cnpj(root_digits))],
+        edges=[],
+        caption="Árvore societária: a empresa consultada na raiz; sócios PF/PJ no primeiro nível; outras firmas dos mesmos sócios mais abaixo.",
+    )
     for idx, partner in enumerate(partners):
         kind = "org" if partner.kind == "CNPJ" else "person"
         nid = f"p-{idx}-{only_digits(str(partner.value)) or idx}"
-        graph.nodes.append(GraphNode(nid, partner.display_name, kind, str(partner.attrs.get("papel") or partner.kind)))
-        graph.edges.append(GraphEdge(nid, f"cnpj-{root_digits}", str(partner.attrs.get("papel") or "sócio")))
+        papel = str(partner.attrs.get("papel") or "sócio")
+        graph.nodes.append(GraphNode(nid, partner.display_name, kind, papel))
+        graph.edges.append(
+            GraphEdge(nid, f"cnpj-{root_digits}", papel, f"{papel} no QSA oficial da Receita (Minha Receita / BrasilAPI).")
+        )
     return graph
 
 
@@ -732,7 +775,9 @@ def _expand_related_companies(
         label = str((org.attrs if org else {}).get("razao_social") or partner.display_name)
         nid = f"cnpj-{other}"
         nodes.append(GraphNode(nid, label, "org", _format_cnpj(other)))
-        edges.append(GraphEdge(f"cnpj-{root_digits}", nid, "sócio PJ"))
+        edges.append(
+            GraphEdge(f"cnpj-{root_digits}", nid, "sócio PJ", "Esta empresa figura como sócia pessoa jurídica no QSA.")
+        )
         hits.append(ConsultHit(label, f"Empresa relacionada · {_format_cnpj(other)}", f"https://minhareceita.org/{other}", "relacionada"))
 
     socio = SocioSearchConnector(settings)
@@ -760,7 +805,9 @@ def _expand_related_companies(
             seen.add(cnpj)
             nid = f"cnpj-{cnpj}"
             nodes.append(GraphNode(nid, entity.display_name, "org", _format_cnpj(cnpj)))
-            edges.append(GraphEdge(person_id, nid, "também sócio"))
+            edges.append(
+                GraphEdge(person_id, nid, "também sócio", f"{person.display_name} também consta no QSA desta outra empresa.")
+            )
             hits.append(
                 ConsultHit(
                     entity.display_name,
@@ -772,6 +819,74 @@ def _expand_related_companies(
             if len(seen) > 10:
                 return hits, nodes, edges
     return hits, nodes, edges
+
+
+def _lookup_plate_vehicle(settings: Settings, compact: str, pretty: str) -> tuple[dict[str, str], list[str], list[ConsultHit]]:
+    queries = (
+        f'"{pretty}" OR "{compact}" (modelo OR marca OR veículo OR carro OR moto OR leilão)',
+        f'"{pretty}" placa (Gol OR Onix OR Civic OR Corolla OR HB20 OR Strada OR Polo OR Argo)',
+        f'"{compact}" (fipe OR "ano modelo" OR prata OR branco OR preto)',
+    )
+    web: list[ConsultHit] = []
+    seen_urls: set[str] = set()
+    cards: list[dict[str, str]] = []
+    owners: list[str] = []
+    for query in queries:
+        for hit in _safe_web_search(settings, query, f"plate:{compact}"):
+            if hit.url and hit.url in seen_urls:
+                continue
+            if hit.url:
+                seen_urls.add(hit.url)
+            web.append(hit)
+            blob = f"{hit.title} {hit.meta}"
+            card = extract_vehicle_card(blob)
+            if card:
+                cards.append(card)
+            for name in extract_owner_mentions(blob):
+                if name not in owners:
+                    owners.append(name)
+    for hit in web[:3]:
+        if not hit.url:
+            continue
+        page = _fetch_public_snippet(hit.url, compact)
+        if not page:
+            continue
+        card = extract_vehicle_card(page)
+        if card:
+            cards.append(card)
+        for name in extract_owner_mentions(page):
+            if name not in owners:
+                owners.append(name)
+    return merge_vehicle_cards(cards), owners[:3], web
+
+
+def _fetch_public_snippet(url: str, plate: str) -> str:
+    host = (url or "").lower()
+    if any(skip in host for skip in ("detran.", "gov.br/login", "facebook.com", "instagram.com", "whatsapp.com")):
+        return ""
+    try:
+        from osint4all.http_client import RateLimitedClient
+
+        http = RateLimitedClient(
+            source="plate_page",
+            max_concurrency=1,
+            timeout=6.0,
+            default_headers={"User-Agent": "osint4all/0.1 (public mention)"},
+        )
+        resp = http.request("GET", url, allow_404=True, max_retries=1)
+        if resp.status_code >= 400:
+            return ""
+        raw = (resp.text or "")[:12000]
+    except Exception:
+        return ""
+    text = re.sub(r"(?is)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>", " ", raw)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    needle = plate.replace("-", "")
+    idx = text.upper().find(needle[:3])
+    if idx < 0:
+        return text[:800]
+    return text[max(0, idx - 220) : idx + 420]
 
 
 def _safe_web_search(settings: Settings, query: str, origin_key: str) -> list[ConsultHit]:

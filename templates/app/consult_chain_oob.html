@@ -1,0 +1,5 @@
+{% if request.headers.get("HX-Request") %}
+<div id="consult-chain" class="consult-chain" hx-swap-oob="true">
+  {% include "app/consult_chain_inner.html" %}
+</div>
+{% endif %}

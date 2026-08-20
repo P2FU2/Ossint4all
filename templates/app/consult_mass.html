@@ -20,7 +20,7 @@
     {% if part.facts %}
     <dl class="fact-grid">
       {% for label, value in part.facts %}
-      <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
+      <div><dt>{{ label }}</dt><dd><button type="button" class="inspect-open" data-inspect='{{ {"title": label, "kind": "fato", "meta": value, "url": "", "when": ""}|tojson }}'>{{ value }}</button></dd></div>
       {% endfor %}
     </dl>
     {% endif %}
@@ -32,8 +32,7 @@
       {% for ev in part.timeline %}
       <li class="tl-{{ ev.kind }}">
         {% if ev.when %}<span class="tl-when">{{ ev.when }}</span>{% endif %}
-        {% if ev.url %}<a href="{{ ev.url }}" target="_blank" rel="noopener">{{ ev.title }}</a>
-        {% else %}<strong>{{ ev.title }}</strong>{% endif %}
+        <button type="button" class="inspect-open" data-inspect='{{ {"title": ev.title, "kind": ev.kind or "evento", "meta": ev.meta or "", "url": ev.url or "", "when": ev.when or ""}|tojson }}'>{{ ev.title }}</button>
         {% if ev.meta %}<span class="muted">{{ ev.meta }}</span>{% endif %}
       </li>
       {% endfor %}
@@ -43,8 +42,7 @@
     <ul class="hit-list">
       {% for hit in part.hits %}
       <li>
-        {% if hit.url %}<a href="{{ hit.url }}" target="_blank" rel="noopener">{{ hit.title }}</a>
-        {% else %}<strong>{{ hit.title }}</strong>{% endif %}
+        <button type="button" class="inspect-open" data-inspect='{{ {"title": hit.title, "kind": hit.kind or "fonte", "meta": hit.meta or "", "url": hit.url or "", "when": hit.when or ""}|tojson }}'>{{ hit.title }}</button>
         <span class="muted">{{ hit.meta }}</span>
       </li>
       {% endfor %}
@@ -78,3 +76,5 @@
   </footer>
 </article>
 {% endif %}
+{% include "app/search_history_oob.html" %}
+{% include "app/consult_chain_oob.html" %}

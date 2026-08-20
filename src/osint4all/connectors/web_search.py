@@ -130,7 +130,7 @@ class WebSearchConnector:
         self.http = RateLimitedClient(
             source=self.name,
             max_concurrency=2,
-            timeout=14.0,
+            timeout=8.0,
             default_headers={"Accept": "application/json", "User-Agent": "osint4all/0.1 (investigative journalism)"},
         )
 
@@ -206,7 +206,7 @@ class WebSearchConnector:
 
     def _searxng(self, query: str, origin_key: str) -> ConnectorResult:
         last = "nenhuma instância respondeu JSON"
-        for base in searxng_bases(self.settings)[:6]:
+        for base in searxng_bases(self.settings)[:2]:
             try:
                 resp = self.http.request(
                     "GET",

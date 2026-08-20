@@ -133,7 +133,7 @@
       <strong>{{ ev.source_label }}</strong>
       <span class="muted">{{ ev.connector }} · {{ ev.collected_at }}</span>
       <p>{{ ev.snippet or "" }}</p>
-      {% if ev.url %}<a href="{{ ev.url }}" target="_blank" rel="noopener">fonte</a>{% endif %}
+      {% if ev.url %}<button type="button" class="inspect-open" data-inspect='{{ {"title": ev.source_label, "kind": "fonte", "meta": ev.snippet or ev.connector or "", "url": ev.url, "when": ev.collected_at.strftime("%d/%m %H:%M") if ev.collected_at else ""}|tojson }}'>fonte</button>{% endif %}
     </li>
     {% else %}
     <li>Nenhuma evidência coletada ainda.</li>

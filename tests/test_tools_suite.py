@@ -17,7 +17,6 @@ def test_mass_plate_offline() -> None:
     mass = run_mass("ABC1D23", live=False)
     assert mass.ok
     assert mass.parts[0].kind == "PLATE"
-    assert mass.derived
     seeds = seeds_from_results(mass.parts)
     assert any(s.kind == "PLATE" for s in seeds)
 
@@ -26,8 +25,9 @@ def test_mass_email_derives_user_and_domain() -> None:
     mass = run_mass("ana@exemplo.com", live=False)
     assert mass.ok
     kinds = {k for k, _ in mass.derived}
-    assert "USERNAME" in kinds
     assert "URL" in kinds
+    assert mass.parts[0].kind == "EMAIL"
+    assert any("ana" in (ev.title + ev.meta) for ev in mass.parts[0].timeline)
 
 
 def test_assign_seeds_to_existing_case(settings, db) -> None:
@@ -57,3 +57,16 @@ def test_assign_seeds_to_existing_case(settings, db) -> None:
 
 def test_consult_rejects_empty_mass() -> None:
     assert run_consult("", mode="massa").ok is False
+
+
+def test_mass_keeps_going_if_derived_breaks(monkeypatch) -> None:
+    from osint4all import tools_suite
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("fonte caiu")
+
+    monkeypatch.setattr(tools_suite, "_consult_domain", boom)
+    mass = run_mass("ana@exemplo.com", live=True)
+    assert mass.ok
+    assert mass.parts[0].ok
+    assert any(not p.ok and "fonte caiu" in (p.error or "") for p in mass.parts[1:])

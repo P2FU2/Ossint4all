@@ -1,0 +1,65 @@
+{% if chain %}
+<section class="chain-box {% if chain.linked %}is-linked{% endif %}" aria-label="Cadeia de consultas">
+  <header class="chain-head">
+    <div>
+      <p class="eyebrow">ponto de cadeia</p>
+      <h2>{{ chain.title }}</h2>
+      {% if chain.linked %}
+      <p class="lede">{{ chain.steps|length }} consultas ligadas{% if chain.shared %} por {{ chain.shared|join(", ") }}{% endif %}. Tudo que já entrou neste fio aparece abaixo.</p>
+      {% else %}
+      <p class="lede">Ponto aberto. Se o próximo dado cruzar com este (e-mail, @user, placa, CPF…), entra na mesma cadeia.</p>
+      {% endif %}
+    </div>
+    <div class="chain-actions">
+      {% if chain.linked %}
+      <form method="post" action="/app/cadeia/grafo">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn primary" type="submit" data-tip="Cria um caso com todos os identificadores desta cadeia">guardar caso</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/app/cadeia/nova" hx-post="/app/cadeia/nova" hx-target="#consult-chain" hx-swap="outerHTML">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn ghost" type="submit" data-tip="Fecha este fio e começa outro na próxima consulta">nova cadeia</button>
+      </form>
+    </div>
+  </header>
+
+  {% if chain.graph_payload %}
+  <div class="mini-graph chain-graph" data-graph='{{ chain.graph_payload | tojson }}' aria-label="Árvore da cadeia"></div>
+  {% endif %}
+
+  <ol class="chain-steps">
+    {% for step in chain.steps %}
+    <li class="chain-step {% if step.is_current %}is-now{% endif %}">
+      {% if step.link %}
+      <p class="chain-join">cruza em <strong>{{ step.link }}</strong></p>
+      {% endif %}
+      <form class="history-replay" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="q" value="{{ step.query }}" />
+        <input type="hidden" name="modo" value="{{ step.kind or 'auto' }}" />
+        <button type="submit" class="chain-node" data-tip="Repete esta consulta da cadeia">
+          <span class="chain-index">{{ step.index }}</span>
+          <span class="chain-body">
+            <span class="history-kind">{{ step.kind_label }}</span>
+            <strong>{{ step.title }}</strong>
+            {% if step.summary %}<span class="muted">{{ step.summary }}</span>{% endif %}
+          </span>
+          {% if step.when %}<time>{{ step.when }}</time>{% endif %}
+        </button>
+      </form>
+      {% if step.findings %}
+      <ul class="chain-findings">
+        {% for item in step.findings %}
+        <li>
+          <button type="button" class="inspect-open" data-inspect='{{ {"title": item.title, "kind": "achado", "meta": item.meta or "", "url": item.url or "", "when": ""}|tojson }}'>{{ item.title }}</button>
+          {% if item.meta %}<span class="muted">{{ item.meta }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}

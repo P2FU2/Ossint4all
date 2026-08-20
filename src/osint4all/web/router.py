@@ -13,6 +13,8 @@ from osint4all.documents.metadata import ingest_local_pdf
 from osint4all.config import ALL_CONNECTORS, get_settings
 from osint4all.paths import project_root
 from osint4all.connectors.registry import connector_health, enabled_connector_names
+from osint4all.db.chain import active_chain, chain_seeds, chain_view, ingest_outcome, reset_chain
+from osint4all.db.history import clear_searches, kind_label as history_kind_label, list_searches, record_search, replay_mode
 from osint4all.db.models import AuditLog, Edge, Entity, Evidence, ExpansionJob, Investigation, User
 from osint4all.db.repository import enqueue_expand, graph_payload, job_counts
 from osint4all.graph.expand import process_pending_jobs
@@ -53,6 +55,49 @@ def _with_cases(ctx: dict, request: Request, session: Session) -> dict:
     ctx["current_case_id"] = cid
     ctx["current_case"] = next((row for row in rows if row.id == cid), None)
     return ctx
+
+
+def _history_view(session: Session, user: User) -> list[dict]:
+    items: list[dict] = []
+    for row in list_searches(session, user):
+        stamp = row.created_at.strftime("%d/%m %H:%M") if row.created_at else ""
+        items.append(
+            {
+                "id": row.id,
+                "query": row.query,
+                "mode": replay_mode(row.mode, row.kind),
+                "kind": row.kind,
+                "kind_label": history_kind_label(row.kind or row.mode),
+                "title": row.title or row.query,
+                "summary": row.summary,
+                "ok": row.ok,
+                "when": stamp,
+            }
+        )
+    return items
+
+
+def _with_history(ctx: dict, session: Session, user: User) -> dict:
+    ctx["history"] = _history_view(session, user)
+    return ctx
+
+
+def _with_chain(ctx: dict, session: Session, user: User, *, current_query: str = "") -> dict:
+    ctx["chain"] = chain_view(session, user, current_query=current_query)
+    return ctx
+
+
+def _save_search(session: Session, user: User, query: str, mode: str, outcome: object) -> None:
+    record_search(
+        session,
+        user,
+        query=query,
+        mode=mode,
+        kind=str(getattr(outcome, "kind", "") or ""),
+        title=str(getattr(outcome, "title", "") or query),
+        summary=str(getattr(outcome, "summary", "") or getattr(outcome, "error", "") or ""),
+        ok=bool(getattr(outcome, "ok", True)),
+    )
 
 
 def _assign_seeds(
@@ -149,8 +194,17 @@ def consult_home(
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
     ctx = template_context(request, user)
-    ctx.update({"nav": "consultar", "modes": MODES, "mode": request.query_params.get("modo") or "auto"})
+    ctx.update(
+        {
+            "nav": "consultar",
+            "modes": MODES,
+            "mode": request.query_params.get("modo") or "auto",
+            "q": request.query_params.get("q") or "",
+        }
+    )
     _with_cases(ctx, request, session)
+    _with_history(ctx, session, user)
+    _with_chain(ctx, session, user)
     return templates.TemplateResponse(request, "app/consult.html", ctx)
 
 
@@ -168,16 +222,91 @@ def consult_run(
     ctx.update({"q": q, "modo": modo, "nav": "consultar", "modes": MODES, "mode": modo})
     _with_cases(ctx, request, session)
     if (modo or "").lower() == "massa":
-        mass = run_mass(q)
+        try:
+            mass = run_mass(q)
+        except Exception as exc:  # noqa: BLE001
+            mass = MassResult(query=q, kind="massa", title=q, summary="", ok=False, error=str(exc) or "Busca em massa falhou.")
         write_audit(session, "consult.mass", username=user.username, details={"ok": mass.ok, "parts": len(mass.parts)})
+        _save_search(session, user, q, "massa", mass)
+        ingest_outcome(session, user, mass)
         ctx["mass"] = mass
+        _with_history(ctx, session, user)
+        _with_chain(ctx, session, user, current_query=q)
         template = "app/consult_mass.html" if request.headers.get("HX-Request") else "app/consult.html"
         return templates.TemplateResponse(request, template, ctx)
     result = run_consult(q, mode=modo)
     write_audit(session, "consult.run", username=user.username, details={"kind": result.kind, "ok": result.ok})
+    _save_search(session, user, q, modo, result)
+    ingest_outcome(session, user, result)
     ctx["result"] = result
+    _with_history(ctx, session, user)
+    _with_chain(ctx, session, user, current_query=q)
     template = "app/consult_result.html" if request.headers.get("HX-Request") else "app/consult.html"
     return templates.TemplateResponse(request, template, ctx)
+
+
+@router.post("/app/historico/limpar")
+def history_clear(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> Response:
+    require_csrf(request, csrf_token)
+    clear_searches(session, user)
+    if request.headers.get("HX-Request"):
+        ctx = template_context(request, user)
+        ctx["history"] = []
+        return templates.TemplateResponse(request, "app/search_history.html", ctx)
+    return RedirectResponse("/app", status_code=303)
+
+
+@router.post("/app/cadeia/nova")
+def chain_reset(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> Response:
+    require_csrf(request, csrf_token)
+    reset_chain(session, user)
+    if request.headers.get("HX-Request"):
+        ctx = template_context(request, user)
+        ctx["chain"] = None
+        return templates.TemplateResponse(request, "app/consult_chain.html", ctx)
+    return RedirectResponse("/app", status_code=303)
+
+
+@router.post("/app/cadeia/grafo")
+def chain_to_graph(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    chain = active_chain(session, user)
+    seeds = chain_seeds(session, chain) if chain else []
+    if not chain or not seeds:
+        request.session["flash"] = {"level": "error", "message": "Não há cadeia com identificadores para guardar."}
+        return RedirectResponse("/app", status_code=303)
+    inv = create_investigation(
+        session,
+        title=chain.title or "Cadeia de consultas",
+        hypothesis="Gerada a partir da cadeia de buscas relacionadas.",
+        seeds=seeds,
+        connectors=list(enabled_connector_names()),
+        max_depth=get_settings().default_max_depth,
+        monitor=False,
+        created_by=user.username,
+        max_attempts=get_settings().job_max_attempts,
+    )
+    write_audit(session, "investigation.from_chain", username=user.username, investigation_id=inv.id, details={"steps": len(seeds)})
+    session.commit()
+    request.session["current_case_id"] = inv.id
+    if get_settings().expand_sync:
+        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
 @router.post("/app/consultar/grafo")
@@ -831,10 +960,16 @@ def tools_run(
     q: str = Form(""),
 ) -> HTMLResponse:
     require_csrf(request, csrf_token)
-    outcome = run_embedded_tool(tool, q)
+    try:
+        outcome = run_embedded_tool(tool, q)
+    except Exception as exc:  # noqa: BLE001
+        outcome = MassResult(query=q, kind="massa", title=q, summary="", ok=False, error=str(exc) or "Ferramenta falhou.") if (tool or "").lower() == "massa" else ConsultResult(kind=tool, query=q, title=q, summary="", ok=False, error=str(exc) or "Ferramenta falhou.")
     write_audit(session, "tool.run", username=user.username, details={"tool": tool, "ok": getattr(outcome, "ok", True)})
+    _save_search(session, user, q, tool, outcome)
+    ingest_outcome(session, user, outcome)
     ctx = template_context(request, user)
     _with_cases(ctx, request, session)
+    _with_chain(ctx, session, user, current_query=q)
     ctx.update({"tool_id": tool, "q": q})
     if isinstance(outcome, MassResult):
         ctx["mass"] = outcome

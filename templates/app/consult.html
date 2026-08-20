@@ -1,12 +1,13 @@
 {% extends "app/base.html" %}
 {% block title %}Consultar{% endblock %}
 {% block content %}
+<div class="consult-shell">
 <div class="consult-wrap">
   <ol class="flow-rail" aria-label="Como consultar">
     <li class="is-done">Tipo</li>
     <li class="{% if result %}is-done{% else %}is-now{% endif %}">Valor</li>
     <li class="{% if result %}is-now{% else %}is-next{% endif %}">Resultado</li>
-    <li class="is-next">Grafo, se quiser</li>
+    <li class="{% if chain and chain.linked %}is-now{% else %}is-next{% endif %}">Cadeia</li>
   </ol>
 
   <section class="consult-hero">
@@ -15,7 +16,7 @@
     <p class="lede">E-mail vira linha do tempo de redes. CPF cruza QSA e listas. CNPJ desenha empresas ligadas. Placa traz série, veículo e dono só se a menção for pública.</p>
   </section>
 
-  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="button[type=submit]">
+  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="button[type=submit]" hx-timeout="45000">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="mode-rail" role="radiogroup" aria-label="Tipo de consulta">
       {% for key, label, tip, ph in modes %}
@@ -31,13 +32,14 @@
       <input id="q" name="q" autofocus autocomplete="off" value="{{ q or '' }}" placeholder="ABC1D23, @jornalista, nome do sócio…" data-tip="Cole o valor e Enter. Em Detectar, o tipo é reconhecido sozinho. Atalho: /" />
       <button class="btn primary" type="submit" data-tip="Consulta só a fonte pública deste tipo. Sem criar caso.">exec</button>
     </div>
-    <p id="consult-hint" class="consult-hint">Enter consulta · / foca o campo · Guardar é opcional</p>
+    <p id="consult-hint" class="consult-hint inspect-hint" data-tip="Enter consulta · / foca o campo · Guardar é opcional. Clique no hint para a ficha.">Enter consulta · / foca o campo · Guardar é opcional</p>
   </form>
 
   <div id="consult-wait" class="htmx-indicator consult-wait" role="status">
     <span class="spinner" aria-hidden="true"></span>
     varrendo nós públicos…
   </div>
+  {% include "app/consult_chain.html" %}
   <div id="consult-result" class="consult-result" aria-live="polite">
     {% if mass %}
     {% include "app/consult_mass.html" %}
@@ -50,10 +52,13 @@
         <li><strong>tipo</strong> — Detectar, ou force e-mail / CPF / CNPJ / placa.</li>
         <li><strong>payload</strong> — um identificador. Enter dispara o scan.</li>
         <li><strong>dump</strong> — linha do tempo, mapa de vínculos e o que a fonte não entrega.</li>
+        <li><strong>cadeia</strong> — se o próximo dado cruzar com o que já saiu, entra no mesmo fio.</li>
         <li><strong>persist</strong> — só então o caso e o grafo nascem.</li>
       </ol>
     </div>
     {% endif %}
   </div>
+</div>
+{% include "app/search_history.html" %}
 </div>
 {% endblock %}

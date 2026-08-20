@@ -137,14 +137,27 @@ def run_embedded_tool(tool_id: str, raw: str, *, settings: Settings | None = Non
 
 def run_mass(raw: str, *, mode: str = "auto", settings: Settings | None = None, live: bool = True) -> MassResult:
     settings = settings or get_settings()
-    primary = run_consult(raw, mode=mode, settings=settings)
+    try:
+        primary = run_consult(raw, mode=mode, settings=settings, quick=not live)
+    except Exception as exc:  # noqa: BLE001
+        return MassResult(query=raw, kind="", title=raw, summary="", ok=False, error=str(exc) or "Falha na consulta principal.")
     if not primary.ok:
         return MassResult(query=raw, kind=primary.kind, title=raw, summary="", parts=[primary], ok=False, error=primary.error)
     derived = _derive(primary)
     parts = [primary]
     if live:
         for kind, value in derived:
-            extra = _run_derived(kind, value, settings, quick=True)
+            try:
+                extra = _run_derived(kind, value, settings, quick=True)
+            except Exception as exc:  # noqa: BLE001
+                extra = ConsultResult(
+                    kind=kind,
+                    query=value,
+                    title=value,
+                    summary="",
+                    ok=False,
+                    error=f"Correlato {kind} falhou: {exc}",
+                )
             if extra:
                 parts.append(extra)
     summary = f"{len(parts)} consulta(s) a partir de {primary.kind_label}. {len(derived)} correlato(s) derivado(s)."
@@ -175,9 +188,7 @@ def seeds_from_results(parts: list[ConsultResult]) -> list:
 def _derive(primary: ConsultResult) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     if primary.kind == "EMAIL":
-        local, _, domain = primary.query.partition("@")
-        if local:
-            out.append(("USERNAME", local))
+        _local, _, domain = primary.query.partition("@")
         if domain:
             out.append(("URL", domain))
     elif primary.kind == "USERNAME":
@@ -194,8 +205,6 @@ def _derive(primary: ConsultResult) -> list[tuple[str, str]]:
         for hit in primary.hits:
             if hit.kind == "socio" and hit.title and " " in hit.title:
                 out.append(("NAME", hit.title))
-    elif primary.kind == "PLATE":
-        out.append(("NAME", primary.query))
     elif primary.kind == "PHONE":
         digits = only_digits(primary.query)
         if digits:
@@ -236,7 +245,17 @@ def _consult_domain(raw: str, settings: Settings, *, live: bool) -> ConsultResul
         entity_type="ORG",
         identifiers=[SimpleNamespace(kind="NAME", value=host)],
     )
-    parsed = conn.collect(fake, SimpleNamespace())
+    try:
+        parsed = conn.collect(fake, SimpleNamespace())
+    except Exception as exc:  # noqa: BLE001
+        return ConsultResult(
+            kind="URL",
+            query=host,
+            title=host,
+            summary="crt.sh indisponível neste momento.",
+            facts=[("Domínio", host)],
+            notes=[str(exc)],
+        )
     hits = [ConsultHit(e.display_name, str((e.attrs or {}).get("issuer") or "certificado"), e.value, "host") for e in parsed.entities]
     return ConsultResult(
         kind="URL",
@@ -276,7 +295,16 @@ def _consult_web(raw: str, settings: Settings, *, live: bool) -> ConsultResult:
         entity_type="PERSON",
         identifiers=[],
     )
-    parsed = conn.collect(fake, SimpleNamespace())
+    try:
+        parsed = conn.collect(fake, SimpleNamespace())
+    except Exception as exc:  # noqa: BLE001
+        return ConsultResult(
+            kind="NAME",
+            query=text,
+            title=text,
+            summary="Busca web indisponível neste momento.",
+            notes=[str(exc)],
+        )
     hits = [ConsultHit(e.display_name, str((e.attrs or {}).get("snippet") or ""), e.value, "mencao") for e in parsed.entities]
     return ConsultResult(
         kind="NAME",

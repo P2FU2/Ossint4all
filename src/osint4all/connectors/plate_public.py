@@ -171,21 +171,67 @@ _DETRAN_PORTAL = {
 }
 
 _BRANDS = (
-    "Fiat", "Ford", "Volkswagen", "VW", "Chevrolet", "Honda", "Toyota", "Hyundai",
-    "Renault", "Jeep", "Nissan", "Peugeot", "Citroën", "Citroen", "Mitsubishi",
-    "Kia", "BMW", "Mercedes", "Audi", "Volvo", "Iveco", "Scania", "Yamaha",
-    "Suzuki", "Kawasaki", "Chery", "CAOA", "Caoa", "JAC", "BYD", "Ram",
+    "Fiat", "Ford", "Volkswagen", "VW", "Chevrolet", "Chevy", "GM", "Honda", "Toyota",
+    "Hyundai", "Renault", "Jeep", "Nissan", "Peugeot", "Citroën", "Citroen", "Mitsubishi",
+    "Kia", "BMW", "Mercedes", "Mercedes-Benz", "Audi", "Volvo", "Iveco", "Scania",
+    "Yamaha", "Suzuki", "Kawasaki", "Chery", "CAOA", "Caoa", "JAC", "BYD", "Ram",
+    "Land Rover", "Jaguar", "Porsche", "Mini", "Dodge", "Chrysler", "Subaru",
+    "Troller", "Agrale", "Shineray", "Haojue", "Dafra", "Kasinski",
 )
+_MODELS = (
+    "Gol", "Voyage", "Saveiro", "Fox", "Polo", "Virtus", "Golf", "Jetta", "Nivus",
+    "T-Cross", "Tcross", "Taos", "Amarok", "Kombi",
+    "Onix", "Prisma", "Cruze", "Tracker", "S10", "Spin", "Montana", "Cobalt", "Celta", "Corsa",
+    "Civic", "City", "Fit", "HR-V", "HRV", "WR-V", "WRV", "CR-V", "Civic",
+    "Corolla", "Yaris", "Hilux", "SW4", "Etios", "RAV4",
+    "HB20", "Creta", "Tucson", "i30", "IX35",
+    "Kwid", "Sandero", "Logan", "Duster", "Oroch", "Captur", "Stepway",
+    "Strada", "Toro", "Argo", "Mobi", "Uno", "Palio", "Siena", "Weekend", "Pulse", "Fastback", "Cronos", "Fiorino",
+    "Compass", "Renegade", "Commander", "Wrangler",
+    "Kicks", "Versa", "Frontier", "March", "Sentra",
+    "Ranger", "Ka", "EcoSport", "Territory", "Maverick", "Fusion",
+    "208", "2008", "3008", "Partner",
+    "C3", "C4", "Aircross",
+    "L200", "Outlander", "ASX", "Pajero",
+    "Sportage", "Cerato", "Sorento",
+    "Tiggo", "Arrizo",
+    "Dolphin", "Yuan", "Song", "Seal",
+    "Ranger", "S10",
+    "CG", "Biz", "Bros", "Factor", "Fazer", "Titan",
+)
+_COLORS = (
+    "branco", "preto", "prata", "cinza", "vermelho", "azul", "verde", "amarelo",
+    "marrom", "vinho", "dourado", "laranja", "bege", "grafite", "chumbo", "rosa",
+    "branco gelo", "preto fosco",
+)
+_BRAND_ALIASES = {
+    "vw": "Volkswagen",
+    "chevy": "Chevrolet",
+    "gm": "Chevrolet",
+    "mercedes-benz": "Mercedes-Benz",
+}
 
 _OWNER_RE = re.compile(
     r"(?:propriet[aá]rio(?:\(a\))?|em nome de|perten(?:ce|cente) a|de propriedade de)\s+"
     r"([A-ZÁÉÍÓÚÂÊÔÃÕ][A-Za-zÁÉÍÓÚÂÊÔÃÕáéíóúâêôãõç']+(?:\s+[A-ZÁÉÍÓÚÂÊÔÃÕ][A-Za-zÁÉÍÓÚÂÊÔÃÕáéíóúâêôãõç']+){1,5})",
     re.I,
 )
+_BRAND_ALT = "|".join(re.escape(b) for b in sorted(_BRANDS, key=len, reverse=True))
+_MODEL_ALT = "|".join(re.escape(m) for m in sorted(_MODELS, key=len, reverse=True))
 _VEHICLE_RE = re.compile(
-    rf"\b((?:{'|'.join(_BRANDS)})\s+[A-Za-z0-9][A-Za-z0-9\- ]{{1,24}}?)(?:\s+(?:ano\s+)?((?:19|20)\d{{2}}))?",
+    rf"\b({_BRAND_ALT})\s+({_MODEL_ALT})\b(?:\s*(1\.\d|2\.\d))?(?:\s+(?:ano\s+|/?)\s*((?:19|20)\d{{2}}))?",
     re.I,
 )
+_MODEL_RE = re.compile(
+    rf"\b({_MODEL_ALT})\b(?:\s*(1\.\d|2\.\d))?(?:\s+(?:ano\s+|/?)\s*((?:19|20)\d{{2}}))?",
+    re.I,
+)
+_FIELD_RE = re.compile(
+    r"\b(marca|modelo|ano(?:\s+modelo)?|cor|vers[aã]o)\s*[:\-]\s*([A-Za-z0-9ÁÉÍÓÚÂÊÔÃÕÇ][A-Za-z0-9ÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç.\-]{0,24})(?=\s+(?:marca|modelo|ano|cor|vers[aã]o|placa)\b|[.,;]|$|\s{2})",
+    re.I,
+)
+_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})(?:\s*/\s*((?:19|20)\d{2}))?\b")
+_COLOR_RE = re.compile(rf"\bcor\s*[:\-]?\s*({'|'.join(re.escape(c) for c in _COLORS)})\b|\b({'|'.join(re.escape(c) for c in _COLORS)})\b", re.I)
 _STOP_NAMES = {
     "sao paulo", "rio de janeiro", "minas gerais", "estado", "prefeitura",
     "detran", "senatran", "veiculo", "veículo", "motocicleta",
@@ -241,14 +287,85 @@ def extract_owner_mentions(text: str) -> list[str]:
 
 
 def extract_vehicle_mentions(text: str) -> list[str]:
-    found: list[str] = []
-    for match in _VEHICLE_RE.finditer(text or ""):
-        model = re.sub(r"\s+", " ", match.group(1)).strip(" .,;-")
-        year = match.group(2)
-        label = f"{model} {year}".strip() if year else model
-        if 3 < len(label) < 40 and label not in found:
-            found.append(label)
-    return found[:3]
+    card = extract_vehicle_card(text)
+    if card.get("label"):
+        return [card["label"]]
+    return []
+
+
+def extract_vehicle_card(text: str) -> dict[str, str]:
+    """Marca, modelo, ano e cor a partir de anúncio, leilão ou notícia."""
+    blob = re.sub(r"\s+", " ", text or "")
+    fields: dict[str, str] = {}
+    for match in _FIELD_RE.finditer(blob):
+        key = match.group(1).casefold()
+        value = match.group(2).strip(" .,;")
+        if key.startswith("marca"):
+            fields["marca"] = _canon_brand(value)
+        elif key.startswith("modelo"):
+            fields["modelo"] = value.title()
+        elif key.startswith("ano"):
+            year = _YEAR_RE.search(value)
+            if year:
+                fields["ano"] = year.group(1)
+        elif key.startswith("cor"):
+            fields["cor"] = value.casefold()
+        elif key.startswith("vers"):
+            fields["versao"] = value
+    brand_hit = _VEHICLE_RE.search(blob)
+    if brand_hit:
+        fields.setdefault("marca", _canon_brand(brand_hit.group(1)))
+        model = brand_hit.group(2)
+        engine = brand_hit.group(3)
+        fields.setdefault("modelo", (f"{model} {engine}".strip() if engine else model).title())
+        if brand_hit.group(4):
+            fields.setdefault("ano", brand_hit.group(4))
+    if "modelo" not in fields:
+        model_hit = _MODEL_RE.search(blob)
+        if model_hit:
+            model = model_hit.group(1)
+            engine = model_hit.group(2)
+            fields["modelo"] = (f"{model} {engine}".strip() if engine else model).title()
+            if model_hit.group(3):
+                fields.setdefault("ano", model_hit.group(3))
+    if "ano" not in fields:
+        year = _YEAR_RE.search(blob)
+        if year:
+            fields["ano"] = year.group(1)
+    if "cor" not in fields:
+        color = _COLOR_RE.search(blob)
+        if color:
+            fields["cor"] = (color.group(1) or color.group(2) or "").casefold()
+    bits = [fields.get("marca"), fields.get("modelo"), fields.get("ano"), fields.get("cor")]
+    label = " ".join(bit for bit in bits if bit)
+    if label:
+        fields["label"] = label
+    return fields
+
+
+def _canon_brand(value: str) -> str:
+    raw = (value or "").strip()
+    alias = _BRAND_ALIASES.get(raw.casefold())
+    if alias:
+        return alias
+    for brand in _BRANDS:
+        if brand.casefold() == raw.casefold():
+            return brand
+    return raw.title()
+
+
+def merge_vehicle_cards(cards: list[dict[str, str]]) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for card in cards:
+        for key, value in card.items():
+            if key == "label" or not value:
+                continue
+            merged.setdefault(key, value)
+    bits = [merged.get("marca"), merged.get("modelo"), merged.get("ano"), merged.get("cor")]
+    label = " ".join(bit for bit in bits if bit)
+    if label:
+        merged["label"] = label
+    return merged
 
 
 def parse_plate_enrichment(

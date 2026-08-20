@@ -1,0 +1,35 @@
+<header class="history-head">
+  <div>
+    <p class="eyebrow">log</p>
+    <h2>histórico</h2>
+  </div>
+  {% if history %}
+  <form method="post" action="/app/historico/limpar" hx-post="/app/historico/limpar" hx-target="#search-history" hx-swap="outerHTML" hx-confirm="Apagar todo o histórico desta conta?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="btn ghost history-clear" type="submit" data-tip="Remove só o seu histórico de consultas">limpar</button>
+  </form>
+  {% endif %}
+</header>
+{% if history %}
+<ul class="history-list">
+  {% for item in history %}
+  <li>
+    <form class="history-replay" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="q" value="{{ item.query }}" />
+      <input type="hidden" name="modo" value="{{ item.mode }}" />
+      <button type="submit" class="history-item {% if not item.ok %}is-fail{% endif %}" data-tip="Repete esta consulta">
+        <span class="history-meta">
+          <span class="history-kind">{{ item.kind_label }}</span>
+          {% if item.when %}<time>{{ item.when }}</time>{% endif %}
+        </span>
+        <strong>{{ item.title }}</strong>
+        {% if item.summary %}<span class="muted">{{ item.summary }}</span>{% endif %}
+      </button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="history-empty">nenhuma consulta nesta sessão ainda. o log fica só na sua conta.</p>
+{% endif %}

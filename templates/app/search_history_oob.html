@@ -1,0 +1,5 @@
+{% if request.headers.get("HX-Request") %}
+<aside id="search-history" class="search-history" hx-swap-oob="true">
+  {% include "app/search_history_inner.html" %}
+</aside>
+{% endif %}

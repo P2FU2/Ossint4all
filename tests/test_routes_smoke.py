@@ -28,11 +28,42 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "scan_target" in logged.text.lower()
 
     token = _csrf(logged.text)
+    mass = client.post("/app/consultar", data={"csrf_token": token, "q": "ABC1D23", "modo": "massa"})
+    assert mass.status_code == 200
+    assert "Busca em massa" in mass.text
+    assert "ABC1D23" in mass.text
+    assert "result-banner error" not in mass.text
+
+    token = _csrf(logged.text)
     plate = client.post("/app/consultar", data={"csrf_token": token, "q": "ABC1D23", "modo": "PLATE"})
     assert plate.status_code == 200
     assert "ABC1D23" in plate.text
     assert "Adicionar ao caso" not in plate.text
     assert "Novo caso" in plate.text
+    assert 'target="_blank"' not in plate.text
+    assert "inspect-open" in plate.text
+    assert "inspect-modal" in plate.text
+    assert "search-history" in plate.text
+    assert "histórico" in plate.text.lower()
+    assert 'class="history-item' in plate.text
+
+    token = _csrf(plate.text)
+    cleared = client.post("/app/historico/limpar", data={"csrf_token": token}, follow_redirects=True)
+    assert cleared.status_code == 200
+    assert "nenhuma consulta" in cleared.text.lower()
+    assert 'class="history-item' not in cleared.text
+
+    token = _csrf(cleared.text)
+    social = client.post("/app/consultar", data={"csrf_token": token, "q": "@ana", "modo": "USERNAME"})
+    assert social.status_code == 200
+    assert "ponto de cadeia" in social.text.lower()
+
+    token = _csrf(social.text)
+    email = client.post("/app/consultar", data={"csrf_token": token, "q": "ana@exemplo.com", "modo": "EMAIL"})
+    assert email.status_code == 200
+    assert "consultas ligadas" in email.text.lower()
+    assert "@ana" in email.text
+    assert "ana@exemplo.com" in email.text
 
     tools = client.get("/app/ferramentas")
     assert tools.status_code == 200

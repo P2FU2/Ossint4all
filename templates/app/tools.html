@@ -49,7 +49,7 @@
     <p class="lede">Abra ou escolha um caso para anexar o PDF. <a href="/app/casos">Casos</a></p>
     {% endif %}
     {% else %}
-    <form class="consult-form" method="post" action="/app/ferramentas/executar" hx-post="/app/ferramentas/executar" hx-target="#tool-result" hx-swap="innerHTML" hx-indicator="#consult-wait">
+    <form class="consult-form" method="post" action="/app/ferramentas/executar" hx-post="/app/ferramentas/executar" hx-target="#tool-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-timeout="45000">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="tool" value="{{ selected.id }}" />
       <div class="consult-bar">

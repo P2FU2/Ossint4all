@@ -1,6 +1,8 @@
 from osint4all.connectors.socio_search import extract_cnpjs, parse_socio_hits
 from osint4all.connectors.plate_public import (
     extract_owner_mentions,
+    extract_vehicle_card,
+    extract_vehicle_mentions,
     parse_plate_enrichment,
     uf_from_plate_series,
 )
@@ -67,6 +69,18 @@ def test_crtsh_names() -> None:
     names = {e.display_name for e in result.entities}
     assert "exemplo.gov.br" in names
     assert result.evidence
+
+
+def test_vehicle_card_from_listing() -> None:
+    card = extract_vehicle_card("Leilão: VW GOL 1.0 2018 prata placa ABC1D23")
+    assert card.get("marca") == "Volkswagen"
+    assert "Gol" in (card.get("modelo") or "")
+    assert card.get("ano") == "2018"
+    assert extract_vehicle_mentions("Honda Civic 2018 em nome de Ana") == ["Honda Civic 2018"]
+    labeled = extract_vehicle_card("Marca: Fiat Modelo: Strada Ano: 2021 Cor: branco")
+    assert labeled["marca"] == "Fiat"
+    assert labeled["modelo"] == "Strada"
+    assert labeled["ano"] == "2021"
 
 
 def test_plate_enrichment_and_owner() -> None:
