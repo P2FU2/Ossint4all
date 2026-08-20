@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, desc, func, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from osint4all.catalog.framework import load_framework_tree
 from osint4all.documents.metadata import ingest_local_file
@@ -60,13 +60,23 @@ from osint4all.db.repository import (
 )
 from osint4all.connectors.base import FoundEntity
 from osint4all.graph.expand import process_pending_jobs
-from osint4all.graph.resolve import upsert_found_entity
+from osint4all.graph.resolve import apply_result, upsert_found_entity
 from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.media import collect_target_media, fields_from_identifiers
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
-from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results, tool_id_for_kind
+from osint4all.tools_suite import (
+    MassResult,
+    get_tool,
+    graph_tools_plan,
+    list_tools,
+    outcome_to_connector,
+    run_embedded_tool,
+    run_mass,
+    seeds_from_results,
+    tool_id_for_kind,
+)
 from osint4all.identifiers import collect_form_seeds, parse_seed
 from osint4all.validators import looks_like_plate, validate_cnpj
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
@@ -114,10 +124,10 @@ def _host_cards_for(session: Session, investigation_id: str, entity: Entity) -> 
     return cards_for_entity(session, investigation_id, entity)
 
 
-def _case_events(session: Session, investigation_id: str, entity_id: str | None = None):
+def _case_events(session: Session, investigation_id: str, entity_id: str | None = None, limit: int = 40):
     from osint4all.quality.timeline import list_events
 
-    return list_events(session, investigation_id, entity_id=entity_id, limit=40)
+    return list_events(session, investigation_id, entity_id=entity_id, limit=limit)
 
 
 def _case_tasks(session: Session, investigation_id: str):
@@ -937,6 +947,7 @@ def graph_page(
         return RedirectResponse("/app", status_code=303)
     request.session["current_case_id"] = inv.id
     notes = list_notes(session, inv.id)
+    dossier = case_identifiers(session, inv.id)
     ctx = template_context(request, user)
     ctx.update(
         {
@@ -954,12 +965,16 @@ def graph_page(
             "board_note_flat": notes,
             "board_notes": note_tree(notes),
             "board_entities": session.scalars(
-                select(Entity).where(Entity.investigation_id == inv.id).order_by(Entity.display_name)
+                select(Entity)
+                .options(load_only(Entity.id, Entity.display_name))
+                .where(Entity.investigation_id == inv.id)
+                .order_by(Entity.display_name)
             ).all(),
             "rel_types": EDGE_REL_TYPES,
-            "dossier": case_identifiers(session, inv.id),
+            "dossier": dossier,
+            "graph_tools": graph_tools_plan(dossier),
             "target": case_target_fields(session, inv.id),
-            "case_events": _case_events(session, inv.id),
+            "case_events": _case_events(session, inv.id, limit=20),
             "case_tasks": _case_tasks(session, inv.id),
             "case_changes": _case_changes(session, inv.id),
             "case_digest": _case_digest(session, inv.id),
@@ -968,9 +983,7 @@ def graph_page(
         }
     )
     from osint4all.engines.playbooks import list_items, progress
-    from osint4all.engines.verification import quality_score
 
-    ctx["quality"] = quality_score(session, inv)
     ctx["playbook_progress"] = progress(list_items(session, inv.id, inv.playbook_key))
     return templates.TemplateResponse(request, "app/graph.html", ctx)
 
@@ -1668,6 +1681,85 @@ def add_company(
         return _json_case(session, investigation_id, ok=True, queued=True)
     _set_flash(request, "ok", "Empresa ligada ao alvo. QSA e sócios entram na fila.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/buscar-ferramentas")
+def search_graph_tools(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    tools: list[str] = Form(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    selected = [str(item).strip().lower() for item in tools if str(item).strip()]
+    plan = {item["id"]: item for item in graph_tools_plan(case_identifiers(session, inv.id))}
+    ran = 0
+    added = 0
+    errors: list[str] = []
+    for tool_id in selected:
+        item = plan.get(tool_id)
+        if not item or not item.get("ready"):
+            continue
+        for raw in item["values"]:
+            try:
+                outcome = run_embedded_tool(tool_id, raw)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{item['name']}: {exc}")
+                continue
+            seed = parse_seed(raw)
+            origin = find_entity_by_key(session, inv.id, seed.canonical_key) if seed else None
+            if origin is None:
+                origin = session.scalar(
+                    select(Entity).where(Entity.investigation_id == inv.id, Entity.is_seed.is_(True))
+                )
+            if origin is None:
+                errors.append(f"{item['name']}: sem nó de origem no grafo.")
+                continue
+            result = outcome_to_connector(outcome, origin.canonical_key)
+            created = apply_result(
+                session,
+                inv,
+                origin,
+                result,
+                connector=f"tool:{tool_id}",
+                depth=origin.depth or 0,
+                enqueue_children=False,
+                max_attempts=get_settings().job_max_attempts,
+                fill_only=True,
+                consolidate=False,
+            )
+            ran += 1
+            added += len(created)
+            if not getattr(outcome, "ok", True) and getattr(outcome, "error", None):
+                errors.append(f"{item['name']}: {outcome.error}")
+    if ran:
+        consolidate_identities(session, inv.id)
+    write_audit(
+        session,
+        "investigation.graph_tools",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"tools": selected, "ran": ran, "added": added},
+    )
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, inv.id, ok=True, ran=ran, added=added)
+    if ran:
+        extra = f" {errors[0]}" if errors else ""
+        _set_flash(
+            request,
+            "ok",
+            f"Busca complementar: {ran} consulta(s), {added} info(s) nova(s) no grafo (nada foi substituído).{extra}",
+        )
+    else:
+        _set_flash(request, "error", errors[0] if errors else "Marque ao menos uma ferramenta com dado já no grafo.")
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
 @router.post("/app/casos/{investigation_id}/explodir")

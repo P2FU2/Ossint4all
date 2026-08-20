@@ -32,6 +32,7 @@ def upsert_found_entity(
     *,
     depth: int,
     is_seed: bool = False,
+    fill_only: bool = False,
 ) -> Entity:
     key = found_canonical_key(found)
     existing = find_entity_by_key(session, investigation.id, key)
@@ -63,13 +64,17 @@ def upsert_found_entity(
         existing.confidence = max(existing.confidence, found.confidence)
         if depth < (existing.depth or 0):
             existing.depth = depth
-        if found.display_name and (
+        if found.display_name and not fill_only and (
             existing.display_name == existing.canonical_key or len(found.display_name) > len(existing.display_name)
         ):
             existing.display_name = found.display_name
         prev_attrs = dict(existing.attrs or {})
         attrs = dict(prev_attrs)
-        attrs.update({k: v for k, v in found.attrs.items() if v not in (None, "")})
+        incoming = {k: v for k, v in found.attrs.items() if v not in (None, "")}
+        if fill_only:
+            attrs.update({k: v for k, v in incoming.items() if not prev_attrs.get(k)})
+        else:
+            attrs.update(incoming)
         attrs["grau"] = existing.depth
         existing.attrs = attrs
         add_identifier(existing, found.kind, found.value, key)
@@ -167,6 +172,8 @@ def apply_result(
     depth: int,
     enqueue_children: bool,
     max_attempts: int,
+    fill_only: bool = False,
+    consolidate: bool = True,
 ) -> list[Entity]:
     created: list[Entity] = []
     ref_map: dict[str, Entity] = {origin.canonical_key: origin}
@@ -191,7 +198,7 @@ def apply_result(
             if found.kind in {"CPF", "EMAIL", "PHONE", "USERNAME", "BIRTHDATE"}:
                 add_identifier(target, found.kind, found.value, canonical_key(found.kind, found.value))
             continue
-        entity = upsert_found_entity(session, investigation, found, depth=depth + 1)
+        entity = upsert_found_entity(session, investigation, found, depth=depth + 1, fill_only=fill_only)
         ref_map[found_canonical_key(found)] = entity
         ref_map[canonical_key(found.kind, found.value)] = entity
         created.append(entity)
@@ -261,7 +268,8 @@ def apply_result(
         )
         _index_host_payload(session, investigation, ev_target, connector, ev.payload)
 
-    consolidate_identities(session, investigation.id)
+    if consolidate:
+        consolidate_identities(session, investigation.id)
     return created
 
 

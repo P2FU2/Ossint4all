@@ -1,6 +1,14 @@
-from osint4all.consult import ConsultResult, run_consult
+from osint4all.consult import ConsultGraph, ConsultHit, ConsultResult, GraphEdge, GraphNode, run_consult
 from osint4all.graph.seed import add_seed_entities, create_investigation
-from osint4all.tools_suite import get_tool, list_tools, run_mass, seeds_from_results, tool_id_for_kind
+from osint4all.tools_suite import (
+    get_tool,
+    graph_tools_plan,
+    list_tools,
+    outcome_to_connector,
+    run_mass,
+    seeds_from_results,
+    tool_id_for_kind,
+)
 
 
 def test_suite_search_and_internal_urls() -> None:
@@ -76,6 +84,51 @@ def test_assign_seeds_to_existing_case(settings, db) -> None:
     db.refresh(inv)
     assert inv.title == "Caso editado"
     assert {e.entity_type for e in inv.entities} == {"VEHICLE", "PERSON"}
+
+
+def test_graph_tools_plan_matches_dossier() -> None:
+    plan = {item["id"]: item for item in graph_tools_plan([
+        {"kind": "PLATE", "value": "ABC1D23"},
+        {"kind": "EMAIL", "value": "ana@exemplo.com"},
+    ])}
+    assert plan["plate"]["ready"] is True
+    assert plan["plate"]["checked"] is True
+    assert "ABC1D23" in plan["plate"]["values"]
+    assert plan["email"]["ready"] is True
+    assert plan["name"]["checked"] is False
+    assert plan["cnpj"]["ready"] is False
+    assert plan["username"]["ready"] is False
+    assert "pdf" not in plan
+
+
+def test_outcome_to_connector_adds_without_name_dump() -> None:
+    result = outcome_to_connector(
+        ConsultResult(
+            kind="EMAIL",
+            query="ana@exemplo.com",
+            title="ana@exemplo.com",
+            summary="ok",
+            hits=[
+                ConsultHit("Perfil público", "github", "https://github.com/ana", "host"),
+                ConsultHit("Empresa solta", "menção", None, "mencao"),
+            ],
+            graph=ConsultGraph(
+                nodes=[
+                    GraphNode("cnpj-33000167000101", "Alvo Ltda", "org", "33.000.167/0001-01"),
+                    GraphNode("p-0-ana", "Ana Silva", "person", "sócia"),
+                ],
+                edges=[GraphEdge("p-0-ana", "cnpj-33000167000101", "sócia")],
+            ),
+        ),
+        "email:ana@exemplo.com",
+    )
+    kinds = {found.kind for found in result.entities}
+    assert "EMAIL" in kinds
+    assert "URL" in kinds
+    assert "CNPJ" in kinds
+    assert "NAME" in kinds
+    assert not any(found.display_name == "Empresa solta" for found in result.entities)
+    assert any(edge.rel_type == "SOCIO" for edge in result.edges)
 
 
 def test_consult_rejects_empty_mass() -> None:

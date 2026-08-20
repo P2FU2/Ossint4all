@@ -176,7 +176,7 @@
       idealEdgeLength: () => edgeLen,
       edgeElasticity: () => 0.28,
       gravity: 0.08,
-      numIter: n > 80 ? 1100 : 1600,
+      numIter: n > 200 ? 400 : n > 80 ? 700 : 1100,
       componentSpacing: 200,
       nestingFactor: 1.2,
     };
@@ -184,10 +184,11 @@
 
   function unoverlapNodes() {
     const nodes = cy.nodes(":visible").toArray();
-    if (nodes.length < 2) return false;
+    if (nodes.length < 2 || nodes.length > 140) return false;
     const pad = 22;
     let moved = false;
-    for (let iter = 0; iter < 14; iter += 1) {
+    const maxIter = nodes.length > 60 ? 6 : 14;
+    for (let iter = 0; iter < maxIter; iter += 1) {
       let hit = false;
       for (let i = 0; i < nodes.length; i += 1) {
         for (let j = i + 1; j < nodes.length; j += 1) {
@@ -508,6 +509,39 @@
     else if (view !== "mapa") applyLayout(view);
   }
 
+  function patchElements(data) {
+    const nextNodes = new Set((data.nodes || []).map((item) => item.id));
+    const nextEdges = new Set((data.edges || []).map((item) => item.id));
+    const gone = cy.elements().filter((el) => (el.isNode() ? !nextNodes.has(el.id()) : !nextEdges.has(el.id())));
+    if (gone.length) gone.remove();
+    const haveNodes = new Set(cy.nodes().map((node) => node.id()));
+    const haveEdges = new Set(cy.edges().map((edge) => edge.id()));
+    const fresh = {
+      nodes: (data.nodes || []).filter((item) => !haveNodes.has(item.id)),
+      edges: (data.edges || []).filter((item) => !haveEdges.has(item.id)),
+    };
+    if (fresh.nodes.length || fresh.edges.length) cy.add(toElements(fresh));
+    (data.nodes || []).forEach((item) => {
+      if (!haveNodes.has(item.id)) return;
+      const el = cy.getElementById(item.id);
+      if (!el.nonempty()) return;
+      const label = cardLabel(item);
+      if (el.data("label") !== label || el.data("status") !== (item.status || "confirmed")) {
+        el.data({
+          name: item.label,
+          label,
+          status: item.status || "confirmed",
+          ids: item.ids || [],
+          attrs: item.attrs || {},
+          depth: item.depth || 0,
+        });
+      }
+    });
+    return { added: fresh.nodes.length + fresh.edges.length, removed: gone.length };
+  }
+
+  let lastLoadAt = 0;
+
   async function load() {
     const live = capturePositions();
     const camera = snapshotView();
@@ -516,7 +550,13 @@
     if (!res.ok) throw new Error("grafo " + res.status);
     const next = await res.json();
     if (!next || typeof next !== "object") throw new Error("grafo inválido");
+    if (hadNodes && next.rev && payload.rev && next.rev === payload.rev) {
+      lastLoadAt = Date.now();
+      return;
+    }
+    const known = new Set([...Object.keys(live), ...cy.nodes().map((node) => node.id())]);
     payload = next;
+    rebuildNodeIndex();
     if (yearInput && (payload.years || []).length && !yearInput.dataset.ready) {
       yearInput.min = String(payload.years[0]);
       yearInput.max = String(payload.years[payload.years.length - 1]);
@@ -524,33 +564,42 @@
       if (yearOut) yearOut.textContent = yearInput.value;
       yearInput.dataset.ready = "1";
     }
-    cy.elements().remove();
-    cy.add(toElements(payload));
+    if (hadNodes) patchElements(payload);
+    else {
+      cy.elements().remove();
+      cy.add(toElements(payload));
+    }
     const serverNodes = savedNodeMap();
     const merged = { ...serverNodes, ...live };
     const applied = applySavedPositions(merged);
-    placeNewNodes(new Set(Object.keys(merged)));
-    if (unoverlapNodes()) payload.layout = { ...(payload.layout || {}), nodes: capturePositions() };
+    placeNewNodes(new Set([...known, ...Object.keys(merged)]));
     layoutLocked = applied > 0 || Object.keys(serverNodes).length > 0;
+    if (!layoutLocked && unoverlapNodes()) payload.layout = { ...(payload.layout || {}), nodes: capturePositions() };
     payload.layout = { ...(payload.layout || {}), nodes: { ...merged, ...capturePositions() } };
     const active = document.querySelector(".view-tab.is-active");
     const nextView = (!hadNodes && payload.layout.view) || (active && active.dataset.view) || "rede";
-    setView(nextView);
     if (hadNodes) {
+      applyFilters();
       applySnapshot(camera);
       laidOnce = true;
-    } else if (layoutLocked && nextView !== "arvore") {
-      const layout = payload.layout || {};
-      if (layout.zoom) {
-        applySnapshot({ kind: "cy", zoom: layout.zoom, x: (layout.pan || {}).x || 0, y: (layout.pan || {}).y || 0 });
-      } else {
-        cy.fit(undefined, 48);
+      if (nextView === "split") renderSplit();
+      if (nextView === "mapa") renderMap();
+    } else {
+      setView(nextView);
+      if (layoutLocked && nextView !== "arvore") {
+        const layout = payload.layout || {};
+        if (layout.zoom) {
+          applySnapshot({ kind: "cy", zoom: layout.zoom, x: (layout.pan || {}).x || 0, y: (layout.pan || {}).y || 0 });
+        } else {
+          cy.fit(undefined, 48);
+        }
+        laidOnce = true;
+      } else if (!layoutLocked) {
+        scheduleSaveLayout();
       }
-      laidOnce = true;
-    } else if (!layoutLocked) {
-      scheduleSaveLayout();
+      applyFilters();
     }
-    applyFilters();
+    lastLoadAt = Date.now();
   }
 
   const TYPE_LABEL = {
@@ -603,8 +652,16 @@
     return wrap;
   }
 
+  let nodeIndex = new Map();
+
+  function rebuildNodeIndex() {
+    nodeIndex = new Map((payload.nodes || []).map((item) => [item.id, item]));
+  }
+
   function nodeRecord(node) {
-    return (payload.nodes || []).find((item) => item.id === node.id()) || {};
+    const id = typeof node === "string" ? node : node.id();
+    if (nodeIndex.has(id)) return nodeIndex.get(id) || {};
+    return (payload.nodes || []).find((item) => item.id === id) || {};
   }
 
   function fillBalloon(el, full) {
@@ -1122,14 +1179,14 @@
           info = applyPulse(jobs);
         }
       }
-      if (info.changed && !selectMode) {
+      if (info.changed && !selectMode && Date.now() - lastLoadAt > 900) {
         try {
           await load();
         } catch (_) {
           /* próximo ciclo tenta de novo */
         }
       }
-      schedulePoll(info.queue ? 1600 : 4000);
+      schedulePoll(info.queue ? 2200 : 5000);
     } catch (_) {
       schedulePoll(5000);
     }
@@ -1290,6 +1347,17 @@
     });
     payload.nodes = (payload.nodes || []).filter((node) => !gone.has(node.id));
     payload.edges = (payload.edges || []).filter((edge) => !gone.has(edge.source) && !gone.has(edge.target));
+    rebuildNodeIndex();
+  }
+
+  function removeEdgesLocal(ids) {
+    const gone = new Set((ids || []).filter(Boolean));
+    if (!gone.size) return;
+    gone.forEach((id) => {
+      const el = cy.getElementById(id);
+      if (el && el.length) el.remove();
+    });
+    payload.edges = (payload.edges || []).filter((edge) => !gone.has(edge.id));
   }
 
   async function postBoard(url, fields, status) {
@@ -1302,9 +1370,11 @@
     const loading = (status && status.loading) || "Gravando no quadro…";
     const done = (status && status.done) || "Quadro atualizado.";
     const removeIds = (status && status.removeIds) || [];
+    const removeEdgeIds = (status && status.removeEdgeIds) || [];
     const skipReload = !!(status && status.skipReload);
     mutating = true;
     if (removeIds.length) removeNodesLocal(removeIds);
+    if (removeEdgeIds.length) removeEdgesLocal(removeEdgeIds);
     if (window.setActionStatus) window.setActionStatus("loading", loading);
     try {
       const res = await fetch(url, {
@@ -1652,6 +1722,8 @@
           postBoard(root.dataset.edgeBase + edge.id() + "/apagar", {}, {
             loading: "Removendo…",
             done: "Ligação removida.",
+            skipReload: true,
+            removeEdgeIds: [edge.id()],
           });
         }
       }));
@@ -1742,6 +1814,16 @@
       postBoard(form.action, {}, {
         loading: exploding ? "Rodando QSA…" : "Rodando fila…",
         done: exploding ? "QSA na fila — o grafo atualiza sozinho." : "Lote na fila — o grafo atualiza sozinho.",
+      });
+    });
+  });
+  document.querySelectorAll('form[action*="/buscar-ferramentas"]').forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const tools = [...form.querySelectorAll('input[name="tools"]:checked')].map((input) => input.value);
+      postBoard(form.action, { tools }, {
+        loading: "Buscando com as ferramentas do grafo…",
+        done: "Infos acrescentadas — o grafo não substituiu o que já existia.",
       });
     });
   });

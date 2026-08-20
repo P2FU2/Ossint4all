@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=27" defer></script>
+<script src="/static/graph.js?v=29" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -19,10 +19,6 @@
     <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>
     <span class="kpi" data-tip="Relações já confirmadas (sócio, menção, proprietário…)">{{ edge_count }} vínculos</span>
     <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote.">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
-    <form method="post" action="/app/casos/{{ inv.id }}/explodir" data-busy="Explodindo QSA…">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn primary" type="submit" data-busy="Explodindo QSA…" data-tip="Expande só nós ativos ligados ao alvo. Homônimo e empresa solta saem do mapa.">Explodir QSA</button>
-    </form>
     <form method="post" action="/app/casos/{{ inv.id }}/processar" data-busy="Processando fila…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn" type="submit" data-busy="Processando fila…" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
@@ -90,8 +86,27 @@
       </div>
     </details>
     <details class="more-menu">
-      <summary class="btn" data-tip="Placa, PDF, monitor e exclusão">Mais</summary>
+      <summary class="btn" data-tip="Explodir QSA, buscar com ferramentas, placa, PDF e exclusão">Mais</summary>
       <div class="more-panel">
+        <form method="post" action="/app/casos/{{ inv.id }}/explodir" data-busy="Explodindo QSA…">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn" type="submit" data-busy="Explodindo QSA…" data-tip="Expande só nós ativos ligados ao alvo. Homônimo e empresa solta saem do mapa.">Explodir QSA</button>
+        </form>
+        <form class="tool-pick" method="post" action="/app/casos/{{ inv.id }}/buscar-ferramentas" data-busy="Buscando com as ferramentas do grafo…">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <p class="section-kicker">buscar com o grafo</p>
+          <p class="muted">Roda as ferramentas nos identificadores já no mapa. O que vier entra sem substituir o que existe — você liga os nós depois.</p>
+          {% for tool in graph_tools %}
+          <label class="{% if not tool.ready %}is-off{% endif %}">
+            <input type="checkbox" name="tools" value="{{ tool.id }}" {% if tool.checked %}checked{% endif %} {% if not tool.ready %}disabled{% endif %} />
+            <span>
+              <strong>{{ tool.name }}</strong>
+              <small>{{ tool.hint }}</small>
+            </span>
+          </label>
+          {% endfor %}
+          <button class="btn primary" type="submit" data-tip="Consulta só o que já está no grafo e acrescenta o resultado.">Buscar e acrescentar</button>
+        </form>
         <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/placa">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input name="seed_plate" placeholder="Placa" required data-tip="ABC1D23. Sem dono no DETRAN." />
@@ -127,32 +142,32 @@
 </header>
 <div class="graph-panel">
 <div class="graph-toolbar">
-  <div class="view-tabs" role="tablist">
-    <button type="button" class="btn view-tab is-active" data-view="rede" data-tip="Layout de rede: quem se liga a quem">Rede</button>
-    <button type="button" class="btn view-tab" data-view="arvore" data-tip="Árvore a partir das sementes">Árvore</button>
-    <button type="button" class="btn view-tab" data-view="split" data-tip="Grafo + lista de empresas">Split</button>
-    <button type="button" class="btn view-tab" data-view="mapa" data-tip="Grid geográfico das empresas — mesmo visual do painel">Mapa</button>
+  <div class="view-tabs track-group" role="tablist">
+    <button type="button" class="view-tab track-item is-active" data-view="rede" data-tip="Layout de rede: quem se liga a quem">Rede</button>
+    <button type="button" class="view-tab track-item" data-view="arvore" data-tip="Árvore a partir das sementes">Árvore</button>
+    <button type="button" class="view-tab track-item" data-view="split" data-tip="Grafo + lista de empresas">Split</button>
+    <button type="button" class="view-tab track-item" data-view="mapa" data-tip="Grid geográfico das empresas — mesmo visual do painel">Mapa</button>
   </div>
   <div class="graph-filters" id="graph-filters">
-    <div class="filter-group" role="group" aria-label="Tipo">
-      <button type="button" class="chip is-on" data-filter-type="all" data-tip="Mostra todos os tipos">Todos</button>
-      <button type="button" class="chip" data-filter-type="PERSON" data-tip="Só pessoas, no grau marcado">Pessoas</button>
-      <button type="button" class="chip" data-filter-type="ORG" data-tip="Só empresas, no grau marcado">Empresas</button>
+    <div class="filter-group track-group" role="group" aria-label="Tipo">
+      <button type="button" class="chip track-item is-on" data-filter-type="all" data-tip="Mostra todos os tipos">Todos</button>
+      <button type="button" class="chip track-item" data-filter-type="PERSON" data-tip="Só pessoas, no grau marcado">Pessoas</button>
+      <button type="button" class="chip track-item" data-filter-type="ORG" data-tip="Só empresas, no grau marcado">Empresas</button>
     </div>
-    <div class="filter-group" role="group" aria-label="Grau até o alvo">
-      <span class="filter-kicker">Grau</span>
-      <label class="chip"><input type="checkbox" data-filter-degree="0" checked /> Alvo</label>
-      <label class="chip"><input type="checkbox" data-filter-degree="1" checked /> 1º</label>
-      <label class="chip"><input type="checkbox" data-filter-degree="2" checked /> 2º</label>
-      <label class="chip"><input type="checkbox" data-filter-degree="3" checked /> 3º</label>
-      <label class="chip"><input type="checkbox" data-filter-degree="4" checked /> 4º</label>
+    <div class="filter-group track-group" role="group" aria-label="Grau até o alvo">
+      <span class="track-kicker">Grau</span>
+      <label class="chip track-item"><input class="sr-only" type="checkbox" data-filter-degree="0" checked /> Alvo</label>
+      <label class="chip track-item"><input class="sr-only" type="checkbox" data-filter-degree="1" checked /> 1º</label>
+      <label class="chip track-item"><input class="sr-only" type="checkbox" data-filter-degree="2" checked /> 2º</label>
+      <label class="chip track-item"><input class="sr-only" type="checkbox" data-filter-degree="3" checked /> 3º</label>
+      <label class="chip track-item"><input class="sr-only" type="checkbox" data-filter-degree="4" checked /> 4º</label>
     </div>
   </div>
-    <label class="graph-search">
+    <label class="graph-search track-shell" data-tip="Filtra pelo nome do nó">
       <span class="sr-only">Buscar</span>
-      <input id="graph-search" type="search" placeholder="nome, CNPJ, placa…" data-tip="Filtra pelo nome do nó" />
+      <input id="graph-search" type="search" placeholder="nome, CNPJ, placa…" />
     </label>
-    <label class="graph-search year-slider" data-tip="Mostra só relações com ano até este ponto. Sem ano, a aresta permanece.">
+    <label class="year-slider track-shell" data-tip="Mostra só relações com ano até este ponto. Sem ano, a aresta permanece.">
       <span>Ano</span>
       <input id="graph-year" type="range" min="2010" max="2026" value="2026" />
       <output id="graph-year-out">2026</output>

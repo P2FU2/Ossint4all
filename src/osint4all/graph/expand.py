@@ -6,7 +6,7 @@ from osint4all.config import Settings, get_settings
 from osint4all.connectors.base import Connector, ExpandContext
 from osint4all.connectors.registry import build_connectors
 from osint4all.db.models import Entity, ExpansionJob, Investigation
-from osint4all.db.repository import claim_next_job, utcnow
+from osint4all.db.repository import claim_next_job, consolidate_identities, utcnow
 from osint4all.db.session import session_scope
 from osint4all.exceptions import SkippedDisabled
 from osint4all.graph.resolve import apply_result
@@ -114,8 +114,11 @@ class ExpansionEngine:
                 depth=depth,
                 enqueue_children=True,
                 max_attempts=self.settings.job_max_attempts,
+                consolidate=False,
             )
             applied += 1
+        if applied:
+            consolidate_identities(session, investigation.id)
         attrs = dict(entity.attrs or {})
         if "probe_kinds" in attrs:
             attrs.pop("probe_kinds", None)

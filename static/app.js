@@ -112,6 +112,7 @@ function busyLabel(form) {
   const action = formAction(form);
   if (action.includes("/nova") || action.includes("/grafo")) return "Criando caso…";
   if (action.includes("/explodir")) return "Explodindo QSA…";
+  if (action.includes("/buscar-ferramentas")) return "Buscando com as ferramentas do grafo…";
   if (action.includes("/processar")) return "Processando fila…";
   if (action.includes("/expandir")) return "Expandindo nó…";
   if (action.includes("/consultar")) return "Consultando…";

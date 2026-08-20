@@ -115,6 +115,8 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Editar" in created.text
     assert "Buscar" in created.text
     assert "Explodir QSA" in created.text
+    assert "Buscar e acrescentar" in created.text
+    assert "buscar-ferramentas" in created.text
     assert "canvas-tools" in created.text
     assert "ct-dots" in created.text
 
@@ -137,6 +139,15 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "alvo@exemplo.com" in edited.text or "já no grafo" in edited.text.lower()
 
     token = _csrf(edited.text)
+    tools_run = client.post(
+        f"/app/casos/{created.url.path.split('/')[3]}/buscar-ferramentas",
+        data={"csrf_token": token, "tools": "plate"},
+        follow_redirects=True,
+    )
+    assert tools_run.status_code == 200
+    assert "complementar" in tools_run.text.lower() or "acrescent" in tools_run.text.lower() or "Caso editado" in tools_run.text
+
+    token = _csrf(tools_run.text)
     assigned = client.post(
         "/app/consultar/atribuir",
         data={

@@ -9,8 +9,9 @@ from typing import Any
 from osint4all.config import Settings, get_settings
 from osint4all.connectors.crtsh import CrtshConnector, _DOMAIN_RE
 from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
+from osint4all.connectors.base import ConnectorResult, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.consult import ConsultHit, ConsultResult, run_consult
-from osint4all.identifiers import seeds_from_kind_values
+from osint4all.identifiers import parse_seed, seeds_from_kind_values
 from osint4all.security import only_digits
 
 
@@ -112,6 +113,31 @@ class MassResult:
         return "Busca em massa"
 
 
+TOOL_GRAPH_KINDS: dict[str, tuple[str, ...]] = {
+    "massa": ("NAME", "CPF", "CNPJ", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ"),
+    "username": ("USERNAME",),
+    "plate": ("PLATE",),
+    "phone": ("PHONE",),
+    "name": ("NAME",),
+    "cnpj": ("CNPJ",),
+    "cpf": ("CPF",),
+    "email": ("EMAIL",),
+    "cnj": ("CNJ",),
+    "negativa": ("NAME", "CPF", "CNPJ"),
+    "imovel": ("NAME", "CPF", "CNPJ"),
+    "diario": ("NAME", "CPF", "CNPJ"),
+    "crtsh": ("URL",),
+    "hosts": ("URL",),
+    "hostficha": ("URL",),
+    "web": ("NAME",),
+}
+
+_STRONG_HIT_KINDS = frozenset({"CPF", "CNPJ", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ", "URL"})
+_AUTO_CHECK_TOOLS = frozenset({"username", "plate", "phone", "cnpj", "cpf", "email", "cnj", "crtsh", "hosts", "hostficha"})
+_MAX_TOOL_VALUES = 4
+_MAX_OUTCOME_ENTITIES = 40
+
+
 def tool_id_for_kind(kind: str) -> str:
     return {
         "USERNAME": "username",
@@ -130,6 +156,175 @@ def tool_id_for_kind(kind: str) -> str:
         "MASSA": "massa",
         "massa": "massa",
     }.get((kind or "").upper() if (kind or "") != "massa" else "massa", "massa")
+
+
+def graph_tools_plan(dossier: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ferramentas embutidas cruzadas com o que já está no grafo."""
+    by_kind: dict[str, list[str]] = {}
+    for item in dossier or []:
+        kind = str(item.get("kind") or "").upper()
+        value = str(item.get("value") or "").strip()
+        if kind and value:
+            by_kind.setdefault(kind, []).append(value)
+    plan: list[dict[str, Any]] = []
+    for tool in EMBEDDED_TOOLS:
+        kinds = TOOL_GRAPH_KINDS.get(tool.id)
+        if not kinds:
+            continue
+        values: list[str] = []
+        seen: set[str] = set()
+        for kind in kinds:
+            for value in by_kind.get(kind, []):
+                key = f"{kind}:{value.casefold()}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                values.append(value)
+                if len(values) >= _MAX_TOOL_VALUES:
+                    break
+            if len(values) >= _MAX_TOOL_VALUES:
+                break
+        plan.append(
+            {
+                "id": tool.id,
+                "name": tool.name,
+                "summary": tool.summary,
+                "values": values,
+                "ready": bool(values),
+                "checked": bool(values) and tool.id in _AUTO_CHECK_TOOLS,
+                "hint": ", ".join(values[:2]) if values else "sem este dado no grafo",
+            }
+        )
+    return plan
+
+
+def outcome_parts(outcome: ConsultResult | MassResult) -> list[ConsultResult]:
+    if isinstance(outcome, MassResult):
+        return [part for part in outcome.parts if part]
+    return [outcome]
+
+
+def outcome_to_connector(outcome: ConsultResult | MassResult, origin_key: str) -> ConnectorResult:
+    """Converte o resultado da ferramenta em nós/vínculos novos, sem apagar o grafo."""
+    result = ConnectorResult()
+    seen: set[str] = set()
+    for part in outcome_parts(outcome):
+        if not part or not part.ok:
+            if part and part.error:
+                result.notes.append(part.error)
+            continue
+        _ingest_consult_part(result, part, origin_key, seen)
+        if len(result.entities) >= _MAX_OUTCOME_ENTITIES:
+            break
+    return result
+
+
+def _ingest_consult_part(result: ConnectorResult, part: ConsultResult, origin_key: str, seen: set[str]) -> None:
+    query_seed = parse_seed(part.query, forced_kind=part.kind if part.kind not in {"", "auto", "massa", "FILE", "PROCESSOS"} else None)
+    if part.kind == "PROCESSOS":
+        query_seed = parse_seed(part.query, forced_kind="CNJ") or query_seed
+    if query_seed:
+        _add_found(result, query_seed, seen, attrs={"tool_query": True})
+    graph = getattr(part, "graph", None)
+    if graph and getattr(graph, "nodes", None):
+        id_to_key: dict[str, str] = {}
+        for node in graph.nodes:
+            seed = _seed_from_graph_node(node)
+            if not seed:
+                continue
+            _add_found(result, seed, seen, attrs={"from_tool_graph": True, "papel": getattr(node, "meta", "") or ""})
+            id_to_key[node.id] = seed.canonical_key
+        for edge in getattr(graph, "edges", []) or []:
+            src = id_to_key.get(edge.source)
+            dst = id_to_key.get(edge.target)
+            if src and dst and src != dst:
+                result.edges.append(FoundEdge(src, dst, _rel_from_label(getattr(edge, "label", "")), 0.7, {"fonte": "ferramenta"}))
+    for hit in part.hits or []:
+        if len(result.entities) >= _MAX_OUTCOME_ENTITIES:
+            break
+        url = str(getattr(hit, "url", "") or "").strip()
+        title = str(getattr(hit, "title", "") or "").strip()
+        if url:
+            url_seed = parse_seed(url, forced_kind="URL")
+            if url_seed:
+                _add_found(result, url_seed, seen, display=title or url_seed.display_name, attrs={"snippet": getattr(hit, "meta", "") or ""})
+                if origin_key and origin_key != url_seed.canonical_key:
+                    result.edges.append(FoundEdge(origin_key, url_seed.canonical_key, "MENCAO", 0.55, {"fonte": "ferramenta"}))
+                result.evidence.append(
+                    FoundEvidence(
+                        source_label=title or "menção pública",
+                        url=url,
+                        snippet=str(getattr(hit, "meta", "") or "")[:400] or None,
+                        entity_ref=url_seed.canonical_key,
+                    )
+                )
+                continue
+        hit_seed = parse_seed(title)
+        if hit_seed and hit_seed.kind in _STRONG_HIT_KINDS:
+            _add_found(result, hit_seed, seen)
+            if origin_key and origin_key != hit_seed.canonical_key:
+                result.edges.append(FoundEdge(origin_key, hit_seed.canonical_key, "RELACIONADO", 0.5, {"fonte": "ferramenta"}))
+    for note in part.notes or []:
+        result.notes.append(str(note))
+
+
+def _add_found(
+    result: ConnectorResult,
+    seed,
+    seen: set[str],
+    *,
+    display: str = "",
+    attrs: dict[str, Any] | None = None,
+) -> None:
+    if seed.canonical_key in seen:
+        return
+    seen.add(seed.canonical_key)
+    result.entities.append(
+        FoundEntity(
+            entity_type=seed.entity_type,
+            kind=seed.kind,
+            value=seed.value,
+            display_name=display or seed.display_name,
+            attrs=dict(attrs or {}),
+            confidence=0.72 if seed.kind in _STRONG_HIT_KINDS else 0.5,
+        )
+    )
+
+
+def _seed_from_graph_node(node) -> Any:
+    nid = str(getattr(node, "id", "") or "")
+    label = str(getattr(node, "label", "") or "").strip()
+    meta = str(getattr(node, "meta", "") or "").strip()
+    kind = str(getattr(node, "kind", "") or "").casefold()
+    if nid.startswith("cnpj-"):
+        return parse_seed(nid.split("-", 1)[1], forced_kind="CNPJ") or parse_seed(meta, forced_kind="CNPJ")
+    if nid.startswith("cpf-"):
+        return parse_seed(nid.split("-", 1)[1], forced_kind="CPF") or parse_seed(meta, forced_kind="CPF")
+    for raw in (meta, label):
+        seed = parse_seed(raw)
+        if seed and seed.kind in _STRONG_HIT_KINDS:
+            return seed
+    forced = {"org": "CNPJ", "person": "NAME", "owner": "NAME", "profile": "USERNAME", "email": "EMAIL", "vehicle": "PLATE", "case": "CNJ"}.get(kind)
+    if forced == "CNPJ":
+        return parse_seed(meta, forced_kind="CNPJ") or parse_seed(label, forced_kind="NAME")
+    if forced == "NAME" and label.count(" ") >= 1:
+        return parse_seed(label, forced_kind="NAME")
+    if forced and forced != "NAME":
+        return parse_seed(label, forced_kind=forced) or parse_seed(meta, forced_kind=forced)
+    return None
+
+
+def _rel_from_label(label: str) -> str:
+    text = (label or "").casefold()
+    if "sóci" in text or "soci" in text:
+        return "SOCIO"
+    if "admin" in text:
+        return "ADMIN"
+    if "propriet" in text:
+        return "PROPRIETARIO"
+    if "parte" in text:
+        return "PARTE"
+    return "RELACIONADO"
 
 
 def list_tools(query: str = "") -> list[EmbeddedTool]:

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import delete, func, or_, select, update
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from osint4all.db.models import (
     BlockedKey,
@@ -191,10 +191,13 @@ def seed_entity_ids(session: Session, investigation_id: str) -> set[str]:
 
 def _undirected_adj(session: Session, investigation_id: str) -> dict[str, set[str]]:
     adj: dict[str, set[str]] = {}
-    for edge in session.scalars(select(Edge).where(Edge.investigation_id == investigation_id)):
-        src, dst = str(edge.from_entity_id), str(edge.to_entity_id)
-        adj.setdefault(src, set()).add(dst)
-        adj.setdefault(dst, set()).add(src)
+    rows = session.execute(
+        select(Edge.from_entity_id, Edge.to_entity_id).where(Edge.investigation_id == investigation_id)
+    ).all()
+    for src, dst in rows:
+        src_id, dst_id = str(src), str(dst)
+        adj.setdefault(src_id, set()).add(dst_id)
+        adj.setdefault(dst_id, set()).add(src_id)
     return adj
 
 
@@ -220,30 +223,37 @@ def linked_entity_ids(session: Session, investigation_id: str) -> set[str]:
     return _bfs_ids(seeds, _undirected_adj(session, investigation_id))
 
 
-def derived_entity_ids(session: Session, investigation_id: str, root_id: str) -> set[str]:
+def derived_entity_ids(
+    session: Session,
+    investigation_id: str,
+    root_id: str,
+    *,
+    adj: dict[str, set[str]] | None = None,
+) -> set[str]:
     """Nós que só existem neste caso porque passam pelo `root_id`."""
-    adj = _undirected_adj(session, investigation_id)
+    graph = adj if adj is not None else _undirected_adj(session, investigation_id)
     keep = seed_entity_ids(session, investigation_id) - {root_id}
-    from_root = _bfs_ids({root_id}, adj)
-    from_keep = _bfs_ids(keep, adj, blocked={root_id}) if keep else set()
+    from_root = _bfs_ids({root_id}, graph)
+    from_keep = _bfs_ids(keep, graph, blocked={root_id}) if keep else set()
     return (from_root - from_keep) | {root_id}
 
 
 def prune_unlinked_entities(session: Session, investigation_id: str) -> int:
     """Tira pessoas/empresas que não têm caminho até o alvo."""
-    linked = linked_entity_ids(session, investigation_id)
     seeds = seed_entity_ids(session, investigation_id)
     if not seeds:
         return 0
-    removed = 0
-    for entity in list(session.scalars(select(Entity).where(Entity.investigation_id == investigation_id))):
-        if entity.id in linked or entity.id in seeds or entity.is_seed:
-            continue
-        if entity.entity_type not in {"PERSON", "ORG"}:
-            continue
-        _delete_entity_local(session, investigation_id, entity, block=False)
-        removed += 1
-    return removed
+    linked = _bfs_ids(seeds, _undirected_adj(session, investigation_id))
+    victims = [
+        row.id
+        for row in session.scalars(
+            select(Entity)
+            .options(load_only(Entity.id, Entity.entity_type, Entity.is_seed))
+            .where(Entity.investigation_id == investigation_id)
+        )
+        if row.id not in linked and row.id not in seeds and not row.is_seed and row.entity_type in {"PERSON", "ORG"}
+    ]
+    return _purge_entity_ids(session, investigation_id, victims, block=False)
 
 
 def get_investigation(session: Session, investigation_id: str) -> Investigation | None:
@@ -262,13 +272,14 @@ def find_entity_by_key(session: Session, investigation_id: str, canonical_key: s
     )
     if entity:
         return entity
-    ident = session.scalar(select(Identifier).where(Identifier.canonical_key == key))
+    ident = session.scalar(
+        select(Identifier)
+        .join(Entity, Identifier.entity_id == Entity.id)
+        .where(Identifier.canonical_key == key, Entity.investigation_id == investigation_id)
+    )
     if not ident:
         return None
-    other = session.get(Entity, ident.entity_id)
-    if other and other.investigation_id == investigation_id:
-        return other
-    return None
+    return session.get(Entity, ident.entity_id)
 
 
 _FOLD_PREFIXES = ("cpf:", "email:", "phone:", "username:")
@@ -546,13 +557,15 @@ def claim_next_job(session: Session, *, investigation_id: str | None = None) -> 
 
 def job_counts(session: Session, investigation_id: str) -> dict[str, int]:
     rows = session.execute(
-        select(ExpansionJob.status, ExpansionJob.id).where(
-            ExpansionJob.investigation_id == investigation_id
-        )
+        select(ExpansionJob.status, func.count())
+        .where(ExpansionJob.investigation_id == investigation_id)
+        .group_by(ExpansionJob.status)
     ).all()
-    counts = {"PENDING": 0, "RUNNING": 0, "DONE": 0, "FAILED": 0, "TOTAL": len(rows)}
-    for status, _ in rows:
-        counts[status] = counts.get(status, 0) + 1
+    counts = {"PENDING": 0, "RUNNING": 0, "DONE": 0, "FAILED": 0, "TOTAL": 0}
+    for status, total in rows:
+        n = int(total or 0)
+        counts[str(status)] = n
+        counts["TOTAL"] += n
     return counts
 
 
@@ -776,12 +789,21 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
     nodes, links = collapse_graph_view(nodes, links)
     years = sorted({int(link["year"]) for link in links if link.get("year")})
     inv = session.get(Investigation, investigation_id)
+    stamp = 0
+    for entity in entities:
+        seen = getattr(entity, "last_seen_at", None)
+        if seen is not None:
+            try:
+                stamp = max(stamp, int(seen.timestamp()))
+            except (OSError, OverflowError, TypeError, ValueError):
+                pass
     return {
         "nodes": nodes,
         "edges": links,
         "entity_count": len(nodes),
         "edge_count": len(links),
         "years": years,
+        "rev": f"{len(nodes)}:{len(links)}:{stamp}",
         "layout": dict(inv.graph_layout or {}) if inv else {},
     }
 
@@ -889,9 +911,7 @@ def _purge_entity_ids(session: Session, investigation_id: str, entity_ids: list[
                 extra.add(f"cnpj:{digits}")
             if len(digits) == 11:
                 extra.add(f"cpf:{digits}")
-        for key in to_block | extra:
-            if key:
-                block_key(session, investigation_id, key)
+        block_keys(session, investigation_id, to_block | extra)
     ev_ids = list(session.scalars(select(Evidence.id).where(Evidence.entity_id.in_(real_ids))))
     if ev_ids:
         session.execute(delete(HypothesisStance).where(HypothesisStance.evidence_id.in_(ev_ids)))
@@ -941,9 +961,10 @@ def detach_entities(
     if not wanted:
         return 0
     if cascade:
+        adj = _undirected_adj(session, investigation_id)
         extra: set[str] = set()
         for entity_id in wanted:
-            extra |= derived_entity_ids(session, investigation_id, entity_id)
+            extra |= derived_entity_ids(session, investigation_id, entity_id, adj=adj)
         wanted = [item for item in extra if item not in seeds]
     return _purge_entity_ids(session, investigation_id, wanted, block=True)
 
@@ -1048,18 +1069,33 @@ def blocked_key_set(session: Session, investigation_id: str) -> set[str]:
     return {str(key) for key in rows}
 
 
+def block_keys(session: Session, investigation_id: str, keys: set[str] | list[str]) -> int:
+    wanted = {str(key).strip() for key in keys if str(key or "").strip()}
+    if not wanted:
+        return 0
+    existing = set(
+        session.scalars(
+            select(BlockedKey.canonical_key).where(
+                BlockedKey.investigation_id == investigation_id,
+                BlockedKey.canonical_key.in_(wanted),
+            )
+        )
+    )
+    added = 0
+    for key in wanted - existing:
+        session.add(BlockedKey(investigation_id=investigation_id, canonical_key=key))
+        added += 1
+    return added
+
+
 def block_key(session: Session, investigation_id: str, canonical_key: str) -> BlockedKey | None:
     key = (canonical_key or "").strip()
     if not key:
         return None
-    existing = session.scalar(
+    block_keys(session, investigation_id, {key})
+    return session.scalar(
         select(BlockedKey).where(BlockedKey.investigation_id == investigation_id, BlockedKey.canonical_key == key)
     )
-    if existing:
-        return existing
-    row = BlockedKey(investigation_id=investigation_id, canonical_key=key)
-    session.add(row)
-    return row
 
 
 def delete_edge(session: Session, investigation_id: str, edge_id: str) -> bool:
