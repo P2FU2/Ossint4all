@@ -16,6 +16,8 @@ def test_resolve_and_plate_consult() -> None:
     cnj = run_consult("0000123-45.2024.8.26.0100", mode="CNJ")
     assert cnj.ok
     assert cnj.kind == "CNJ"
+    assert any("DJEN" in (h.title or "") for h in cnj.hits)
+    assert any(label == "Número CNJ" for label, _ in cnj.facts)
 
 
 def test_phone_email_cpf() -> None:
@@ -45,6 +47,35 @@ def test_cnpj_and_name_stay_offline_in_pytest() -> None:
     assert name.ok
     assert name.kind == "NAME"
     assert name.hits == []
+
+
+def test_public_records_modes_stay_offline() -> None:
+    processos = run_consult("Ana Silva", mode="PROCESSOS")
+    assert processos.ok
+    assert processos.kind == "PROCESSOS"
+    assert any("DJEN" in (h.title or "") for h in processos.hits)
+    assert any("PJe" in (h.meta or "") or "PJe" in (h.title or "") for h in processos.hits)
+    assert processos.timeline
+
+    negativa = run_consult("529.982.247-25", mode="NEGATIVA")
+    assert negativa.ok
+    assert negativa.kind == "NEGATIVA"
+    assert any("CEIS" in (h.title or "") for h in negativa.hits)
+    assert any("CNEP" in (h.title or "") for h in negativa.hits)
+    assert any("TCU" in (h.title or "") for h in negativa.hits)
+
+    imovel = run_consult("Ana Silva", mode="IMOVEL")
+    assert imovel.ok
+    assert imovel.kind == "IMOVEL"
+    assert any("Caixa" in (h.title or "") for h in imovel.hits)
+    assert any("SNCR" in (h.title or "") or "Incra" in (h.title or "") for h in imovel.hits)
+    assert any("cartório" in n.lower() for n in imovel.notes)
+
+    diario = run_consult("Ana Silva", mode="DIARIO")
+    assert diario.ok
+    assert diario.kind == "DIARIO"
+    assert any("in.gov.br" in (h.url or "") for h in diario.hits)
+    assert any("Querido" in (h.title or "") for h in diario.hits)
 
 
 def test_cnpj_graph_from_partners() -> None:

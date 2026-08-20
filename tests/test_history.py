@@ -9,6 +9,8 @@ def test_replay_mode_maps_tools() -> None:
     assert replay_mode("auto", "PLATE") == "auto"
     assert replay_mode("PLATE", "PLATE") == "PLATE"
     assert replay_mode("email", "EMAIL") == "EMAIL"
+    assert replay_mode("cnj", "CNJ") == "PROCESSOS"
+    assert replay_mode("negativa", "NEGATIVA") == "NEGATIVA"
     assert replay_mode("massa", "massa") == "massa"
     assert replay_mode("unknown", "CNPJ") == "CNPJ"
     crt = replay_spec("crtsh", "URL")

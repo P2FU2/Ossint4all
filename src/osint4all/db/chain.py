@@ -63,6 +63,10 @@ _GRAPH_KIND = {
     "PHONE": "person",
     "PLATE": "vehicle",
     "CNJ": "org",
+    "PROCESSOS": "org",
+    "NEGATIVA": "person",
+    "IMOVEL": "org",
+    "DIARIO": "org",
 }
 
 _SEED_KINDS = frozenset({"EMAIL", "USERNAME", "PHONE", "PLATE", "CPF", "CNPJ", "CNJ", "URL"})
@@ -137,7 +141,7 @@ def identifiers_from_outcome(outcome: object) -> list[dict[str, str]]:
         kind = str(getattr(part, "kind", "") or "")
         query = str(getattr(part, "query", "") or "")
         if query:
-            forced = kind if kind and kind not in {"massa", "FILE"} else None
+            forced = kind if kind and kind not in {"massa", "FILE", "PROCESSOS", "NEGATIVA", "IMOVEL", "DIARIO"} else None
             _add_ident(items, seen, forced or "", query, "consulta")
             _derive_bridges(items, seen, kind, query)
         for label, value in list(getattr(part, "facts", None) or [])[:12]:

@@ -20,13 +20,15 @@ from osint4all.connectors.plate_public import (
     merge_vehicle_cards,
     parse_plate_enrichment,
 )
+from osint4all.connectors.datajud import DatajudConnector
+from osint4all.connectors.djen import DjenConnector
 from osint4all.connectors.socio_search import SocioSearchConnector
 from osint4all.connectors.transparencia import TransparenciaConnector
 from osint4all.connectors.username_public import UsernamePublicConnector
 from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 from osint4all.identifiers import detect_kind, parse_seed
 from osint4all.security import only_digits
-from osint4all.validators import format_plate, looks_like_plate, validate_cnpj, validate_cpf
+from osint4all.validators import format_plate, looks_like_plate, normalize_cnj, validate_cnpj, validate_cpf
 
 
 # key, label, tip, placeholder
@@ -39,7 +41,10 @@ MODES = (
     ("CNPJ", "CNPJ", "Ficha, QSA e mapa de empresas relacionadas (sócios PJ e outras firmas dos sócios).", "00.000.000/0001-00"),
     ("CPF", "CPF", "Valida, cruza QSA público, sanções e menções. A Receita não devolve o nome por API.", "000.000.000-00"),
     ("EMAIL", "E-mail", "Perfis públicos do local-part em linha do tempo. Sem caixa nem vazamento.", "nome@dominio.com"),
-    ("CNJ", "Processo", "Número CNJ. Capa e partes vêm do DataJud ao guardar no grafo.", "0000123-45.2024.8.26.0100"),
+    ("PROCESSOS", "Processo", "CNJ ou nome da parte. DataJud, DJEN, PJe e menções públicas. Sem tribunal fechado.", "0000123-45.2024.8.26.0100 ou nome"),
+    ("NEGATIVA", "Negativa", "CEIS, CNEP, TCU, CVM, TSE e menções de condenação em fonte oficial.", "Nome, CPF ou CNPJ"),
+    ("IMOVEL", "Imóvel", "Leilão Caixa, SNCR, DOU. Sem matrícula de cartório nem IPTU autenticado.", "Nome, CPF, CNPJ ou endereço"),
+    ("DIARIO", "Diário", "DOU, Imprensa Nacional, DJEN e diários estaduais públicos.", "Nome, CPF, CNPJ ou termo"),
     ("massa", "Massa", "Um dado só: deriva correlatos (user, domínio, sócio, menções) e cruza no painel.", "um único identificador"),
 )
 
@@ -52,6 +57,10 @@ KIND_LABELS = {
     "CPF": "CPF",
     "EMAIL": "E-mail",
     "CNJ": "Processo",
+    "PROCESSOS": "Processo",
+    "NEGATIVA": "Negativa",
+    "IMOVEL": "Imóvel",
+    "DIARIO": "Diário oficial",
     "URL": "Domínio",
     "massa": "Massa",
 }
@@ -178,6 +187,15 @@ def run_consult(raw: str, *, mode: str = "auto", settings: Settings | None = Non
             notes=[f"{k}: {v}" for k, v in mass.derived],
         )
     settings = settings or get_settings()
+    forced = (mode or "").upper()
+    if forced == "PROCESSOS":
+        return _consult_processos(text, settings, quick=quick)
+    if forced == "NEGATIVA":
+        return _consult_negativa(text, settings, quick=quick)
+    if forced == "IMOVEL":
+        return _consult_imovel(text, settings, quick=quick)
+    if forced == "DIARIO":
+        return _consult_diario(text, settings, quick=quick)
     kind = resolve_kind(mode, text)
     if not kind:
         return ConsultResult(kind="", query=text, title="", summary="", ok=False, error="Não reconheci esse valor. Escolha o tipo à esquerda.")
@@ -197,7 +215,7 @@ def run_consult(raw: str, *, mode: str = "auto", settings: Settings | None = Non
         if kind == "NAME":
             return _consult_name(text, settings, quick=quick)
         if kind == "CNJ":
-            return _consult_cnj(text)
+            return _consult_processos(text, settings, quick=quick)
     except Exception as exc:  # noqa: BLE001
         return ConsultResult(kind=kind, query=text, title=text, summary="", ok=False, error=str(exc))
     return ConsultResult(kind=kind, query=text, title=text, summary="Tipo reconhecido. Abra um caso para expandir o grafo.")
@@ -722,21 +740,380 @@ def _consult_name(raw: str, settings: Settings, *, quick: bool = False) -> Consu
     )
 
 
-def _consult_cnj(raw: str) -> ConsultResult:
-    seed = parse_seed(raw, forced_kind="CNJ")
-    if not seed:
-        return ConsultResult(kind="CNJ", query=raw, title=raw, summary="", ok=False, error="Número CNJ inválido.")
-    display = seed.display_name
+_CNJ_SEGMENTO = {
+    "1": "STF",
+    "2": "CNJ",
+    "3": "STJ",
+    "4": "Justiça Federal",
+    "5": "Justiça do Trabalho",
+    "6": "Justiça Eleitoral",
+    "7": "Justiça Militar",
+    "8": "Justiça Estadual",
+    "9": "Justiça Militar estadual",
+}
+
+
+def _query_subject(raw: str) -> tuple[str, str, str]:
+    text = (raw or "").strip()
+    parts = normalize_cnj(text)
+    if parts:
+        return "CNJ", parts.numero_formatado, f"cnj:{parts.numero_digits}"
+    if validate_cnpj(text):
+        digits = only_digits(text)
+        return "CNPJ", _format_cnpj(digits), f"cnpj:{digits}"
+    if validate_cpf(text):
+        digits = only_digits(text)
+        return "CPF", f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}", f"cpf:{digits}"
+    collapsed = re.sub(r"\s+", " ", text)
+    return "NAME", collapsed, f"name:{collapsed.casefold()}"
+
+
+def _extend_unique(hits: list[ConsultHit], extra: list[ConsultHit], *, limit: int = 12) -> None:
+    seen = {(h.url or h.title) for h in hits}
+    for hit in extra[:limit]:
+        key = hit.url or hit.title
+        if key in seen:
+            continue
+        seen.add(key)
+        hits.append(hit)
+
+
+def _hits_from_connector(parsed: Any, *, hit_kind: str, when: str) -> tuple[list[ConsultHit], list[TimelineEvent], list[tuple[str, str]]]:
+    hits: list[ConsultHit] = []
+    timeline: list[TimelineEvent] = []
+    facts: list[tuple[str, str]] = []
+    if not parsed:
+        return hits, timeline, facts
+    for ev in list(getattr(parsed, "evidence", None) or [])[:12]:
+        hits.append(ConsultHit(ev.source_label, ev.snippet or "", ev.url, hit_kind))
+        timeline.append(TimelineEvent(ev.source_label, ev.snippet or "", ev.url, when=when, kind=hit_kind))
+    for entity in list(getattr(parsed, "entities", None) or []):
+        if entity.kind == "CNJ":
+            facts.append(("Processo", entity.display_name))
+        elif entity.kind == "NAME" and entity.display_name:
+            facts.append((str((entity.attrs or {}).get("polo") or entity.entity_type or "Nome"), entity.display_name))
+    return hits, timeline, facts
+
+
+def _try_datajud(settings: Settings, origin: str, display: str) -> Any | None:
+    if not (settings.datajud_enable and settings.datajud_api_key):
+        return None
+    digits = origin.split(":", 1)[-1]
+    fake = SimpleNamespace(
+        canonical_key=origin,
+        display_name=display,
+        entity_type="CASE",
+        identifiers=[SimpleNamespace(kind="CNJ", value=digits)],
+    )
+    try:
+        return DatajudConnector(settings).collect(fake, SimpleNamespace())
+    except Exception:
+        return None
+
+
+def _try_djen(settings: Settings, origin: str, display: str, entity_type: str) -> Any | None:
+    if not settings.djen_enable:
+        return None
+    fake = SimpleNamespace(
+        canonical_key=origin,
+        display_name=display,
+        entity_type=entity_type,
+        identifiers=[],
+    )
+    try:
+        return DjenConnector(settings).collect(fake, SimpleNamespace())
+    except Exception:
+        return None
+
+
+def _try_transparencia(settings: Settings, origin: str, display: str, id_kind: str) -> Any | None:
+    if id_kind not in {"CPF", "CNPJ"}:
+        return None
+    if not (settings.transparencia_enable and settings.transparencia_api_key):
+        return None
+    digits = origin.split(":", 1)[-1]
+    fake = SimpleNamespace(
+        canonical_key=origin,
+        display_name=display,
+        entity_type="ORG" if id_kind == "CNPJ" else "PERSON",
+        identifiers=[SimpleNamespace(kind=id_kind, value=digits)],
+    )
+    try:
+        return TransparenciaConnector(settings).collect(fake, SimpleNamespace())
+    except Exception:
+        return None
+
+
+def _consult_processos(raw: str, settings: Settings | None = None, *, quick: bool = False) -> ConsultResult:
+    settings = settings or get_settings()
+    id_kind, display, origin = _query_subject(raw)
+    result_kind = "CNJ" if id_kind == "CNJ" else "PROCESSOS"
+    hits = [
+        ConsultHit("DJEN / Comunica", "Diário de Justiça eletrônico e comunicações", "https://comunica.pje.jus.br/", "fonte"),
+        ConsultHit("Consulta processual CNJ", "Painel público unificado (PJe)", "https://www.cnj.jus.br/plataforma-digital-do-poder-judiciario-pdpj/", "fonte"),
+        ConsultHit("DataJud (wiki da chave)", "API pública de capa e partes — exige chave do CNJ", "https://datajud-wiki.cnj.jus.br/api-publica/acesso/", "fonte"),
+    ]
+    facts: list[tuple[str, str]] = [("Consulta", display), ("Tipo do valor", KIND_LABELS.get(id_kind, id_kind))]
+    notes = [
+        "Capa, polo e andamento oficiais só saem de DataJud/DJEN ou do tribunal. Sem login em PJe fechado.",
+        "Nome sozinho não prova que a parte é a mesma pessoa.",
+    ]
+    timeline = [TimelineEvent("Portais oficiais", "DJEN, PJe e DataJud — ficha interna, sem sair do painel", when="fonte", kind="fonte")]
+    graph = ConsultGraph(
+        nodes=[GraphNode("q", display, "org" if id_kind in {"CNPJ", "CNJ"} else "person", result_kind)],
+        edges=[],
+        caption="Árvore processual: o valor consultado no topo; abaixo, comunicações DJEN e capas DataJud quando a API responde.",
+    )
+    if id_kind == "CNJ":
+        parts = normalize_cnj(raw)
+        if parts:
+            facts.append(("Número CNJ", parts.numero_formatado))
+            facts.append(("Ano", parts.ano))
+            facts.append(("Segmento", _CNJ_SEGMENTO.get(parts.segmento, parts.segmento)))
+            facts.append(("Tribunal", parts.tribunal))
+            timeline.append(TimelineEvent(parts.numero_formatado, f"Segmento {parts.segmento} · tribunal {parts.tribunal}", when="CNJ", kind="id"))
+
+    found = 0
+    if _live_ok(settings, quick):
+        if id_kind == "CNJ":
+            parsed = _try_datajud(settings, origin, display)
+            extra, events, extra_facts = _hits_from_connector(parsed, hit_kind="processo", when="DataJud")
+            _extend_unique(hits, extra)
+            timeline.extend(events)
+            facts.extend(extra_facts[:8])
+            found += len(extra)
+            for entity in list(getattr(parsed, "entities", None) or []):
+                if entity.entity_type == "PERSON" and entity.display_name:
+                    nid = f"parte-{entity.display_name.casefold()}"
+                    if nid not in {n.id for n in graph.nodes}:
+                        graph.nodes.append(GraphNode(nid, entity.display_name, "person", str(entity.attrs.get("polo") or "parte")))
+                        graph.edges.append(GraphEdge("q", nid, "parte", "Nome extraído da capa DataJud."))
+        entity_type = "CASE" if id_kind == "CNJ" else ("ORG" if id_kind == "CNPJ" else "PERSON")
+        parsed = _try_djen(settings, origin, display, entity_type)
+        extra, events, extra_facts = _hits_from_connector(parsed, hit_kind="processo", when="DJEN")
+        _extend_unique(hits, extra)
+        timeline.extend(events)
+        facts.extend(extra_facts[:8])
+        found += len(extra)
+        for entity in list(getattr(parsed, "entities", None) or []):
+            if entity.kind == "CNJ":
+                nid = f"cnj-{only_digits(entity.value)}"
+                if nid not in {n.id for n in graph.nodes}:
+                    graph.nodes.append(GraphNode(nid, entity.display_name, "org", "processo"))
+                    graph.edges.append(GraphEdge("q", nid, "mencionado", "Número CNJ citado no DJEN."))
+        quoted = f'"{display}"'
+        web = _safe_web_search(
+            settings,
+            f"{quoted} (processo OR reclamatória OR \"número CNJ\" OR ação OR sentença) (site:jus.br OR site:pje.jus.br OR site:cnj.jus.br OR site:in.gov.br)",
+            origin,
+        )
+        _extend_unique(hits, web, limit=8)
+        for ev in web[:6]:
+            timeline.append(TimelineEvent(ev.title, ev.meta, ev.url, when="menção web", kind="web"))
+            found += 1
+
+    if found:
+        summary = f"{found} menção(ões) processual(is) pública(s) para {display}."
+    elif not _live_ok(settings, quick):
+        summary = "Consulta processual reconhecida. DataJud, DJEN e menções em jus.br rodam ao vivo."
+        notes.append("Fora de teste, busca comunicações no DJEN e capa no DataJud (se a chave do CNJ estiver configurada).")
+    else:
+        summary = "Nenhuma comunicação ou capa nesta rodada. Use os portais oficiais na ficha."
     return ConsultResult(
-        kind="CNJ",
+        kind=result_kind,
         query=display,
         title=display,
-        summary="Número de processo reconhecido. A capa e as partes vêm do DataJud ao guardar no grafo.",
-        hits=[
-            ConsultHit("DataJud (wiki da chave)", "API pública do CNJ", "https://datajud-wiki.cnj.jus.br/api-publica/acesso/", "fonte"),
-        ],
-        notes=["Guarde no grafo com o conector datajud ligado."],
+        summary=summary,
+        facts=facts,
+        hits=hits,
+        notes=notes,
+        timeline=timeline,
+        graph=graph,
     )
+
+
+def _consult_negativa(raw: str, settings: Settings | None = None, *, quick: bool = False) -> ConsultResult:
+    settings = settings or get_settings()
+    id_kind, display, origin = _query_subject(raw)
+    termo = only_digits(raw) if id_kind in {"CPF", "CNPJ"} else display
+    hits = [
+        ConsultHit("CEIS — empresas inidôneas", "Cadastro de Empresas Inidôneas e Suspensas", "https://portaldatransparencia.gov.br/sancoes/consulta?cadastro=1", "fonte"),
+        ConsultHit("CNEP — punições a pessoas jurídicas", "Cadastro Nacional de Empresas Punidas", "https://portaldatransparencia.gov.br/sancoes/consulta?cadastro=2", "fonte"),
+        ConsultHit("Portal da Transparência", "Busca nas listas oficiais da CGU", f"https://portaldatransparencia.gov.br/busca?termo={termo}", "fonte"),
+        ConsultHit("TCU — inabilitados e inidôneos", "Lista pública do Tribunal de Contas da União", "https://contas.tcu.gov.br/ords/f?p=1660:3", "fonte"),
+        ConsultHit("CVM — alertas e processos", "Regulados e punições da Comissão de Valores Mobiliários", "https://www.gov.br/cvm/pt-br/assuntos/protecao/alertas", "fonte"),
+        ConsultHit("TSE — divulgação de candidaturas", "Contas e condicionalidades eleitorais públicas", "https://divulgacandcontas.tse.jus.br/", "fonte"),
+    ]
+    facts = [("Consulta", display), ("Documento", KIND_LABELS.get(id_kind, id_kind))]
+    notes = [
+        "Sanção oficial só vale se o documento (CPF/CNPJ) bater na lista. Nome sozinho é menção.",
+        "Não consulta certidão de antecedentes nem base policial fechada.",
+    ]
+    timeline = [TimelineEvent("Listas oficiais", "CEIS, CNEP, TCU, CVM e TSE — só o que é público", when="fonte", kind="fonte")]
+    graph = ConsultGraph(
+        nodes=[GraphNode("q", display, "org" if id_kind == "CNPJ" else "person", "negativa")],
+        edges=[],
+        caption="Árvore de negativa: o alvo no topo; abaixo, registros CEIS/CNEP ou menções oficiais de condenação.",
+    )
+    found = 0
+    if _live_ok(settings, quick):
+        parsed = _try_transparencia(settings, origin, display, id_kind)
+        extra, events, extra_facts = _hits_from_connector(parsed, hit_kind="sancao", when="CEIS/CNEP")
+        _extend_unique(hits, extra)
+        timeline.extend(events)
+        facts.extend(extra_facts[:6])
+        found += len(extra)
+        for ev in extra:
+            nid = f"s-{len(graph.nodes)}"
+            graph.nodes.append(GraphNode(nid, ev.title, "org", "sanção"))
+            graph.edges.append(GraphEdge("q", nid, "lista oficial", "Registro em CEIS, CNEP ou lista da Transparência."))
+        quoted = f'"{display}"'
+        web = _safe_web_search(
+            settings,
+            f"{quoted} (condenação OR condenado OR CEIS OR CNEP OR inidoneidade OR improbidade OR inelegível OR \"pena de\" OR TCU) (site:gov.br OR site:tcu.gov.br OR site:tse.jus.br OR site:in.gov.br)",
+            origin,
+        )
+        _extend_unique(hits, web, limit=8)
+        for ev in web[:6]:
+            timeline.append(TimelineEvent(ev.title, ev.meta, ev.url, when="menção oficial", kind="alert"))
+            found += 1
+    facts.append(("Registros ao vivo", str(found)))
+    if found:
+        summary = f"{found} registro(s) ou menção(ões) negativa(s) pública(s) para {display}."
+    elif not _live_ok(settings, quick):
+        summary = "Listas oficiais apontadas. CEIS/CNEP e menções em gov.br rodam ao vivo (chave da Transparência, se houver)."
+        notes.append("Com TRANSPARENCIA_API_KEY e CPF/CNPJ, a consulta pergunta CEIS e CNEP direto.")
+    else:
+        summary = "Nada nas listas desta rodada. Abra CEIS, CNEP, TCU ou TSE na ficha."
+    return ConsultResult(
+        kind="NEGATIVA",
+        query=display,
+        title=display,
+        summary=summary,
+        facts=facts,
+        hits=hits,
+        notes=notes,
+        timeline=timeline,
+        graph=graph,
+    )
+
+
+def _consult_imovel(raw: str, settings: Settings | None = None, *, quick: bool = False) -> ConsultResult:
+    settings = settings or get_settings()
+    id_kind, display, origin = _query_subject(raw)
+    hits = [
+        ConsultHit("Caixa — leilão de imóveis", "Oferta pública de imóveis da Caixa", "https://venda-imoveis.caixa.gov.br/sistema/busca-imovel.asp", "fonte"),
+        ConsultHit("SNCR / Incra", "Consulta pública do cadastro rural", "https://sncr.serpro.gov.br/sncr-web/consultaPublica.jsf", "fonte"),
+        ConsultHit("SIGEF", "Parcelário rural georreferenciado (Incra)", "https://sigef.incra.gov.br/", "fonte"),
+        ConsultHit("DOU — Imprensa Nacional", "Editais de hasta, desapropriação e averbação publicados", "https://www.in.gov.br/consulta", "fonte"),
+    ]
+    facts = [("Consulta", display), ("Tipo do valor", KIND_LABELS.get(id_kind, id_kind))]
+    notes = [
+        "Não há API aberta de matrícula de cartório nem IPTU autenticado. O que aparece é menção pública (leilão, DOU, SNCR).",
+        "Endereço ou nome em edital não prova propriedade.",
+    ]
+    timeline = [TimelineEvent("Portais de imóvel público", "Caixa, SNCR, SIGEF e DOU", when="fonte", kind="fonte")]
+    graph = ConsultGraph(
+        nodes=[GraphNode("q", display, "org" if id_kind == "CNPJ" else "person", "imóvel")],
+        edges=[],
+        caption="Árvore de imóvel: o alvo no topo; abaixo, leilões Caixa, cadastro rural e menções no DOU.",
+    )
+    found = 0
+    if _live_ok(settings, quick):
+        quoted = f'"{display}"'
+        web = _safe_web_search(
+            settings,
+            f"{quoted} (imóvel OR imóvel OR matrícula OR leilão OR \"hasta pública\" OR IPTU OR SNCR OR SIGEF OR \"registro de imóveis\") (site:gov.br OR site:caixa.gov.br OR site:in.gov.br OR site:incra.gov.br)",
+            origin,
+        )
+        _extend_unique(hits, web, limit=10)
+        for ev in web[:8]:
+            timeline.append(TimelineEvent(ev.title, ev.meta, ev.url, when="menção pública", kind="web"))
+            nid = f"imv-{len(graph.nodes)}"
+            graph.nodes.append(GraphNode(nid, ev.title, "org", "menção"))
+            graph.edges.append(GraphEdge("q", nid, "mencionado", "Menção pública a imóvel, leilão ou cadastro rural."))
+            found += 1
+    if found:
+        summary = f"{found} menção(ões) pública(s) de imóvel, leilão ou cadastro rural para {display}."
+    elif not _live_ok(settings, quick):
+        summary = "Portais de leilão e cadastro rural apontados. Menções no DOU e Caixa rodam ao vivo."
+    else:
+        summary = "Nenhuma menção pública nesta rodada. Consulte Caixa, SNCR ou o DOU na ficha."
+    return ConsultResult(
+        kind="IMOVEL",
+        query=display,
+        title=display,
+        summary=summary,
+        facts=facts,
+        hits=hits,
+        notes=notes,
+        timeline=timeline,
+        graph=graph,
+    )
+
+
+def _consult_diario(raw: str, settings: Settings | None = None, *, quick: bool = False) -> ConsultResult:
+    settings = settings or get_settings()
+    id_kind, display, origin = _query_subject(raw)
+    hits = [
+        ConsultHit("DOU — consulta", "Diário Oficial da União (Imprensa Nacional)", "https://www.in.gov.br/consulta", "fonte"),
+        ConsultHit("Leitura do jornal", "Edições do DOU em texto corrido", "https://www.in.gov.br/leiturajornal", "fonte"),
+        ConsultHit("Querido Diário", "Diários municipais e estaduais indexados (OK.br)", "https://querido-diario.ok.org.br/", "fonte"),
+        ConsultHit("DJEN / Comunica", "Publicações do Poder Judiciário", "https://comunica.pje.jus.br/", "fonte"),
+    ]
+    facts = [("Consulta", display), ("Tipo do valor", KIND_LABELS.get(id_kind, id_kind))]
+    notes = [
+        "Diário oficial publica ato, edital e comunicação. Não substitui certidão do cartório ou do tribunal.",
+    ]
+    timeline = [TimelineEvent("Diários públicos", "DOU, Querido Diário e DJEN", when="fonte", kind="fonte")]
+    graph = ConsultGraph(
+        nodes=[GraphNode("q", display, "org" if id_kind in {"CNPJ", "CNJ"} else "person", "diário")],
+        edges=[],
+        caption="Árvore de diário: o termo no topo; abaixo, publicações do DOU, DJEN e diários locais.",
+    )
+    found = 0
+    if _live_ok(settings, quick):
+        entity_type = "CASE" if id_kind == "CNJ" else ("ORG" if id_kind == "CNPJ" else "PERSON")
+        parsed = _try_djen(settings, origin, display, entity_type)
+        extra, events, extra_facts = _hits_from_connector(parsed, hit_kind="diario", when="DJEN")
+        _extend_unique(hits, extra)
+        timeline.extend(events)
+        facts.extend(extra_facts[:6])
+        found += len(extra)
+        quoted = f'"{display}"'
+        web = _safe_web_search(
+            settings,
+            f"{quoted} (site:in.gov.br OR \"diário oficial\" OR \"querido diário\" OR DJE OR DJEN OR \"imprensa nacional\")",
+            origin,
+        )
+        _extend_unique(hits, web, limit=8)
+        for ev in web[:6]:
+            timeline.append(TimelineEvent(ev.title, ev.meta, ev.url, when="diário", kind="web"))
+            nid = f"dou-{len(graph.nodes)}"
+            graph.nodes.append(GraphNode(nid, ev.title, "org", "publicação"))
+            graph.edges.append(GraphEdge("q", nid, "publicado", "Menção em diário oficial ou índice público."))
+            found += 1
+    if found:
+        summary = f"{found} publicação(ões) em diário oficial ou DJEN para {display}."
+    elif not _live_ok(settings, quick):
+        summary = "DOU, Querido Diário e DJEN apontados. A busca em in.gov.br e comunicações rodam ao vivo."
+    else:
+        summary = "Nenhuma publicação nesta rodada. Consulte o DOU ou o Querido Diário na ficha."
+    return ConsultResult(
+        kind="DIARIO",
+        query=display,
+        title=display,
+        summary=summary,
+        facts=facts,
+        hits=hits,
+        notes=notes,
+        timeline=timeline,
+        graph=graph,
+    )
+
+
+def _consult_cnj(raw: str, settings: Settings | None = None, *, quick: bool = False) -> ConsultResult:
+    return _consult_processos(raw, settings, quick=quick)
 
 
 def result_to_save_payload(result: ConsultResult) -> dict[str, Any]:

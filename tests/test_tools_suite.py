@@ -13,6 +13,8 @@ def test_suite_search_and_internal_urls() -> None:
     assert all("/app/ferramentas?tool=" in f"/app/ferramentas?tool={t.id}" for t in list_tools())
     assert tool_id_for_kind("NAME") == "name"
     assert tool_id_for_kind("CNJ") == "cnj"
+    assert tool_id_for_kind("PROCESSOS") == "cnj"
+    assert tool_id_for_kind("NEGATIVA") == "negativa"
     assert tool_id_for_kind("URL") == "crtsh"
 
 

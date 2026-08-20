@@ -668,7 +668,10 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .result-card.kind-phone, .result-card.kind-email { border-left-color: var(--blue); }
 .result-card.kind-cnpj { border-left-color: var(--amber); }
 .result-card.kind-cpf { border-left-color: var(--red); }
-.result-card.kind-cnj { border-left-color: var(--red); }
+.result-card.kind-cnj, .result-card.kind-processos { border-left-color: var(--red); }
+.result-card.kind-negativa { border-left-color: var(--amber); }
+.result-card.kind-imovel { border-left-color: var(--gold); }
+.result-card.kind-diario { border-left-color: var(--blue); }
 .result-head { margin-bottom: 16px; }
 .result-head h2 { margin: 4px 0 8px; font-size: 1.35rem; }
 .section-kicker {
