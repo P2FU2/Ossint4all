@@ -14,6 +14,8 @@ from osint4all.validators import validate_cnpj
 
 
 def _origin_seed(entity: Entity) -> tuple[str, str] | None:
+    if entity.canonical_key.startswith("property:"):
+        return "PROPERTY", entity.canonical_key.split(":", 1)[1] or entity.display_name
     if entity.canonical_key.startswith("cnpj:"):
         digits = only_digits(entity.canonical_key.split(":", 1)[1])
         if validate_cnpj(digits):
@@ -55,6 +57,32 @@ def parse_viacep(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def lookup_coords(query: str) -> dict[str, Any]:
+    """Geocodifica um endereço público. Falha em silêncio se a rede não responder."""
+    text = " ".join((query or "").split()).strip()
+    if len(text) < 8:
+        return {}
+    http = RateLimitedClient(
+        source="geo_public",
+        max_concurrency=1,
+        timeout=12.0,
+        default_headers={"User-Agent": "osint4all/0.1 (investigative journalism; nominatim)", "Accept": "application/json"},
+    )
+    try:
+        resp = http.request(
+            "GET",
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": text, "format": "json", "limit": 1, "countrycodes": "br"},
+            allow_404=True,
+        )
+        if resp.status_code >= 400:
+            return {}
+        rows = resp.json()
+    except Exception:
+        return {}
+    return parse_nominatim_rows(rows if isinstance(rows, list) else [])
+
+
 def parse_nominatim_rows(rows: list[Any]) -> dict[str, Any]:
     for row in rows:
         if not isinstance(row, dict):
@@ -89,7 +117,9 @@ class GeoPublicConnector:
         return {"source": self.name, "enabled": self.settings.geo_public_enable, "via": "viacep+nominatim"}
 
     def accepts(self, entity: Entity) -> bool:
-        if entity.entity_type != "ORG":
+        if entity.entity_type not in {"ORG", "ASSET"}:
+            return False
+        if str(entity.canonical_key or "").startswith("geo:"):
             return False
         attrs = entity.attrs or {}
         if attrs.get("lat") not in (None, "") and attrs.get("lng") not in (None, ""):

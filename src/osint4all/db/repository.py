@@ -46,6 +46,7 @@ from osint4all.graph.identity import (
     is_unconfirmed,
     is_weak_name,
     names_match,
+    names_same_person,
     profile_from_fields,
 )
 from osint4all.security import only_digits
@@ -68,6 +69,8 @@ EDGE_REL_TYPES = (
     "EMPRESA",
     "TITULAR",
     "PATRIMONIO",
+    "SEDE",
+    "LOCAL",
 )
 
 
@@ -318,7 +321,7 @@ def find_person_by_name(session: Session, investigation_id: str, name: str) -> E
         .options(selectinload(Entity.identifiers))
         .where(Entity.investigation_id == investigation_id, Entity.entity_type == "PERSON")
     ).all()
-    hits = [row for row in people if names_match(row.display_name, name)]
+    hits = [row for row in people if names_same_person(row.display_name, name)]
     if not hits:
         return None
     hits.sort(key=lambda row: (not row.is_seed, 0 if person_cpf(row) else 1, row.depth or 0))
@@ -481,6 +484,25 @@ def consolidate_identities(session: Session, investigation_id: str) -> int:
                     continue
                 absorb_entity(session, investigation_id, keeper, extra)
                 merged += 1
+    if seed_person:
+        people = list(
+            session.scalars(
+                select(Entity)
+                .options(selectinload(Entity.identifiers))
+                .where(Entity.investigation_id == investigation_id, Entity.entity_type == "PERSON")
+            )
+        )
+        seed_cpf = person_cpf(seed_person)
+        for row in people:
+            if row.id == seed_person.id:
+                continue
+            extra_cpf = person_cpf(row)
+            if extra_cpf and extra_cpf != seed_cpf:
+                continue
+            if not names_same_person(row.display_name, seed_person.display_name):
+                continue
+            absorb_entity(session, investigation_id, seed_person, row)
+            merged += 1
     return merged
 
 
@@ -797,7 +819,13 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "snippet",
                     "via",
                     "tipo",
+                    "tipo_imovel",
+                    "matricula",
+                    "fotos",
                     "quando",
+                    "maps_url",
+                    "embed_url",
+                    "geo_label",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
             },

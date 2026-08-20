@@ -237,7 +237,7 @@ window.addEventListener("pageshow", () => {
     return;
   }
   if (!saved || Date.now() - (saved.t || 0) > 30000) return;
-  setActionStatus("ok", "Caso criado.");
+  setActionStatus(saved.phase || "ok", saved.message || "Pronto.");
 });
 
 (function tips() {
@@ -560,6 +560,11 @@ window.addEventListener("pageshow", () => {
       .concat(data.participacoes || [])
       .filter(Boolean);
     actionsEl.replaceChildren();
+    if (painted.url && /^https?:/i.test(painted.url)) {
+      actionsEl.appendChild(action("abrir fonte oficial", () => {
+        window.open(painted.url, "_blank", "noopener,noreferrer");
+      }, true));
+    }
     actionsEl.appendChild(action("copiar título", () => copyText(painted.title)));
     if (painted.url) actionsEl.appendChild(action("copiar URL", () => copyText(painted.url)));
     actionsEl.appendChild(action("copiar ficha", () => copyText(lines.join("\n"))));
@@ -639,19 +644,10 @@ window.addEventListener("pageshow", () => {
   });
 
   document.addEventListener("click", (event) => {
-    const ext = event.target.closest("a[href]");
-    if (ext) {
-      const href = ext.getAttribute("href") || "";
-      if (/^https?:/i.test(href) || href.startsWith("//")) {
-        event.preventDefault();
-        event.stopPropagation();
-        openInspect({
-          title: (ext.textContent || "").trim() || "fonte",
-          kind: "fonte",
-          meta: ext.getAttribute("data-tip") || "Link externo bloqueado. Use copiar URL se precisar do endereço.",
-          url: ext.href,
-          when: "",
-        });
+    const outbound = event.target.closest("a[href]");
+    if (outbound) {
+      const href = outbound.getAttribute("href") || "";
+      if (/^https?:/i.test(href) || href.startsWith("//") || outbound.hasAttribute("download")) {
         return;
       }
     }

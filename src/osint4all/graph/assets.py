@@ -1,13 +1,17 @@
-"""Ativos manuais: conta bancária e patrimônio estimado. Sem consulta a banco."""
+"""Ativos manuais: conta, patrimônio e imóvel. Sem consulta a banco nem cartório."""
 
 from __future__ import annotations
+
+from dataclasses import asdict
 
 from osint4all.connectors.base import FoundEntity
 from osint4all.db.models import Entity, Investigation
 from osint4all.db.repository import create_manual_edge
+from osint4all.graph.match import infer_place, places_from_attrs
 from osint4all.graph.resolve import upsert_found_entity
 
 ACCOUNT_TYPES = ("corrente", "poupança", "pagamento", "investimento", "outro")
+PROPERTY_TYPES = ("casa", "apartamento", "terreno", "sala", "galpão", "sítio", "outro")
 
 
 def _clean(value: str) -> str:
@@ -129,5 +133,117 @@ def add_wealth_estimate(
         to_id=node.id,
         rel_type="PATRIMONIO",
         note=source or "Estimativa acrescentada no dossiê",
+    )
+    return node
+
+
+def _attach_place(host: Entity, *, municipio: str, uf: str, source: str) -> None:
+    place = infer_place(municipio=municipio, uf=uf, role="imovel", source=source or "manual", kind="associated")
+    if place is None:
+        return
+    attrs = dict(host.attrs or {})
+    places = [asdict(item) for item in places_from_attrs(attrs)]
+    mark = (place.kind, place.municipio, place.uf, place.role)
+    if any((p.get("kind"), p.get("municipio"), p.get("uf"), p.get("role")) == mark for p in places):
+        return
+    places.append(asdict(place))
+    attrs["places"] = places
+    host.attrs = attrs
+
+
+def add_property(
+    session,
+    investigation: Investigation,
+    host: Entity,
+    *,
+    address: str = "",
+    city: str = "",
+    uf: str = "",
+    property_type: str = "",
+    amount: str = "",
+    registry: str = "",
+    source: str = "",
+    note: str = "",
+    photos: list[dict] | None = None,
+    lat: float | None = None,
+    lng: float | None = None,
+) -> Entity | None:
+    address = _clean(address)
+    city = _clean(city)
+    uf = _clean(uf).upper()[:2]
+    amount = _clean(amount)
+    registry = _clean(registry)
+    source = _clean(source)
+    note = _clean(note)
+    tipo = _clean(property_type).casefold()
+    if tipo not in PROPERTY_TYPES:
+        tipo = ""
+    shots: list[dict] = []
+    seen: set[str] = set()
+    for raw in photos or []:
+        if not isinstance(raw, dict):
+            continue
+        url = _clean(str(raw.get("url") or ""))
+        if not url or url in seen:
+            continue
+        if not (url.startswith("http://") or url.startswith("https://") or url.startswith("/app/casos/")):
+            continue
+        seen.add(url)
+        shots.append({"url": url[:800], "title": _clean(str(raw.get("title") or ""))[:160]})
+        if len(shots) >= 8:
+            break
+    if not (address or city or shots):
+        return None
+    label = address or " · ".join(part for part in (tipo and tipo.title(), city, uf) if part) or "Imóvel"
+    value = " | ".join(part for part in (address, city, uf, host.id) if part)
+    thumb = shots[0]["url"] if shots else ""
+    geo: dict = {}
+    if lat is not None and lng is not None:
+        geo = {"lat": float(lat), "lng": float(lng)}
+        if not thumb:
+            from osint4all.graph.satellite import satellite_urls
+
+            urls = satellite_urls(float(lat), float(lng))
+            thumb = urls["thumb"]
+            geo.update(urls)
+    node = upsert_found_entity(
+        session,
+        investigation,
+        FoundEntity(
+            entity_type="ASSET",
+            kind="PROPERTY",
+            value=value,
+            display_name=label[:180],
+            attrs={
+                "endereco": address,
+                "municipio": city,
+                "uf": uf,
+                "tipo_imovel": tipo,
+                "valor": amount,
+                "matricula": registry,
+                "fonte": source,
+                "nota": note,
+                "fotos": shots,
+                "thumb": thumb,
+                "tipo": "imagem" if thumb else "imovel",
+                **geo,
+                "place_role": "imovel",
+                "place_kind": "associated",
+                "place_source": source or "manual",
+                "status": "unconfirmed",
+            },
+            confidence=0.4,
+        ),
+        depth=max(1, int(host.depth or 0) + 1),
+        is_seed=False,
+    )
+    _attach_place(host, municipio=city, uf=uf, source=source)
+    create_manual_edge(
+        session,
+        investigation,
+        from_id=host.id,
+        to_id=node.id,
+        rel_type="PROPRIETARIO",
+        note=source or "Imóvel acrescentado no dossiê",
     )
     return node

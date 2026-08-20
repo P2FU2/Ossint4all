@@ -30,7 +30,7 @@ def test_parse_djen_publication() -> None:
             "siglaTribunal": "TJSP",
             "texto": "Intimação da parte",
             "tipoComunicacao": "Intimação",
-            "link": "https://comunica.pje.jus.br/x",
+            "link": "https://eproc.exemplo.jus.br/doc/1",
             "destinatarioadvogados": [{"advogado": {"nome": "ADVOGADO UM"}}],
         }
     ]
@@ -38,3 +38,25 @@ def test_parse_djen_publication() -> None:
     assert any(e.entity_type == "PUBLICATION" for e in result.entities)
     assert any(e.entity_type == "CASE" for e in result.entities)
     assert any(e.rel_type == "MENCAO" for e in result.edges)
+    assert any(e.rel_type == "PARTE" for e in result.edges)
+
+
+def test_parse_djen_digits_html_and_destinatarios() -> None:
+    items = [
+        {
+            "numero_processo": "50417135620264047000",
+            "numeroprocessocommascara": "5041713-56.2026.4.04.7000",
+            "siglaTribunal": "TRF4",
+            "texto": "<html><body><p>APELANTE: EDUARDO HERMELINO LEITE</p></body></html>",
+            "tipoComunicacao": "Intimação",
+            "data_disponibilizacao": "2026-07-23",
+            "link": "https://eproc.trf4.jus.br/eproc2trf4/externo_controlador.php?acao=consulta_publica_documento&numProcesso=50417135620264047000",
+            "destinatarios": [{"nome": "EDUARDO HERMELINO LEITE", "polo": "A"}],
+        }
+    ]
+    result = parse_djen_items(items, origin_key="name:eduardo hermelino leite")
+    cases = [e for e in result.entities if e.entity_type == "CASE"]
+    assert cases[0].display_name == "5041713-56.2026.4.04.7000"
+    assert cases[0].attrs.get("fonte", "").startswith("https://eproc.trf4.jus.br")
+    assert any("<" not in (ev.snippet or "") for ev in result.evidence)
+    assert any(e.rel_type == "PARTE" and e.from_ref.startswith("name:") for e in result.edges)

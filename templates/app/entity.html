@@ -193,6 +193,35 @@
     <label>Nota <input name="note" autocomplete="off" /></label>
     <button class="btn" type="submit">Gravar estimativa</button>
   </form>
+  <h3>Imóvel</h3>
+  <p class="lede">Endereço e fotos de fonte lícita. O painel não consulta cartório nem IPTU.</p>
+  <form class="stack" method="post" action="/app/casos/{{ inv.id }}/imoveis" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="from_id" value="{{ entity.id }}" />
+    <fieldset class="seed-grid compact">
+      <label>Endereço <input name="address" placeholder="Rua, número, bairro" autocomplete="off" /></label>
+      <label>Cidade <input name="city" autocomplete="off" /></label>
+      <label>UF <input name="uf" maxlength="2" autocomplete="off" /></label>
+      <label>Tipo
+        <select name="property_type">
+          <option value="">—</option>
+          <option value="casa">Casa</option>
+          <option value="apartamento">Apartamento</option>
+          <option value="terreno">Terreno</option>
+          <option value="sala">Sala</option>
+          <option value="galpão">Galpão</option>
+          <option value="sítio">Sítio</option>
+          <option value="outro">Outro</option>
+        </select>
+      </label>
+      <label>Valor <input name="amount" placeholder="se souber" autocomplete="off" /></label>
+      <label>Fonte <input name="source" placeholder="leilão, notícia, processo…" autocomplete="off" /></label>
+    </fieldset>
+    <label>URL da foto <input name="photo_url" placeholder="https://…" autocomplete="off" /></label>
+    <label>Fotos <input type="file" name="fotos" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple /></label>
+    <label>Nota <input name="note" autocomplete="off" /></label>
+    <button class="btn" type="submit">Ligar imóvel a este nó</button>
+  </form>
   {% endif %}
   <h3>Já na ficha</h3>
   <ul class="plain">
@@ -339,11 +368,13 @@
         {% set other = neighbors.get(other_id) %}
         <tr>
           <td>
-            {% if other and not other.is_seed %}
-            <label class="check"><input type="checkbox" name="entity_ids" value="{{ other.id }}" /> <span class="sr-only">selecionar</span></label>
-            {% else %}
-            <input type="checkbox" name="edge_ids" value="{{ edge.id }}" />
-            {% endif %}
+            <label class="check">
+              <input type="checkbox" name="edge_ids" value="{{ edge.id }}" {% if other and not other.is_seed %}onchange="var p=this.parentElement.querySelector('[name=entity_ids]'); if(p) p.checked=this.checked"{% endif %} />
+              {% if other and not other.is_seed %}
+              <input type="checkbox" name="entity_ids" value="{{ other.id }}" hidden />
+              {% endif %}
+              <span class="sr-only">selecionar</span>
+            </label>
           </td>
           <td>{{ edge.rel_type }}{% if edge.attrs.get("nota") %}<span class="muted"> · {{ edge.attrs.get("nota") }}</span>{% endif %}</td>
           <td>{% if other %}<a href="/app/casos/{{ inv.id }}/entidades/{{ other.id }}">{{ other.display_name }}</a>{% else %}{{ other_id }}{% endif %}</td>

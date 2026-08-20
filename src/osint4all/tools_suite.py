@@ -226,7 +226,9 @@ def outcome_to_connector(outcome: ConsultResult | MassResult, origin_key: str) -
 def _ingest_consult_part(result: ConnectorResult, part: ConsultResult, origin_key: str, seen: set[str]) -> None:
     query_seed = parse_seed(part.query, forced_kind=part.kind if part.kind not in {"", "auto", "massa", "FILE", "PROCESSOS"} else None)
     if part.kind == "PROCESSOS":
-        query_seed = parse_seed(part.query, forced_kind="CNJ") or query_seed
+        numbered = parse_seed(part.query, forced_kind="CNJ")
+        if numbered and only_digits(numbered.value):
+            query_seed = numbered
     if query_seed:
         _add_found(result, query_seed, seen, attrs={"tool_query": True})
     graph = getattr(part, "graph", None)
@@ -314,6 +316,8 @@ def _seed_from_graph_node(node) -> Any:
     label = str(getattr(node, "label", "") or "").strip()
     meta = str(getattr(node, "meta", "") or "").strip()
     kind = str(getattr(node, "kind", "") or "").casefold()
+    if nid.startswith("cnj-"):
+        return parse_seed(nid.split("-", 1)[1], forced_kind="CNJ") or parse_seed(label, forced_kind="CNJ")
     if nid.startswith("cnpj-"):
         return parse_seed(nid.split("-", 1)[1], forced_kind="CNPJ") or parse_seed(meta, forced_kind="CNPJ")
     if nid.startswith("cpf-"):

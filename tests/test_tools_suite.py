@@ -37,6 +37,32 @@ def test_suite_search_and_internal_urls() -> None:
     assert tool_id_for_kind("URL") == "crtsh"
 
 
+def test_processos_name_does_not_become_empty_cnj() -> None:
+    from osint4all.consult import ConsultGraph, ConsultHit, ConsultResult, GraphEdge, GraphNode
+
+    result = outcome_to_connector(
+        ConsultResult(
+            kind="PROCESSOS",
+            query="Eduardo Hermelino Leite",
+            title="Eduardo Hermelino Leite",
+            summary="ok",
+            hits=[ConsultHit("DJEN / Comunica", "portal", "https://comunica.pje.jus.br/", "fonte")],
+            graph=ConsultGraph(
+                nodes=[
+                    GraphNode("q", "Eduardo Hermelino Leite", "person", "PROCESSOS"),
+                    GraphNode("cnj-50417135620264047000", "5041713-56.2026.4.04.7000", "case", "5041713-56.2026.4.04.7000"),
+                ],
+                edges=[GraphEdge("q", "cnj-50417135620264047000", "parte")],
+            ),
+        ),
+        "name:eduardo hermelino leite",
+    )
+    cnjs = [item for item in result.entities if item.kind == "CNJ"]
+    assert cnjs
+    assert all(item.value.isdigit() and len(item.value) == 20 for item in cnjs)
+    assert not any(item.value == "" or item.value == "Eduardo Hermelino Leite" for item in cnjs)
+
+
 def test_processos_result_becomes_cnj_seed() -> None:
     parts = [ConsultResult(kind="PROCESSOS", query="0000123-45.2024.8.26.0100", title="CNJ", summary="", ok=True)]
     seeds = seeds_from_results(parts)

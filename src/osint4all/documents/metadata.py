@@ -235,5 +235,36 @@ def document_canonical_key(digest: str) -> str:
     return canonical_key("URL", f"local://documento/{digest}")
 
 
+def store_case_image(investigation_id: str, filename: str, data: bytes) -> dict[str, str] | None:
+    """Guarda JPEG/PNG enviado pelo usuário. Não baixa da web."""
+    name = (filename or "foto.jpg").lower()
+    suffix = Path(name).suffix
+    if data.startswith(b"\x89PNG"):
+        kind, ext = "png", ".png"
+    elif data.startswith(b"\xff\xd8") or suffix in {".jpg", ".jpeg"}:
+        kind, ext = "jpeg", ".jpg"
+    else:
+        return None
+    if kind == "jpeg" and not data.startswith(b"\xff\xd8"):
+        return None
+    digest = hashlib.sha256(data).hexdigest()
+    dest = _upload_dir(investigation_id) / f"{digest}{ext}"
+    if not dest.exists():
+        dest.write_bytes(data)
+    return {"digest": digest, "suffix": ext, "name": Path(filename).name[:160] or f"foto{ext}"}
+
+
+def case_image_path(investigation_id: str, digest: str) -> Path | None:
+    token = (digest or "").strip().lower()
+    if not token.isalnum() or len(token) != 64:
+        return None
+    folder = _upload_dir(investigation_id)
+    for ext in (".jpg", ".jpeg", ".png"):
+        path = folder / f"{token}{ext}"
+        if path.is_file():
+            return path
+    return None
+
+
 def metadata_summary(meta: dict[str, Any]) -> str:
     return ", ".join(f"{k}={v}" for k, v in meta.items() if v)

@@ -441,6 +441,135 @@ def test_alvo_name_stays_quiet_when_cpf_present() -> None:
     assert layer.candidates == []
 
 
+def test_qsa_same_name_links_target_instead_of_clone(settings, db) -> None:
+    seed = parse_seed("Eduardo Hermelino Leite", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=["cnpj_receita"],
+        max_depth=3,
+        monitor=False,
+        created_by="tester",
+    )
+    origin = next(e for e in inv.entities if e.is_seed)
+    from osint4all.connectors.base import ConnectorResult, FoundEdge
+    from sqlalchemy import select
+
+    first = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="EDUARDO HERMELINO LEITE",
+        display_name="EDUARDO HERMELINO LEITE",
+        attrs={"status": "unconfirmed", "papel": "Sócio", "candidate_key": "qsa:1:eduardo", "documento_ausente": True},
+        confidence=0.45,
+    )
+    second = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="Eduardo Hermelino Leite",
+        display_name="Eduardo Hermelino Leite",
+        attrs={"status": "unconfirmed", "papel": "Sócio", "candidate_key": "qsa:2:eduardo", "documento_ausente": True},
+        confidence=0.45,
+    )
+    apply_result(
+        db,
+        inv,
+        origin,
+        ConnectorResult(
+            entities=[
+                FoundEntity(entity_type="ORG", kind="CNPJ", value="33000167000101", display_name="Empresa A", confidence=0.9),
+                first,
+                FoundEntity(entity_type="ORG", kind="CNPJ", value="00394460005887", display_name="Empresa B", confidence=0.9),
+                second,
+            ],
+            edges=[
+                FoundEdge(from_ref=found_canonical_key(first), to_ref="cnpj:33000167000101", rel_type="SOCIO"),
+                FoundEdge(from_ref=found_canonical_key(second), to_ref="cnpj:00394460005887", rel_type="SOCIO"),
+            ],
+        ),
+        connector="cnpj_receita",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=3,
+    )
+    people = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON")).all()
+    assert len(people) == 1
+    assert people[0].id == origin.id
+    links = db.scalars(select(Edge).where(Edge.investigation_id == inv.id, Edge.rel_type == "SOCIO")).all()
+    assert len(links) == 2
+    assert all(edge.from_entity_id == origin.id or edge.to_entity_id == origin.id for edge in links)
+
+
+def test_consolidate_folds_existing_qsa_name_clones(settings, db) -> None:
+    from osint4all.db.repository import consolidate_identities
+    from sqlalchemy import select
+
+    seed = parse_seed("Eduardo Hermelino Leite", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=["cnpj_receita"],
+        max_depth=3,
+        monitor=False,
+        created_by="tester",
+    )
+    origin = next(e for e in inv.entities if e.is_seed)
+    company = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa A",
+        attrs={"status": "confirmed"},
+        depth=1,
+    )
+    clone = Entity(
+        investigation_id=inv.id,
+        entity_type="PERSON",
+        canonical_key="name:eduardo hermelino leite#cand:qsa:1:eduardo",
+        display_name="EDUARDO HERMELINO LEITE",
+        attrs={"status": "unconfirmed", "candidate_key": "qsa:1:eduardo"},
+        depth=2,
+    )
+    db.add_all([company, clone])
+    db.flush()
+    db.add(Edge(investigation_id=inv.id, from_entity_id=clone.id, to_entity_id=company.id, rel_type="SOCIO"))
+    db.flush()
+    assert consolidate_identities(db, inv.id) >= 1
+    people = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON")).all()
+    assert len(people) == 1
+    assert people[0].id == origin.id
+    links = db.scalars(select(Edge).where(Edge.investigation_id == inv.id, Edge.rel_type == "SOCIO")).all()
+    assert len(links) == 1
+    assert links[0].from_entity_id == origin.id or links[0].to_entity_id == origin.id
+
+
+def test_qsa_name_remaps_even_without_cpf_anchor() -> None:
+    profile = profile_from_fields({"NAME": "Eduardo Hermelino Leite"})
+    assert not profile.has_person_anchor
+    found = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="EDUARDO HERMELINO LEITE",
+        display_name="EDUARDO HERMELINO LEITE",
+        attrs={"status": "unconfirmed", "candidate_key": "qsa:1:eduardo"},
+        confidence=0.45,
+    )
+    assert bind_found_to_profile(found, profile) == "remap"
+    stranger = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="Joao Pereira Lima",
+        display_name="Joao Pereira Lima",
+        attrs={"status": "unconfirmed", "candidate_key": "qsa:1:joao"},
+        confidence=0.45,
+    )
+    assert bind_found_to_profile(stranger, profile) == "keep"
+
+
 def test_apply_result_drops_homonym_and_remaps_alias(settings, db) -> None:
     seed = parse_seed("529.982.247-25", forced_kind="CPF")
     name = parse_seed("Maria Silva Souza", forced_kind="NAME")

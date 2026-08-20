@@ -272,6 +272,9 @@ def apply_result(
 
     if consolidate:
         consolidate_identities(session, investigation.id)
+    from osint4all.graph.satellite import ensure_satellite_cards
+
+    ensure_satellite_cards(session, investigation)
     return created
 
 

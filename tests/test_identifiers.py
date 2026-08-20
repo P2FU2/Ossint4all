@@ -35,6 +35,11 @@ def test_canonical_keys() -> None:
     wealth = parse_seed("R$ 1 milhão|2024", forced_kind="WEALTH")
     assert wealth is not None
     assert wealth.entity_type == "ASSET"
+    house = parse_seed("Rua das Flores 100", forced_kind="PROPERTY")
+    assert house is not None
+    assert house.entity_type == "ASSET"
+    assert house.kind == "PROPERTY"
+    assert house.canonical_key.startswith("property:")
     assert canonical_key("PLATE", "abc-1d23") == "plate:ABC1D23"
     seed = parse_seed("ABC1D23")
     assert seed is not None

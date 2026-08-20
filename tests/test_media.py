@@ -387,6 +387,8 @@ def test_add_selected_media_creates_publication_nodes(monkeypatch, settings) -> 
     assert 'name="image_pick"' in panel.text
     assert "Adicionar selecionadas" in panel.text
     assert "menção pública" in panel.text
+    assert "abrir fonte oficial" in panel.text
+    assert 'href="https://g1.exemplo/a"' in panel.text
     token = re.search(r'name="csrf_token" value="([^"]+)"', panel.text).group(1)
     added = client.post(
         f"/app/casos/{case_id}/midia/adicionar",

@@ -51,11 +51,11 @@ def profile_from_fields(fields: dict[str, str] | None) -> TargetProfile:
 
 
 def bind_found_to_profile(found: FoundEntity, profile: TargetProfile | None) -> str:
-    """keep | skip | remap — remap liga o nome do alvo ao nó que já tem CPF."""
-    if not profile or not profile.has_person_anchor:
+    """keep | skip | remap — sócio com o mesmo nome do alvo vira ligação, não clone."""
+    if not profile:
         return "keep"
     label = str(getattr(found, "display_name", "") or getattr(found, "value", "") or "")
-    same_name = bool(profile.name and names_match(label, profile.name))
+    same_name = bool(profile.name and names_same_person(label, profile.name))
     kind = str(getattr(found, "kind", "") or "").upper()
     if kind == "CPF":
         digits = only_digits(str(getattr(found, "value", "") or ""))

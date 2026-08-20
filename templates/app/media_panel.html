@@ -9,9 +9,9 @@
 <form
   class="media-picker"
   method="post"
-  {% if media_case_id %}
-  action="/app/casos/{{ media_case_id }}/midia/adicionar"
-  hx-post="/app/casos/{{ media_case_id }}/midia/adicionar"
+  {% if media_case_id or cases %}
+  action="/app/casos/{{ media_case_id or cases[0].id }}/midia/adicionar"
+  hx-post="/app/casos/{{ media_case_id or cases[0].id }}/midia/adicionar"
   hx-target="#media-add-status"
   hx-swap="innerHTML"
   hx-disabled-elt="button.media-add"
@@ -24,7 +24,10 @@
   <input type="hidden" name="dest_case_id" value="{{ media_case_id }}" />
   {% elif cases %}
   <label class="media-case-pick">Caso
-    <select name="dest_case_id">
+    <select name="dest_case_id" required>
+      {% if not media_case_id %}
+      <option value="" selected>Escolha o caso</option>
+      {% endif %}
       {% for c in cases %}
       <option value="{{ c.id }}" {% if c.id == media_case_id %}selected{% endif %}>{{ c.title }}</option>
       {% endfor %}
@@ -90,11 +93,13 @@
     <button
       class="btn primary media-add"
       type="submit"
-      {% if not media_case_id or not (media.news or media.images) %}disabled{% endif %}
+      {% if not (media.news or media.images) or not (media_case_id or cases) %}disabled{% endif %}
       data-tip="Grava só o que está marcado, sem baixar arquivo"
     >Adicionar selecionadas ao caso</button>
-    {% if not media_case_id %}
+    {% if not media_case_id and not cases %}
     <p class="muted">Abra ou crie um caso para gravar as escolhidas no grafo.</p>
+    {% elif not media_case_id %}
+    <p class="muted">Escolha o caso no seletor acima antes de gravar.</p>
     {% elif not media.news and not media.images %}
     <p class="muted">Quando aparecerem matérias e fotos, marque e clique Adicionar selecionadas ao caso.</p>
     {% endif %}

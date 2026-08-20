@@ -1061,8 +1061,20 @@ def _hits_from_connector(parsed: Any, *, hit_kind: str, when: str) -> tuple[list
     for entity in list(getattr(parsed, "entities", None) or []):
         if entity.kind == "CNJ":
             facts.append(("Processo", entity.display_name))
+            fonte = str((entity.attrs or {}).get("fonte") or "")
+            hits.append(
+                ConsultHit(
+                    entity.display_name,
+                    f"{(entity.attrs or {}).get('tribunal') or ''} · capa processual".strip(" ·"),
+                    fonte,
+                    "processo",
+                )
+            )
         elif entity.kind == "NAME" and entity.display_name:
             facts.append((str((entity.attrs or {}).get("polo") or entity.entity_type or "Nome"), entity.display_name))
+    for note in list(getattr(parsed, "notes", None) or []):
+        if note:
+            facts.append(("Fonte", str(note)))
     return hits, timeline, facts
 
 
@@ -1093,8 +1105,10 @@ def _try_djen(settings: Settings, origin: str, display: str, entity_type: str) -
     )
     try:
         return DjenConnector(settings).collect(fake, SimpleNamespace())
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001
+        from osint4all.connectors.base import ConnectorResult
+
+        return ConnectorResult(notes=[f"DJEN: {exc}"])
 
 
 def _try_transparencia(settings: Settings, origin: str, display: str, id_kind: str) -> Any | None:
@@ -1170,8 +1184,11 @@ def _consult_processos(raw: str, settings: Settings | None = None, *, quick: boo
             if entity.kind == "CNJ":
                 nid = f"cnj-{only_digits(entity.value)}"
                 if nid not in {n.id for n in graph.nodes}:
-                    graph.nodes.append(GraphNode(nid, entity.display_name, "org", "processo"))
-                    graph.edges.append(GraphEdge("q", nid, "mencionado", "Número CNJ citado no DJEN."))
+                    graph.nodes.append(GraphNode(nid, entity.display_name, "case", entity.display_name))
+                    graph.edges.append(GraphEdge("q", nid, "parte", "Número CNJ citado no DJEN."))
+        for note in list(getattr(parsed, "notes", None) or []):
+            if note and note not in notes:
+                notes.append(str(note))
         quoted = f'"{display}"'
         web = _safe_web_search(
             settings,

@@ -98,6 +98,7 @@ _ID_KINDS = {
     "title": "Título",
     "bank": "Conta",
     "wealth": "Patrimônio",
+    "property": "Imóvel",
 }
 
 _STATUS_LABELS = {

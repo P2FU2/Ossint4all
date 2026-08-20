@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=32" defer></script>
+<script src="/static/graph.js?v=38" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -116,6 +116,7 @@
         <form class="stack" method="post" action="/app/casos/{{ inv.id }}/patrimonio">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="hidden" name="kind" value="bank" />
+          <input type="hidden" name="from_id" class="js-asset-from" value="" />
           <p class="section-kicker">conta bancária</p>
           <p class="muted">Dado que você já tem de fonte lícita. O painel não consulta banco.</p>
           <div class="inline-plate">
@@ -130,12 +131,30 @@
         <form class="stack" method="post" action="/app/casos/{{ inv.id }}/patrimonio">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="hidden" name="kind" value="wealth" />
+          <input type="hidden" name="from_id" class="js-asset-from" value="" />
           <p class="section-kicker">patrimônio estimado</p>
           <div class="inline-plate">
             <input name="amount" placeholder="R$ 2.400.000" required data-tip="Estimativa sua, com fonte. Não é declaração da Receita." />
             <input name="year" placeholder="Ano" inputmode="numeric" />
             <input name="source" placeholder="Fonte" />
             <button class="btn" type="submit">Gravar estimativa</button>
+          </div>
+        </form>
+        <form class="stack" method="post" action="/app/casos/{{ inv.id }}/imoveis" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="from_id" class="js-asset-from" value="" />
+          <p class="section-kicker">imóvel</p>
+          <p class="muted">Endereço e fotos que você já tem. O painel não consulta cartório.</p>
+          <div class="inline-plate">
+            <input name="address" placeholder="Endereço" data-tip="Rua, número, bairro" />
+            <input name="city" placeholder="Cidade" />
+            <input name="uf" placeholder="UF" maxlength="2" />
+            <input name="amount" placeholder="Valor (se souber)" />
+            <input name="photo_url" placeholder="URL da foto" data-tip="Miniatura pública, se já tiver o link" />
+            <label class="btn" data-tip="JPEG ou PNG. Até 6 fotos, 8 MB cada.">Fotos
+              <input type="file" name="fotos" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden />
+            </label>
+            <button class="btn" type="submit">Ligar imóvel</button>
           </div>
         </form>
         <form method="post" action="/app/casos/{{ inv.id }}/documento" enctype="multipart/form-data">
@@ -226,7 +245,7 @@
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
   <div class="graph-canvas">
-    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-asset-url="/app/casos/{{ inv.id }}/patrimonio" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-asset-url="/app/casos/{{ inv.id }}/patrimonio" data-property-url="/app/casos/{{ inv.id }}/imoveis" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
   </div>
   <div class="canvas-tools" aria-label="Canvas">
     <div class="canvas-tools-group">

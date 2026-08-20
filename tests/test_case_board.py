@@ -371,6 +371,66 @@ def test_add_bank_and_wealth_link_to_target(settings, db) -> None:
     assert add_wealth_estimate(db, inv, person, amount="") is None
 
 
+def test_add_property_with_photo_links_to_target(settings, db) -> None:
+    from osint4all.graph.assets import add_property
+
+    inv = _case(db)
+    person = inv.entities[0]
+    house = add_property(
+        db,
+        inv,
+        person,
+        address="Rua das Flores 100",
+        city="Santos",
+        uf="SP",
+        property_type="casa",
+        amount="R$ 890.000",
+        source="leilão Caixa",
+        photos=[{"url": "https://venda-imoveis.caixa.gov.br/foto.jpg", "title": "fachada"}],
+    )
+    db.flush()
+    assert house is not None
+    assert house.entity_type == "ASSET"
+    assert house.attrs["tipo"] == "imagem"
+    assert house.attrs["thumb"].startswith("https://")
+    assert house.attrs["municipio"] == "Santos"
+    places = (person.attrs or {}).get("places") or []
+    assert any(p.get("role") == "imovel" and p.get("uf") == "SP" for p in places)
+    rels = {e.rel_type for e in db.scalars(select(Edge).where(Edge.investigation_id == inv.id))}
+    assert "PROPRIETARIO" in rels
+    assert add_property(db, inv, person) is None
+
+
+def test_satellite_card_for_company_hq(settings, db) -> None:
+    from osint4all.graph.satellite import ensure_satellite_cards, satellite_urls
+
+    urls = satellite_urls(-23.5505, -46.6333)
+    assert "World_Imagery" in urls["thumb"]
+    assert "google.com/maps" in urls["page_url"]
+    assert "3m1!1e3" in urls["page_url"]
+
+    inv = _case(db)
+    firm = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa Sede",
+        attrs={"lat": -23.5505, "lng": -46.6333, "municipio": "São Paulo", "uf": "SP", "endereco": "Praça da Sé"},
+        depth=1,
+    )
+    db.add(firm)
+    db.flush()
+    assert ensure_satellite_cards(db, inv) == 1
+    assert ensure_satellite_cards(db, inv) == 0
+    sat = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.canonical_key.startswith("geo:"))).first()
+    assert sat is not None
+    assert sat.entity_type == "PUBLICATION"
+    assert sat.attrs["tipo"] == "imagem"
+    assert sat.attrs["thumb"].startswith("https://")
+    rels = {e.rel_type for e in db.scalars(select(Edge).where(Edge.investigation_id == inv.id))}
+    assert "SEDE" in rels
+
+
 def test_same_person_stays_in_one_block(settings, db) -> None:
     seed = parse_seed("Eduardo Hermelino Leite", forced_kind="NAME")
     inv = create_investigation(
@@ -408,17 +468,16 @@ def test_same_person_stays_in_one_block(settings, db) -> None:
     assert consolidate_identities(db, inv.id) >= 1
     db.expire_all()
     people = [e for e in db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON"))]
-    assert len(people) == 2
-    seed = next(e for e in people if e.is_seed)
-    twin_row = next(e for e in people if not e.is_seed)
-    assert (twin_row.attrs or {}).get("status") == "unconfirmed"
+    assert len(people) == 1
+    seed = people[0]
+    assert seed.is_seed
     kinds = {i.kind for i in seed.identifiers}
     assert "USERNAME" in kinds or (seed.canonical_key or "").startswith("username:") or any(
         (seed.attrs or {}).get("username")
     )
     payload = graph_payload(db, inv.id)
     labels = [n["label"] for n in payload["nodes"] if n["type"] == "PERSON"]
-    assert labels.count("Eduardo Hermelino Leite") == 2
+    assert labels.count("Eduardo Hermelino Leite") == 1
     edu = next(n for n in payload["nodes"] if n["type"] == "PERSON" and n.get("seed"))
     assert any(i["kind"] == "USERNAME" for i in edu["ids"])
 

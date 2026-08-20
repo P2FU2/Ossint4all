@@ -9,7 +9,7 @@ from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from osint4all.catalog.framework import load_framework_tree
-from osint4all.documents.metadata import ingest_local_file
+from osint4all.documents.metadata import case_image_path, ingest_local_file, store_case_image
 from osint4all.config import ALL_CONNECTORS, get_settings
 from osint4all.paths import project_root
 from osint4all.catalog.opensource import oss_cards
@@ -67,7 +67,7 @@ from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.media import collect_target_media, fields_from_identifiers, media_picks_to_result, parse_media_picks
-from osint4all.graph.assets import add_bank_account, add_wealth_estimate
+from osint4all.graph.assets import add_bank_account, add_property, add_wealth_estimate
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
 from osint4all.tools_suite import (
     MassResult,
@@ -973,8 +973,6 @@ def _media_page(
     _with_cases(ctx, request, session)
     ctx["media"] = media
     chosen = media_case_id or ctx.get("current_case_id") or ""
-    if not chosen and ctx.get("cases"):
-        chosen = ctx["cases"][0].id
     ctx["media_case_id"] = chosen
     ctx["media_locked_case"] = lock_case
     return templates.TemplateResponse(request, "app/media_panel.html", ctx, status_code=status_code)
@@ -1109,6 +1107,10 @@ def graph_page(
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app", status_code=303)
     request.session["current_case_id"] = inv.id
+    consolidate_identities(session, inv.id)
+    from osint4all.graph.satellite import ensure_satellite_cards
+
+    ensure_satellite_cards(session, inv)
     notes = list_notes(session, inv.id)
     dossier = case_identifiers(session, inv.id)
     ctx = template_context(request, user)
@@ -1673,13 +1675,19 @@ def detach_nodes(
             return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
         _set_flash(request, "error", "Investigação não encontrada.")
         return RedirectResponse("/app/casos", status_code=303)
-    removed = detach_entities(session, investigation_id, [item for item in entity_ids if item], keep_seeds=True)
+    wanted = [item for item in entity_ids if item]
+    removed = detach_entities(session, investigation_id, wanted, keep_seeds=True)
     write_audit(session, "entity.detach_batch", username=user.username, investigation_id=investigation_id, details={"removed": removed})
     session.commit()
     dest = _safe_next(investigation_id, next, f"/app/casos/{investigation_id}")
     if _wants_json(request):
         return _json_case(session, investigation_id, ok=True, removed=removed)
-    _set_flash(request, "ok", f"{removed} nó(s) removidos. O alvo permanece.")
+    if not wanted:
+        _set_flash(request, "error", "Nenhum nó removível marcado. O alvo não sai — use Apagar ligações para cortar só o vínculo.")
+    elif removed == 0:
+        _set_flash(request, "error", "Nada foi removido. O alvo permanece.")
+    else:
+        _set_flash(request, "ok", f"{removed} nó(s) removidos. O alvo permanece.")
     return RedirectResponse(dest, status_code=303)
 
 
@@ -1916,6 +1924,126 @@ def add_asset(
         return _json_case(session, investigation_id, ok=True)
     _set_flash(request, "ok", message)
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+def _photo_urls_from_text(*chunks: str) -> list[dict]:
+    shots: list[dict] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        for part in (chunk or "").replace(",", " ").split():
+            url = part.strip()
+            if not url.startswith(("http://", "https://")) or url in seen:
+                continue
+            seen.add(url)
+            shots.append({"url": url, "title": ""})
+    return shots
+
+
+@router.post("/app/casos/{investigation_id}/imoveis")
+async def add_property_route(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    from_id: str = Form(""),
+    address: str = Form(""),
+    city: str = Form(""),
+    uf: str = Form(""),
+    property_type: str = Form(""),
+    amount: str = Form(""),
+    registry: str = Form(""),
+    source: str = Form(""),
+    note: str = Form(""),
+    photo_url: str = Form(""),
+    fotos: list[UploadFile] = File(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    host = session.get(Entity, from_id) if from_id else None
+    if host is None or host.investigation_id != inv.id:
+        host = session.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.is_seed.is_(True)))
+    if host is None:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "sem nó para ligar o imóvel"}, status_code=400)
+        _set_flash(request, "error", "Não há alvo para ligar este imóvel.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    photos = _photo_urls_from_text(photo_url)
+    for arquivo in (fotos or [])[:6]:
+        name = (arquivo.filename or "").strip() or "foto.jpg"
+        data = await arquivo.read(_MAX_FILE_BYTES + 1)
+        if not data or len(data) > _MAX_FILE_BYTES:
+            continue
+        stored = store_case_image(inv.id, name, data)
+        if not stored:
+            continue
+        photos.append(
+            {
+                "url": f"/app/casos/{inv.id}/anexos/{stored['digest']}",
+                "title": stored["name"],
+            }
+        )
+    from osint4all.connectors.geo_public import address_query, lookup_coords
+    from osint4all.graph.satellite import ensure_satellite_cards
+
+    geo = lookup_coords(address_query({"endereco": address, "municipio": city, "uf": uf}))
+    node = add_property(
+        session,
+        inv,
+        host,
+        address=address,
+        city=city,
+        uf=uf,
+        property_type=property_type,
+        amount=amount,
+        registry=registry,
+        source=source,
+        note=note,
+        photos=photos,
+        lat=geo.get("lat"),
+        lng=geo.get("lng"),
+    )
+    if not node:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "informe endereço, cidade ou ao menos uma foto"}, status_code=400)
+        _set_flash(request, "error", "Informe endereço, cidade ou uma foto do imóvel.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    if geo.get("lat") is None:
+        enqueue_expand(session, investigation=inv, entity=node, depth=max(1, int(node.depth or 1)), max_attempts=get_settings().job_max_attempts)
+    ensure_satellite_cards(session, inv)
+    write_audit(
+        session,
+        "investigation.add_property",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"address": address, "city": city, "photos": len(photos)},
+    )
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True)
+    _set_flash(request, "ok", "Imóvel ligado ao nó. Dado manual — o painel não consulta cartório.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.get("/app/casos/{investigation_id}/anexos/{digest}")
+def case_image(
+    investigation_id: str,
+    digest: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+):
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return JSONResponse({"ok": False, "error": "não encontrado"}, status_code=404)
+    path = case_image_path(investigation_id, digest)
+    if not path:
+        return JSONResponse({"ok": False, "error": "foto não encontrada"}, status_code=404)
+    return FileResponse(path)
 
 
 @router.post("/app/casos/{investigation_id}/buscar-ferramentas")

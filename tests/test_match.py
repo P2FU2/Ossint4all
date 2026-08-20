@@ -120,8 +120,8 @@ def test_low_match_does_not_absorb(db) -> None:
         FoundEntity(
             entity_type="PERSON",
             kind="NAME",
-            value="Joao Silva Souza",
-            display_name="Joao Silva Souza",
+            value="Carlos Mendes Rocha",
+            display_name="Carlos Mendes Rocha",
             attrs={"status": "unconfirmed", "candidate_key": "qsa:outro", "documento_ausente": True},
             confidence=0.4,
         )
@@ -136,6 +136,7 @@ def test_low_match_does_not_absorb(db) -> None:
     assert extras
     extra = extras[0]
     assert extra.id != origin.id
+    assert extra.display_name != origin.display_name
     assert int((extra.attrs or {}).get("identity_match") or 0) < DOSSIER_MATCH_MIN
     assert not can_absorb_by_name(extra)
 

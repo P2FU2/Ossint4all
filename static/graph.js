@@ -1,6 +1,11 @@
 (function () {
   const root = document.getElementById("cy");
-  if (!root || typeof cytoscape === "undefined") return;
+  if (!root) return;
+  if (typeof cytoscape === "undefined") {
+    root.classList.add("is-dead");
+    root.textContent = "O motor do grafo não carregou (Cytoscape). Recarregue a página ou libere o CDN unpkg.com.";
+    return;
+  }
 
   const colors = {
     PERSON: "#5d7a88",
@@ -96,7 +101,8 @@
     maxZoom: 2.4,
     wheelSensitivity: 0.25,
     boxSelectionEnabled: false,
-    selectionType: "additive",
+    selectionType: "single",
+    autounselectify: true,
     style: [
       {
         selector: "node",
@@ -410,6 +416,8 @@
     });
   }
 
+  let placeMap = null;
+
   function markerLatLng(node) {
     const a = node.attrs || {};
     if (a.lat != null && a.lng != null) return [Number(a.lat), Number(a.lng)];
@@ -420,6 +428,95 @@
     const city = String(a.municipio || "");
     for (let i = 0; i < city.length; i += 1) extra += city.charCodeAt(i);
     return [center[0] + (extra % 7) * 0.08, center[1] + (extra % 5) * 0.08];
+  }
+
+  function geoStreetLayer() {
+    return L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: "OSM · CARTO",
+      subdomains: "abcd",
+      maxZoom: 18,
+    });
+  }
+
+  function geoSatLayer() {
+    return L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "Esri · Maxar · Earthstar",
+      maxZoom: 19,
+    });
+  }
+
+  function geoMarkIcon() {
+    return L.divIcon({
+      className: "geo-mark",
+      html: '<span class="geo-pulse"></span><span class="geo-core"></span>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+      popupAnchor: [0, -12],
+    });
+  }
+
+  function attachGeoBasemap(host, leaflet, start) {
+    const street = geoStreetLayer();
+    const sat = geoSatLayer();
+    let mode = start === "street" ? "street" : "sat";
+    function apply(next) {
+      mode = next === "street" ? "street" : "sat";
+      if (mode === "street") {
+        if (leaflet.hasLayer(sat)) leaflet.removeLayer(sat);
+        if (!leaflet.hasLayer(street)) street.addTo(leaflet);
+        if (leaflet.getZoom() > 18) leaflet.setZoom(18);
+      } else {
+        if (leaflet.hasLayer(street)) leaflet.removeLayer(street);
+        if (!leaflet.hasLayer(sat)) sat.addTo(leaflet);
+      }
+      host.classList.toggle("is-street", mode === "street");
+      host.querySelectorAll(".geo-basemap [data-base]").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.base === mode);
+      });
+    }
+    let bar = host.querySelector(".geo-basemap");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "geo-basemap track-group";
+      bar.innerHTML =
+        '<button type="button" class="track-item" data-base="sat">Satélite</button>' +
+        '<button type="button" class="track-item" data-base="street">Mapa</button>';
+      host.appendChild(bar);
+    }
+    bar.querySelectorAll("[data-base]").forEach((btn) => {
+      btn.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        apply(btn.dataset.base);
+      };
+    });
+    apply(mode);
+    return apply;
+  }
+
+  function destroyPlaceMap() {
+    if (!placeMap) return;
+    placeMap.remove();
+    placeMap = null;
+  }
+
+  function mountPlaceMap(host, lat, lng) {
+    destroyPlaceMap();
+    if (!host || typeof L === "undefined") return;
+    host.classList.add("geo-stage", "is-ready");
+    placeMap = L.map(host, {
+      zoomControl: false,
+      attributionControl: true,
+      fadeAnimation: false,
+    }).setView([lat, lng], 19);
+    L.control.zoom({ position: "bottomright" }).addTo(placeMap);
+    attachGeoBasemap(host, placeMap, "sat");
+    L.marker([lat, lng], { icon: geoMarkIcon(), keyboard: false }).addTo(placeMap);
+    window.setTimeout(() => {
+      if (!placeMap) return;
+      placeMap.invalidateSize();
+      placeMap.setView([lat, lng], 19);
+    }, 80);
   }
 
   function escapeHtml(text) {
@@ -433,10 +530,19 @@
       .replace(/"/g, "&quot;");
   }
 
+  function mapPlaces() {
+    return (payload.nodes || []).filter((n) => {
+      if (String((n.key || "")).indexOf("geo:") === 0) return false;
+      const a = n.attrs || {};
+      if (a.lat != null && a.lng != null) return n.type === "ORG" || n.type === "ASSET" || n.type === "VEHICLE";
+      return n.type === "ORG";
+    });
+  }
+
   function renderMap() {
     const el = document.getElementById("org-map");
     if (!el || typeof L === "undefined") return;
-    const orgs = (payload.nodes || []).filter((n) => n.type === "ORG");
+    const places = mapPlaces();
     if (map) {
       map.remove();
       map = null;
@@ -450,37 +556,34 @@
     map.on("moveend zoomend", () => {
       if (typeof schedulePushView === "function") schedulePushView();
     });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: "OSM · CARTO · scan_geo",
-      subdomains: "abcd",
-      maxZoom: 18,
-    }).addTo(map);
-    const icon = L.divIcon({
-      className: "geo-mark",
-      html: '<span class="geo-pulse"></span><span class="geo-core"></span>',
-      iconSize: [22, 22],
-      iconAnchor: [11, 11],
-      popupAnchor: [0, -12],
-    });
+    el.classList.add("geo-stage");
+    attachGeoBasemap(el, map, "street");
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+    const icon = geoMarkIcon();
     const bounds = [];
     let plotted = 0;
-    orgs.forEach((node) => {
+    places.forEach((node) => {
       const latlng = markerLatLng(node);
       if (!latlng) return;
       plotted += 1;
       bounds.push(latlng);
       const a = node.attrs || {};
-      const loc = [a.municipio, a.uf].filter(Boolean).join(" / ") || "UF aproximada";
+      const loc = [a.endereco, a.municipio, a.uf].filter(Boolean).join(" · ") || "UF aproximada";
       const exact = a.lat != null && a.lng != null;
+      const kind = node.type === "ORG" ? "empresa" : node.type === "ASSET" ? "imóvel" : "local";
+      const maps = exact
+        ? "https://www.google.com/maps/@" + Number(a.lat).toFixed(6) + "," + Number(a.lng).toFixed(6) + ",18z/data=!3m1!1e3"
+        : "";
       const marker = L.marker(latlng, { icon, keyboard: false }).addTo(map);
       marker.bindPopup(
         `<div class="geo-pop">` +
-          `<p class="type-tag">empresa</p>` +
+          `<p class="type-tag">${kind}</p>` +
           `<strong>${escapeHtml(node.label)}</strong>` +
-          `<p>${escapeHtml(a.situacao || "situação não informada")}</p>` +
+          `<p>${escapeHtml(a.situacao || a.tipo_imovel || "localização")}</p>` +
           `<p class="muted">${escapeHtml(loc)}${exact ? "" : " · pin pela UF"}</p>` +
           (a.nota ? `<p class="muted">${escapeHtml(a.nota)}</p>` : "") +
-          `<a class="btn primary" href="${root.dataset.entityBase}${node.id}">abrir ficha</a>` +
+          (maps ? `<a class="btn primary" href="${maps}" target="_blank" rel="noopener noreferrer">Google Maps satélite</a>` : "") +
+          `<a class="btn" href="${root.dataset.entityBase}${node.id}">abrir ficha</a>` +
           `</div>`,
         { className: "geo-popup", maxWidth: 280 }
       );
@@ -493,14 +596,23 @@
     }
     hud.innerHTML =
       `<strong>${plotted}</strong>` +
-      `<span>${orgs.length - plotted ? (orgs.length - plotted) + " sem pin" : "grid"}</span>`;
+      `<span>${places.length - plotted ? (places.length - plotted) + " sem pin" : "satélite"}</span>`;
     const savedMap = (payload.layout || {}).map;
     if (savedMap && savedMap.lat != null && savedMap.lng != null) {
       map.setView([Number(savedMap.lat), Number(savedMap.lng)], Number(savedMap.zoom) || 4);
     } else if (bounds.length) {
-      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 11 });
+      const close = places.some((n) => n.attrs && n.attrs.lat != null && n.attrs.lng != null);
+      map.fitBounds(bounds, { padding: [36, 36], maxZoom: close ? 17 : 11 });
     }
-    setTimeout(() => map.invalidateSize(), 80);
+    const refreshMapSize = () => {
+      if (!map) return;
+      map.invalidateSize({ animate: false });
+    };
+    requestAnimationFrame(() => {
+      refreshMapSize();
+      window.setTimeout(refreshMapSize, 60);
+      window.setTimeout(refreshMapSize, 240);
+    });
   }
 
   function activeView() {
@@ -524,6 +636,7 @@
       stage.classList.toggle("is-split", view === "split");
       stage.classList.toggle("is-map", view === "mapa");
     }
+    if (view === "mapa" && typeof setSelectMode === "function") setSelectMode(false);
     if (view === "split") renderSplit();
     if (view === "mapa") renderMap();
     if (view === "arvore") applyLayout("arvore");
@@ -669,6 +782,8 @@
     patrimonio_estimado: "patrimônio",
     patrimonio_ano: "ano da estimativa",
     patrimonio_fonte: "fonte do patrimônio",
+    tipo_imovel: "tipo do imóvel",
+    matricula: "matrícula (informada)",
   };
   const balloon = document.getElementById("graph-balloon");
   const gbKind = document.getElementById("gb-kind");
@@ -692,7 +807,7 @@
 
   function officialUrl(rec, el) {
     const bag = (rec && rec.attrs) || (el && el.data && el.data("attrs")) || {};
-    for (const key of ["page_url", "fonte"]) {
+    for (const key of ["maps_url", "page_url", "fonte"]) {
       const val = String(bag[key] || "");
       if (/^https?:\/\//i.test(val)) return val;
     }
@@ -714,6 +829,7 @@
   }
 
   function fillBalloon(el, full) {
+    if (!full) destroyPlaceMap();
     if (!balloon || !gbKind || !gbTitle || !gbLead || !gbFacts || !gbActions) return;
     const isEdge = el.isEdge && el.isEdge();
     if (isEdge) {
@@ -762,14 +878,30 @@
     gbFacts.hidden = !full;
     const sourceUrl = officialUrl(rec, el);
     if (full) {
+      destroyPlaceMap();
+      const lat = Number(attrs.lat);
+      const lng = Number(attrs.lng);
+      const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
       const thumb = String(attrs.thumb || el.data("thumb") || "");
-      if (thumb && /^https?:\/\//i.test(thumb)) {
+      if (!hasGeo && thumb && /^https?:\/\//i.test(thumb)) {
         const pic = document.createElement("img");
         pic.className = "graph-balloon-thumb";
         pic.src = thumb;
         pic.alt = "";
         pic.referrerPolicy = "no-referrer";
         gbFacts.appendChild(pic);
+      }
+      if (hasGeo) {
+        const box = document.createElement("div");
+        box.className = "graph-balloon-map geo-stage";
+        box.addEventListener("click", (event) => event.stopPropagation());
+        box.addEventListener("mousedown", (event) => event.stopPropagation());
+        box.addEventListener("wheel", (event) => event.stopPropagation());
+        gbFacts.appendChild(box);
+        requestAnimationFrame(() => {
+          mountPlaceMap(box, lat, lng);
+          placeBalloon(el);
+        });
       }
       const key = rec.key || el.data("key") || "";
       if (key && key.indexOf("url:") !== 0) gbFacts.appendChild(factRow("chave", key));
@@ -796,7 +928,7 @@
         src.href = sourceUrl;
         src.target = "_blank";
         src.rel = "noopener noreferrer";
-        src.textContent = "Abrir fonte oficial";
+        src.textContent = /google\.com\/maps/i.test(sourceUrl) ? "Abrir no Google Maps" : "Abrir fonte oficial";
         src.addEventListener("click", (event) => event.stopPropagation());
         gbActions.appendChild(src);
       }
@@ -879,6 +1011,7 @@
 
   function hideMini() {
     if (!balloon || balloonLocked) return;
+    destroyPlaceMap();
     balloon.classList.remove("is-visible", "is-open");
     balloon.hidden = true;
     balloonTarget = null;
@@ -886,8 +1019,12 @@
 
   function closeBalloon() {
     balloonLocked = false;
-    cy.elements().unselect();
     hideMini();
+  }
+
+  function clearSelection() {
+    cy.elements().unselect();
+    refreshMultiChrome();
   }
 
   function scheduleHide() {
@@ -898,18 +1035,49 @@
     }, 160);
   }
 
+  function bindAssetHost(id) {
+    document.querySelectorAll("input.js-asset-from").forEach((el) => {
+      el.value = id || "";
+    });
+  }
+
   cy.on("tap", "node", (evt) => {
     if (window.graphLinkPick && window.graphLinkPick(evt.target)) return;
     evt.preventDefault();
+    const orig = evt.originalEvent || {};
+    if (selectMode) return;
+    if (orig.ctrlKey || orig.metaKey) {
+      const node = evt.target;
+      if (node.selected()) node.unselect();
+      else node.select();
+      closeBalloon();
+      refreshMultiChrome();
+      if (window.setActionStatus) {
+        const n = cy.nodes(":selected").length;
+        window.setActionStatus("ok", n ? n + " quadro(s) marcados. Botão direito para ações." : "Seleção limpa.");
+      }
+      return;
+    }
+    cy.nodes().unselect();
+    evt.target.select();
+    refreshMultiChrome();
+    bindAssetHost(evt.target.id());
     openFull(evt.target);
   });
   cy.on("tap", "edge", (evt) => {
     if (window.graphLinkPick) return;
     evt.preventDefault();
+    if (selectMode) return;
+    const orig = evt.originalEvent || {};
+    if (!(orig.ctrlKey || orig.metaKey)) cy.nodes().unselect();
+    refreshMultiChrome();
     openFull(evt.target);
   });
   cy.on("tap", (evt) => {
-    if (evt.target === cy) closeBalloon();
+    if (evt.target !== cy) return;
+    const orig = evt.originalEvent || {};
+    if (!(orig.ctrlKey || orig.metaKey) && !selectMode) clearSelection();
+    closeBalloon();
   });
   cy.on("mouseover", "node", (evt) => {
     window.clearTimeout(hideTimer);
@@ -1350,9 +1518,11 @@
       if (value) input.value = value;
     }
     input.name = name;
-    if (type !== "select" && value) input.value = value;
+    if (type !== "select" && type !== "file" && value) input.value = value;
     if (extra && extra.placeholder) input.placeholder = extra.placeholder;
     if (extra && extra.required) input.required = true;
+    if (extra && extra.accept) input.accept = extra.accept;
+    if (extra && extra.multiple) input.multiple = true;
     wrap.appendChild(input);
     return wrap;
   }
@@ -1390,6 +1560,19 @@
       gcFields.appendChild(field("Valor", "amount", "text", "", { required: true, placeholder: "R$ 2.400.000" }));
       gcFields.appendChild(field("Ano", "year", "text", "", { placeholder: "2024" }));
       gcFields.appendChild(field("Fonte", "source", "text", "", { placeholder: "notícia, leilão, declaração…" }));
+      gcFields.appendChild(field("Nota", "note", "text", "", { placeholder: "opcional" }));
+    } else if (mode === "property") {
+      gcKind.textContent = "imóvel";
+      gcTitle.textContent = "Adicionar imóvel";
+      gcLead.textContent = "Endereço e fotos de fonte lícita. O painel não consulta cartório.";
+      gcFields.appendChild(field("Endereço", "address", "text", "", { placeholder: "Rua, número, bairro" }));
+      gcFields.appendChild(field("Cidade", "city", "text", "", { placeholder: "Município" }));
+      gcFields.appendChild(field("UF", "uf", "text", "", { placeholder: "SP" }));
+      gcFields.appendChild(field("Tipo", "property_type", "select", "", { options: [["", "—"], ["casa", "Casa"], ["apartamento", "Apartamento"], ["terreno", "Terreno"], ["sala", "Sala"], ["galpão", "Galpão"], ["sítio", "Sítio"], ["outro", "Outro"]] }));
+      gcFields.appendChild(field("Valor", "amount", "text", "", { placeholder: "se souber" }));
+      gcFields.appendChild(field("Fonte", "source", "text", "", { placeholder: "leilão, notícia, processo…" }));
+      gcFields.appendChild(field("Fotos", "fotos", "file", "", { accept: "image/jpeg,image/png,.jpg,.jpeg,.png", multiple: true }));
+      gcFields.appendChild(field("URL da foto", "photo_url", "text", "", { placeholder: "https://… miniatura pública" }));
       gcFields.appendChild(field("Nota", "note", "text", "", { placeholder: "opcional" }));
     } else if (mode === "diagram") {
       gcKind.textContent = "diagrama";
@@ -1509,6 +1692,43 @@
     }
   }
 
+  async function postMultipart(url, form, status) {
+    const body = form instanceof FormData ? form : new FormData();
+    if (!body.has("csrf_token")) body.set("csrf_token", csrfToken());
+    const loading = (status && status.loading) || "Gravando no quadro…";
+    const done = (status && status.done) || "Quadro atualizado.";
+    mutating = true;
+    if (window.setActionStatus) window.setActionStatus("loading", loading);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        redirect: "follow",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error("http " + res.status);
+      const ctype = (res.headers.get("content-type") || "").toLowerCase();
+      if (ctype.includes("json")) {
+        const data = await res.json();
+        if (data && data.ok === false) throw new Error(data.error || "falhou");
+        if (data) applyPulse(data);
+      }
+      if (window.setActionStatus) window.setActionStatus("ok", done);
+      try {
+        await load();
+      } catch (_) {
+        if (window.setActionStatus) window.setActionStatus("error", "Ação feita. Recarregue se o grafo não mudou.");
+      }
+    } catch (_) {
+      if (window.setActionStatus) window.setActionStatus("error", "Não concluiu nesta passagem. Confira endereço ou as fotos.");
+    } finally {
+      mutating = false;
+      if (window.unlockActionForms) window.unlockActionForms();
+      schedulePoll(800);
+    }
+  }
+
   function probeNode(id, label, kind) {
     const name = label || "nó";
     const fields = kind ? { kind: kind } : {};
@@ -1572,6 +1792,14 @@
         }, {
           loading: "Gravando no dossiê…",
           done: composerMode === "bank" ? "Conta ligada ao nó." : "Patrimônio estimado gravado.",
+        });
+      } else if (composerMode === "property") {
+        const body = new FormData(composerForm);
+        body.set("csrf_token", csrfToken());
+        body.set("from_id", composer.dataset.entityId || seedNodeId());
+        await postMultipart(root.dataset.propertyUrl, body, {
+          loading: "Ligando imóvel…",
+          done: "Imóvel ligado ao nó.",
         });
       } else if (composerMode === "link") {
         await postBoard(root.dataset.linkUrl, {
@@ -1705,6 +1933,25 @@
     return cy.nodes(":selected").filter((node) => !node.data("seed"));
   }
 
+  function selectedNodes() {
+    return cy.nodes(":selected");
+  }
+
+  function refreshMultiChrome() {
+    if (selectMode) {
+      refreshSelectBar();
+      return;
+    }
+    const picked = selectedNodes();
+    const n = selectedRemovable().length;
+    if (selectBar) selectBar.hidden = picked.length < 2;
+    if (selectCount && picked.length >= 2) {
+      selectCount.textContent = n
+        ? n + " quadro(s) marcados" + (picked.length - n ? " · alvo incluso" : "") + ". Botão direito para ações."
+        : "O alvo está marcado. Marque outros com Ctrl+clique.";
+    }
+  }
+
   function refreshSelectBar() {
     if (!selectCount) return;
     const n = selectedRemovable().length;
@@ -1745,14 +1992,83 @@
       if (window.setActionStatus) window.setActionStatus("error", "Nenhum nó além do alvo nesta área.");
       return;
     }
-    if (!confirm("Excluir " + ids.length + " nó(s) desta área? O alvo permanece.")) return;
+    deleteSelectedNodes();
+  }
+
+  function deleteSelectedNodes() {
+    const ids = selectedRemovable().map((node) => node.id());
+    if (!ids.length) {
+      if (window.setActionStatus) window.setActionStatus("error", "Nenhum nó além do alvo na seleção.");
+      return;
+    }
+    if (!confirm("Excluir " + ids.length + " quadro(s) selecionados? O alvo permanece.")) return;
     postBoard(root.dataset.batchUrl, { entity_ids: ids }, {
-      loading: "Removendo a área…",
-      done: ids.length + " nó(s) excluídos.",
+      loading: "Removendo selecionados…",
+      done: ids.length + " quadro(s) excluídos.",
       skipReload: true,
       removeIds: ids,
     });
     setSelectMode(false);
+    clearSelection();
+  }
+
+  function validateSelectedNodes() {
+    const nodes = selectedNodes().filter((node) => node.data("status") !== "confirmed");
+    if (!nodes.length) {
+      if (window.setActionStatus) window.setActionStatus("ok", "Nada para validar nesta seleção.");
+      return;
+    }
+    nodes.forEach((node) => validateNode(node.id()));
+  }
+
+  function copySelectedNames() {
+    const text = selectedNodes().map((node) => node.data("name") || node.data("label") || "").filter(Boolean).join("\n");
+    if (text && navigator.clipboard) navigator.clipboard.writeText(text);
+    if (window.setActionStatus) window.setActionStatus("ok", "Nomes copiados.");
+  }
+
+  function probeSelected(kinds, label) {
+    const nodes = selectedRemovable();
+    if (!nodes.length) {
+      if (window.setActionStatus) window.setActionStatus("error", "Marque nós além do alvo.");
+      return;
+    }
+    nodes.forEach((node) => probeKinds(node.id(), kinds, label));
+  }
+
+  function expandSelectedNodes() {
+    const nodes = selectedRemovable();
+    if (!nodes.length) {
+      if (window.setActionStatus) window.setActionStatus("error", "Marque nós além do alvo.");
+      return;
+    }
+    nodes.forEach((node) => {
+      postBoard(root.dataset.entityBase + node.id() + "/expandir", {}, {
+        loading: "Rodando expansão…",
+        done: "Expansão na fila — o grafo atualiza sozinho.",
+      });
+    });
+  }
+
+  function showMultiMenu(evt) {
+    const picked = selectedNodes();
+    const removable = selectedRemovable();
+    const head = document.createElement("div");
+    head.className = "k";
+    head.textContent = picked.length + " quadros";
+    menu.appendChild(head);
+    menu.appendChild(menuButton("Excluir selecionados", deleteSelectedNodes));
+    menu.appendChild(menuButton("Validar selecionados", validateSelectedNodes));
+    menu.appendChild(menuButton("Expandir selecionados", expandSelectedNodes));
+    menu.appendChild(menuButton("Buscar processos nos marcados", () => probeSelected(["PROCESSOS"], "processos")));
+    menu.appendChild(menuButton("Buscar empresas nos marcados", () => probeSelected(["COMPANIES"], "empresas")));
+    menu.appendChild(menuButton("Buscar sócios (QSA) nos marcados", () => probeSelected(["QSA"], "sócios")));
+    menu.appendChild(menuButton("Copiar nomes", copySelectedNames));
+    menu.appendChild(menuButton("Limpar seleção", clearSelection));
+    if (!removable.length) {
+      if (window.setActionStatus) window.setActionStatus("ok", "O alvo está na seleção — ele não será excluído.");
+    }
+    placeMenu((evt.originalEvent || {}).clientX || 16, (evt.originalEvent || {}).clientY || 16);
   }
 
   function showMenu(evt, kind) {
@@ -1763,6 +2079,10 @@
     const orig = evt.originalEvent || {};
     const head = document.createElement("div");
     head.className = "k";
+    if (kind === "multi") {
+      showMultiMenu(evt);
+      return;
+    }
     if (kind === "node") {
       const node = evt.target;
       const type = node.data("type") || "";
@@ -1777,6 +2097,7 @@
         menu.appendChild(menuButton("Buscar processos", () => probeKinds(node.id(), ["PROCESSOS"], "processos")));
         menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar imóvel", () => openComposer("property", { entityId: node.id() })));
       } else if (type === "CASE") {
         menu.appendChild(menuButton("Buscar comunicações deste processo", () => probeKinds(node.id(), ["PROCESSOS", "CNJ"], "processos")));
       } else {
@@ -1801,6 +2122,7 @@
         menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar imóvel", () => openComposer("property", { entityId: node.id() })));
       }
       menu.appendChild(menuButton("Abrir ficha", () => {
         window.location.href = root.dataset.entityBase + node.id();
@@ -1859,6 +2181,7 @@
       menu.appendChild(menuButton("Adicionar empresa (CNPJ)", () => openComposer("cnpj", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: seedNodeId() })));
+      menu.appendChild(menuButton("Adicionar imóvel", () => openComposer("property", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Selecionar área e excluir", () => setSelectMode(true)));
       menu.appendChild(menuButton("Adicionar anotação", () => openComposer("note")));
       menu.appendChild(menuButton("Adicionar diagrama", () => openComposer("diagram")));
@@ -1870,7 +2193,13 @@
   cy.on("cxttap", "node", (evt) => {
     evt.preventDefault();
     if (selectMode) return;
-    showMenu(evt, "node");
+    const node = evt.target;
+    if (!node.selected()) {
+      cy.nodes().unselect();
+      node.select();
+      refreshMultiChrome();
+    }
+    showMenu(evt, selectedNodes().length > 1 ? "multi" : "node");
   });
   cy.on("cxttap", "edge", (evt) => {
     evt.preventDefault();
@@ -1884,7 +2213,7 @@
       setSelectMode(false);
       return;
     }
-    showMenu(evt, "bg");
+    showMenu(evt, selectedNodes().length > 1 ? "multi" : "bg");
   });
   function blockBrowserMenu(event) {
     if (!event.target || !event.target.closest) return;
@@ -1905,7 +2234,10 @@
   const selectDelete = document.getElementById("graph-select-delete");
   const selectCancel = document.getElementById("graph-select-cancel");
   if (selectDelete) selectDelete.addEventListener("click", deleteSelectedArea);
-  if (selectCancel) selectCancel.addEventListener("click", () => setSelectMode(false));
+  if (selectCancel) selectCancel.addEventListener("click", () => {
+    if (selectMode) setSelectMode(false);
+    else clearSelection();
+  });
   if (selectBar) selectBar.addEventListener("click", (event) => event.stopPropagation());
   root.addEventListener("mousedown", (event) => {
     if (!selectMode || event.button !== 0) return;
@@ -1924,7 +2256,7 @@
     hideLasso();
   });
   cy.on("select unselect", "node", () => {
-    if (selectMode) refreshSelectBar();
+    refreshMultiChrome();
   });
   document.addEventListener("click", hideMenu);
   document.addEventListener("keydown", (event) => {
@@ -1933,6 +2265,7 @@
     closeComposer();
     stopLink();
     if (selectMode) setSelectMode(false);
+    else if (selectedNodes().length) clearSelection();
   });
 
   document.querySelectorAll('form[action*="/explodir"], form[action*="/processar"]').forEach((form) => {

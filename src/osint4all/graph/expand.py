@@ -20,7 +20,7 @@ PROBE_CONNECTORS = {
     "PHONE": frozenset({"phone_public", "web_search"}),
     "NAME": frozenset({"socio_search", "web_search", "wikidata", "tse", "google_public"}),
     "CPF": frozenset({"socio_search", "tse", "transparencia", "web_search"}),
-    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search"}),
+    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search", "geo_public"}),
     "COMPANIES": frozenset({"socio_search", "cnpj_receita"}),
     "QSA": frozenset({"cnpj_receita", "socio_search"}),
     "PROCESSOS": frozenset({"djen", "datajud"}),
