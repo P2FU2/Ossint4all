@@ -18,6 +18,14 @@ def test_suite_search_and_internal_urls() -> None:
     assert tool_id_for_kind("URL") == "crtsh"
 
 
+def test_processos_result_becomes_cnj_seed() -> None:
+    parts = [ConsultResult(kind="PROCESSOS", query="0000123-45.2024.8.26.0100", title="CNJ", summary="", ok=True)]
+    seeds = seeds_from_results(parts)
+    assert len(seeds) == 1
+    assert seeds[0].kind == "CNJ"
+    assert seeds[0].entity_type == "CASE"
+
+
 def test_mass_plate_offline() -> None:
     mass = run_mass("ABC1D23", live=False)
     assert mass.ok

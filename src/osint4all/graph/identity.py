@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from osint4all.connectors.base import FoundEntity
 from osint4all.db.models import Entity
 from osint4all.identifiers import canonical_key
+
+if TYPE_CHECKING:
+    from osint4all.connectors.base import FoundEntity
+
+MAX_GRAPH_DEPTH = 6
 
 
 def collapse_name(value: str) -> str:
@@ -47,6 +51,15 @@ _EXPAND_PREFIXES = ("cnpj:", "cpf:", "email:", "phone:", "username:", "plate:", 
 _EXPAND_KINDS = frozenset({"CNPJ", "CPF", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ"})
 
 
+def is_qsa_partner(obj: FoundEntity | Entity | dict[str, Any] | None) -> bool:
+    if obj is None:
+        return False
+    attrs = obj if isinstance(obj, dict) else getattr(obj, "attrs", None) or {}
+    if attrs.get("papel") or attrs.get("documento_ausente"):
+        return True
+    return str(attrs.get("candidate_key") or "").startswith("qsa:")
+
+
 def has_expandable_anchor(obj: FoundEntity | Entity | dict[str, Any] | None) -> bool:
     """CNPJ/CPF e outros IDs fortes podem expandir mesmo se o nó chegou como candidato."""
     if obj is None:
@@ -62,7 +75,18 @@ def has_expandable_anchor(obj: FoundEntity | Entity | dict[str, Any] | None) -> 
 
 
 def should_enqueue_child(found: FoundEntity, entity: Entity) -> bool:
+    found_type = str(getattr(found, "entity_type", "") or "")
+    entity_type = str(getattr(entity, "entity_type", "") or "")
+    if found_type == "PROFILE" or entity_type == "PROFILE":
+        return False
     if has_expandable_anchor(found) or has_expandable_anchor(entity):
+        return True
+    name = str(getattr(found, "display_name", "") or getattr(entity, "display_name", "") or "")
+    if (
+        (found_type == "PERSON" or entity_type == "PERSON")
+        and (is_qsa_partner(found) or is_qsa_partner(entity))
+        and not is_weak_name(name)
+    ):
         return True
     return not (is_unconfirmed(found) or is_unconfirmed(entity))
 

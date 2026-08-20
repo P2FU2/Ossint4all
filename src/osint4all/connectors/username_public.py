@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from osint4all.config import Settings
@@ -48,16 +49,164 @@ PUBLIC_PROFILE_TEMPLATES: list[tuple[str, str]] = [
 
 CORE_PROFILE_TEMPLATES = PUBLIC_PROFILE_TEMPLATES[:12]
 
+# Slugs de marca/plataforma e caminhos genéricos — não são o @user do alvo.
+RESERVED_USERNAMES = frozenset(
+    {
+        "github",
+        "gitlab",
+        "bitbucket",
+        "codeberg",
+        "reddit",
+        "medium",
+        "devto",
+        "dev",
+        "hackernews",
+        "news",
+        "wikipedia",
+        "wiki",
+        "x",
+        "twitter",
+        "nitter",
+        "youtube",
+        "yt",
+        "tiktok",
+        "keybase",
+        "twitch",
+        "soundcloud",
+        "telegram",
+        "tg",
+        "pinterest",
+        "flickr",
+        "linktree",
+        "linktr",
+        "about",
+        "aboutme",
+        "replit",
+        "kaggle",
+        "huggingface",
+        "hugging",
+        "npm",
+        "docker",
+        "dockerhub",
+        "gravatar",
+        "vimeo",
+        "dribbble",
+        "behance",
+        "steam",
+        "lichess",
+        "producthunt",
+        "instagram",
+        "insta",
+        "facebook",
+        "fb",
+        "whatsapp",
+        "linkedin",
+        "snapchat",
+        "discord",
+        "threads",
+        "mastodon",
+        "tumblr",
+        "signal",
+        "skype",
+        "google",
+        "apple",
+        "microsoft",
+        "amazon",
+        "netflix",
+        "spotify",
+        "official",
+        "oficial",
+        "admin",
+        "administrador",
+        "root",
+        "support",
+        "suporte",
+        "help",
+        "info",
+        "contato",
+        "contact",
+        "login",
+        "signup",
+        "api",
+        "www",
+        "http",
+        "https",
+        "mailto",
+        "settings",
+        "explore",
+        "search",
+        "download",
+        "app",
+        "apps",
+        "blog",
+        "shop",
+        "store",
+        "status",
+        "privacy",
+        "terms",
+        "legal",
+        "careers",
+        "jobs",
+        "press",
+        "brand",
+        "business",
+        "ads",
+        "security",
+        "safety",
+        "community",
+        "developer",
+        "developers",
+        "home",
+        "index",
+        "user",
+        "users",
+        "profile",
+        "perfil",
+        "channel",
+        "canal",
+        "page",
+        "pagina",
+    }
+)
 
-def parse_public_hits(hits: list[tuple[str, str]], *, origin_key: str) -> ConnectorResult:
+
+def normalize_username(value: str | None) -> str:
+    if not value:
+        return ""
+    user = str(value).strip().lstrip("@")
+    user = user.split("/")[-1].split("?")[0].split("#")[0]
+    user = user.casefold()
+    return re.sub(r"[^a-z0-9._-]", "", user)
+
+
+def is_reserved_username(value: str | None) -> bool:
+    user = normalize_username(value)
+    if not user or len(user) < 2:
+        return True
+    compact = user.replace(".", "").replace("_", "").replace("-", "")
+    return user in RESERVED_USERNAMES or compact in RESERVED_USERNAMES
+
+
+def parse_public_hits(hits: list[tuple[str, str]], *, origin_key: str, user: str = "") -> ConnectorResult:
+    handle = normalize_username(user) or normalize_username(
+        origin_key.split(":", 1)[1] if origin_key.startswith("username:") else ""
+    )
     out = ConnectorResult()
+    if handle and is_reserved_username(handle):
+        return out
     for label, url in hits:
+        slug = normalize_username(url.rstrip("/").rsplit("/", 1)[-1])
+        network = normalize_username(label)
+        if is_reserved_username(slug) or (network and slug == network):
+            continue
+        if handle and slug and slug != handle:
+            continue
         found = FoundEntity(
             entity_type="PROFILE",
             kind="URL",
             value=url,
-            display_name=f"{label}",
-            attrs={"network": label},
+            display_name=f"{label} · @{handle}" if handle else label,
+            attrs={"network": label, "username": handle, "status": "confirmed"},
             confidence=0.7,
         )
         out.entities.append(found)
@@ -68,7 +217,7 @@ def parse_public_hits(hits: list[tuple[str, str]], *, origin_key: str) -> Connec
                 source_label=f"Perfil público · {label}",
                 url=url,
                 snippet=f"URL pública respondeu (HTTP 200): {url}",
-                payload={"network": label},
+                payload={"network": label, "username": handle},
                 entity_ref=ref,
             )
         )
@@ -76,14 +225,18 @@ def parse_public_hits(hits: list[tuple[str, str]], *, origin_key: str) -> Connec
 
 
 def username_from_entity(entity: Entity) -> str | None:
-    if entity.canonical_key.startswith("username:"):
-        return entity.canonical_key.split(":", 1)[1]
-    for ident in entity.identifiers:
-        if ident.kind == "USERNAME":
-            return ident.value.lstrip("@").lower()
-    if entity.entity_type == "PROFILE" and " " not in entity.display_name:
-        return entity.display_name.lstrip("@").lower()
-    return None
+    raw = ""
+    if str(getattr(entity, "canonical_key", "")).startswith("username:"):
+        raw = entity.canonical_key.split(":", 1)[1]
+    else:
+        for ident in getattr(entity, "identifiers", None) or []:
+            if ident.kind == "USERNAME":
+                raw = ident.value
+                break
+    user = normalize_username(raw)
+    if not user or is_reserved_username(user):
+        return None
+    return user
 
 
 class UsernamePublicConnector:
@@ -117,6 +270,8 @@ class UsernamePublicConnector:
         templates = CORE_PROFILE_TEMPLATES if getattr(ctx, "core_only", False) else PUBLIC_PROFILE_TEMPLATES
         hits: list[tuple[str, str]] = []
         for label, template in templates:
+            if normalize_username(label) == user or is_reserved_username(user):
+                continue
             url = template.format(user=user)
             try:
                 resp = self.http.request("GET", url, allow_404=True, max_retries=1)
@@ -124,4 +279,4 @@ class UsernamePublicConnector:
                 continue
             if resp.status_code == 200:
                 hits.append((label, url))
-        return parse_public_hits(hits, origin_key=entity.canonical_key)
+        return parse_public_hits(hits, origin_key=entity.canonical_key, user=user)

@@ -90,6 +90,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     )
     assert created.status_code == 200
     assert "Caso corrente" in created.text
+    assert "criado" in created.text.lower()
     assert "Editar" in created.text
     assert "Buscar" in created.text
     assert "Explodir QSA" in created.text
@@ -97,11 +98,20 @@ def test_consult_tools_assign_edit(settings) -> None:
     token = _csrf(created.text)
     edited = client.post(
         f"/app/casos/{created.url.path.split('/')[3]}/editar",
-        data={"csrf_token": token, "title": "Caso editado", "hypothesis": "Nova", "max_depth": "2"},
+        data={
+            "csrf_token": token,
+            "title": "Caso editado",
+            "hypothesis": "Nova",
+            "max_depth": "2",
+            "seed_email": "alvo@exemplo.com",
+        },
         follow_redirects=True,
     )
     assert edited.status_code == 200
     assert "Caso editado" in edited.text
+    assert "atualizado" in edited.text.lower()
+    assert "identificador" in edited.text.lower()
+    assert "alvo@exemplo.com" in edited.text or "já no grafo" in edited.text.lower()
 
     token = _csrf(edited.text)
     assigned = client.post(
@@ -121,3 +131,28 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert alvo.status_code == 200
     assert "desta pessoa" in alvo.text.lower()
     assert "Buscar nesta camada" in alvo.text
+
+    midia = client.get(f"/app/casos/{created.url.path.split('/')[3]}/midia")
+    assert midia.status_code == 200
+    assert "CPF" in midia.text or "notícia" in midia.text.lower() or "menção" in midia.text.lower()
+
+    alvo_media = client.get("/app/alvo/midia")
+    assert alvo_media.status_code == 200
+
+    manual = client.get("/app/manual")
+    assert manual.status_code == 200
+    assert "Manual da plataforma" in manual.text
+    assert 'href="/app/manual"' in manual.text
+    assert "Explodir QSA" in manual.text
+    assert "Detectar" in manual.text
+
+    case_id = created.url.path.split("/")[3]
+    token = _csrf(client.get("/app/casos").text)
+    purged = client.post(f"/app/casos/{case_id}/apagar", data={"csrf_token": token}, follow_redirects=True)
+    assert purged.status_code == 200
+    assert "caso apagado" in purged.text.lower()
+    assert "Caso editado" not in purged.text
+    leftover = client.get("/app/casos")
+    assert leftover.status_code == 200
+    assert "Caso editado" not in leftover.text
+    assert case_id not in leftover.text

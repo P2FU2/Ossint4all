@@ -1,4 +1,5 @@
-from osint4all.connectors.socio_search import extract_cnpjs, parse_socio_hits
+from osint4all.config import Settings
+from osint4all.connectors.socio_search import SocioSearchConnector, cpf_from_entity, extract_cnpjs, parse_socio_hits
 from osint4all.connectors.plate_public import (
     extract_owner_mentions,
     extract_vehicle_card,
@@ -10,9 +11,12 @@ from osint4all.connectors.crtsh import parse_crtsh_rows
 from osint4all.connectors.opencorporates import parse_opencorporates
 from osint4all.connectors.transparencia import parse_transparencia_rows
 from osint4all.connectors.tse import parse_tse_candidates
-from osint4all.connectors.username_public import parse_public_hits
+from osint4all.connectors.username_public import (
+    is_reserved_username,
+    parse_public_hits,
+    username_from_entity,
+)
 from osint4all.connectors.web_search import parse_searxng_payload, parse_web_hits, searxng_bases, web_search_ready
-from osint4all.config import Settings
 from osint4all.connectors.wikidata import parse_wikidata_search
 
 
@@ -53,8 +57,57 @@ def test_opencorporates_and_web_and_wiki() -> None:
 
 
 def test_username_public_hits() -> None:
-    result = parse_public_hits([("GitHub", "https://github.com/alice")], origin_key="username:alice")
+    result = parse_public_hits([("GitHub", "https://github.com/alice")], origin_key="username:alice", user="alice")
     assert result.entities[0].entity_type == "PROFILE"
+    assert "@alice" in result.entities[0].display_name
+
+
+def test_username_rejects_platform_brand_overlap() -> None:
+    assert is_reserved_username("telegram")
+    assert is_reserved_username("pinterest")
+    assert is_reserved_username("vimeo")
+    assert not is_reserved_username("alice")
+    brand = parse_public_hits(
+        [("Vimeo", "https://vimeo.com/telegram"), ("Linktree", "https://linktr.ee/pinterest")],
+        origin_key="username:telegram",
+        user="telegram",
+    )
+    assert brand.entities == []
+    assert brand.edges == []
+    profile = type("E", (), {"canonical_key": "url:https://vimeo.com/telegram", "display_name": "Vimeo", "entity_type": "PROFILE", "identifiers": []})()
+    assert username_from_entity(profile) is None
+    handle = type("E", (), {"canonical_key": "username:alice", "display_name": "Telegram", "entity_type": "PERSON", "identifiers": []})()
+    assert username_from_entity(handle) == "alice"
+
+
+def test_socio_search_reads_cpf_anchor() -> None:
+    person = type(
+        "E",
+        (),
+        {"canonical_key": "cpf:52998224725", "display_name": "Ana", "entity_type": "PERSON", "identifiers": []},
+    )()
+    assert cpf_from_entity(person) == "52998224725"
+    fake = type(
+        "E",
+        (),
+        {"canonical_key": "cpf:11111111111", "display_name": "X", "entity_type": "PERSON", "identifiers": []},
+    )()
+    assert cpf_from_entity(fake) is None
+    named = type(
+        "E",
+        (),
+        {"canonical_key": "name:ana silva souza", "display_name": "Ana Silva Souza", "entity_type": "PERSON", "identifiers": []},
+    )()
+    assert cpf_from_entity(named) is None
+
+
+def test_cpf_search_does_not_invent_companies() -> None:
+    conn = SocioSearchConnector(Settings(brasil_io_api_token=""))
+    empty = conn.collect_by_cpf("52998224725", "cpf:52998224725")
+    assert empty.entities == []
+    assert empty.edges == []
+    assert any("Brasil.IO" in note for note in empty.notes)
+    assert conn.collect_by_cpf("11111111111", "cpf:11111111111").entities == []
 
 
 def test_crtsh_names() -> None:

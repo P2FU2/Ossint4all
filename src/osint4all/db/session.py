@@ -95,12 +95,17 @@ def _ensure_legacy_columns(engine: Engine) -> None:
         statements.append("ALTER TABLE audit_log ADD COLUMN investigation_id VARCHAR(36)")
     if not statements:
         return
+    from sqlalchemy.exc import OperationalError
+
     with engine.begin() as conn:
         for sql in statements:
-            if dialect == "postgresql":
-                conn.execute(text(sql.replace("ADD COLUMN", "ADD COLUMN IF NOT EXISTS")))
-            else:
-                conn.execute(text(sql))
+            try:
+                if dialect == "postgresql":
+                    conn.execute(text(sql.replace("ADD COLUMN", "ADD COLUMN IF NOT EXISTS")))
+                else:
+                    conn.execute(text(sql))
+            except OperationalError:
+                continue
 
 
 def init_db(database_url: str | None = None) -> None:

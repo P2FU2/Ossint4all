@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from osint4all.db.models import BlockedKey, CaseNote, Edge, Entity, Evidence, ExpansionJob, Identifier, Investigation
-from osint4all.graph.identity import entity_status, has_expandable_anchor
+from osint4all.graph.identity import MAX_GRAPH_DEPTH, entity_status, has_expandable_anchor
 from osint4all.identifiers import STRONG_ID_KINDS
 
 EDGE_REL_TYPES = (
@@ -18,6 +18,8 @@ EDGE_REL_TYPES = (
     "MENCAO",
     "ANOTACAO",
     "RELACIONADO",
+    "SETA",
+    "HIPOTESE",
     "PROPRIETARIO",
     "CANDIDATO",
     "SAME_AS",
@@ -27,6 +29,67 @@ EDGE_REL_TYPES = (
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+CASE_ID_LABELS = {
+    "NAME": "Nome",
+    "CPF": "CPF",
+    "CNPJ": "CNPJ",
+    "EMAIL": "E-mail",
+    "PHONE": "Telefone",
+    "USERNAME": "Usuário",
+    "PLATE": "Placa",
+    "CNJ": "Processo",
+    "URL": "URL",
+}
+
+
+def case_known_keys(session: Session, investigation_id: str) -> set[str]:
+    keys: set[str] = set()
+    entities = session.scalars(
+        select(Entity).options(selectinload(Entity.identifiers)).where(Entity.investigation_id == investigation_id)
+    ).all()
+    for entity in entities:
+        if entity.canonical_key:
+            keys.add(entity.canonical_key)
+        for ident in entity.identifiers:
+            if ident.canonical_key:
+                keys.add(ident.canonical_key)
+    return keys
+
+
+def case_identifiers(session: Session, investigation_id: str) -> list[dict[str, Any]]:
+    """Identificadores já no caso, para o dossiê de edição."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    seen: set[str] = set()
+    entities = session.scalars(
+        select(Entity).options(selectinload(Entity.identifiers)).where(Entity.investigation_id == investigation_id)
+    ).all()
+    for entity in entities:
+        rows = [(ident.kind, ident.value, ident.canonical_key) for ident in entity.identifiers]
+        if not rows and entity.canonical_key:
+            prefix = entity.canonical_key.split(":", 1)[0].upper()
+            rows = [(prefix if prefix in CASE_ID_LABELS else entity.entity_type, entity.display_name, entity.canonical_key)]
+        for kind, value, key in rows:
+            key = key or f"{kind}:{value}"
+            if key in seen:
+                continue
+            seen.add(key)
+            kind = str(kind or "").upper()
+            grouped.setdefault(kind, []).append(
+                {
+                    "kind": kind,
+                    "label": CASE_ID_LABELS.get(kind, kind),
+                    "value": value,
+                    "seed": bool(entity.is_seed),
+                }
+            )
+    order = list(CASE_ID_LABELS)
+    out: list[dict[str, Any]] = []
+    for kind in order + [k for k in grouped if k not in order]:
+        for item in grouped.get(kind, []):
+            out.append(item)
+    return out
 
 
 def get_investigation(session: Session, investigation_id: str) -> Investigation | None:
@@ -82,8 +145,8 @@ def enqueue_expand(
 
 
 def enqueue_qsa_network(session: Session, investigation: Investigation, *, max_attempts: int = 3) -> int:
-    """Enfileira CNPJ/CPF do caso para puxar o QSA oficial até o último nível."""
-    investigation.max_depth = max(investigation.max_depth or 0, 4)
+    """Enfileira CNPJ/CPF e sócios do QSA para puxar as outras empresas até o último grau."""
+    investigation.max_depth = max(investigation.max_depth or 0, MAX_GRAPH_DEPTH)
     queued = 0
     entities = session.scalars(select(Entity).where(Entity.investigation_id == investigation.id)).all()
     for entity in entities:
@@ -107,6 +170,9 @@ def claim_next_job(session: Session, *, investigation_id: str | None = None) -> 
     stmt = select(ExpansionJob).where(ExpansionJob.status == "PENDING").order_by(ExpansionJob.created_at)
     if investigation_id:
         stmt = stmt.where(ExpansionJob.investigation_id == investigation_id)
+    bind = session.get_bind()
+    if bind is not None and getattr(bind.dialect, "name", "") == "postgresql":
+        stmt = stmt.with_for_update(skip_locked=True)
     job = session.scalars(stmt.limit(1)).first()
     if not job:
         return None
@@ -176,6 +242,10 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "capital_social",
                     "porte",
                     "nota",
+                    "motivo",
+                    "papel",
+                    "nome",
+                    "kind",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
             },
@@ -191,19 +261,17 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
             "confidence": edge.confidence,
             "note": (edge.attrs or {}).get("nota") or "",
             "source_connector": edge.source_connector or "",
+            "grau": (edge.attrs or {}).get("grau"),
         }
         for edge in edges
     ]
     return {"nodes": nodes, "edges": links, "entity_count": len(nodes), "edge_count": len(links)}
 
 
-def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bool:
-    entity = session.scalar(
-        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
-    )
-    if not entity:
-        return False
-    block_key(session, investigation_id, entity.canonical_key)
+def _delete_entity_local(session: Session, investigation_id: str, entity: Entity, *, block: bool = True) -> None:
+    if block:
+        block_key(session, investigation_id, entity.canonical_key)
+    entity_id = entity.id
     session.execute(delete(ExpansionJob).where(ExpansionJob.entity_id == entity_id))
     session.execute(
         delete(Edge).where(
@@ -215,6 +283,15 @@ def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bo
     session.execute(delete(CaseNote).where(CaseNote.entity_id == entity_id))
     session.delete(entity)
     session.flush()
+
+
+def detach_entity(session: Session, investigation_id: str, entity_id: str) -> bool:
+    entity = session.scalar(
+        select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
+    )
+    if not entity:
+        return False
+    _delete_entity_local(session, investigation_id, entity, block=True)
     return True
 
 
@@ -269,7 +346,7 @@ def update_edge(
         )
     )
     if clash:
-        return clash
+        return None
     edge.rel_type = kind
     attrs = dict(edge.attrs or {})
     if note.strip():
@@ -343,6 +420,7 @@ def add_case_note(
     parent_id: str | None = None,
     created_by: str | None = None,
     on_graph: bool = False,
+    kind: str = "note",
 ) -> CaseNote:
     note = CaseNote(
         investigation_id=investigation.id,
@@ -355,13 +433,14 @@ def add_case_note(
     session.add(note)
     session.flush()
     if on_graph:
-        key = f"note:{note.id}"
+        shape = "diagram" if str(kind or "").strip().lower() == "diagram" else "note"
+        key = f"{shape}:{note.id}"
         node = Entity(
             investigation_id=investigation.id,
             entity_type="NOTE",
             canonical_key=key,
-            display_name=note.title,
-            attrs={"nota": note.body, "status": "confirmed"},
+            display_name=("Diagrama · " + note.title) if shape == "diagram" else note.title,
+            attrs={"nota": note.body, "status": "confirmed", "kind": shape},
             confidence=0.99,
             is_seed=False,
             depth=0,
@@ -381,15 +460,46 @@ def add_case_note(
     return note
 
 
+def purge_investigation(session: Session, investigation_id: str) -> bool:
+    """Apaga o caso e todos os filhos. Evita IntegrityError do cascade ORM."""
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return False
+    entity_ids = list(session.scalars(select(Entity.id).where(Entity.investigation_id == investigation_id)))
+    session.execute(delete(Evidence).where(Evidence.investigation_id == investigation_id))
+    session.execute(delete(ExpansionJob).where(ExpansionJob.investigation_id == investigation_id))
+    session.execute(delete(Edge).where(Edge.investigation_id == investigation_id))
+    if entity_ids:
+        session.execute(delete(Identifier).where(Identifier.entity_id.in_(entity_ids)))
+    session.execute(delete(CaseNote).where(CaseNote.investigation_id == investigation_id))
+    session.execute(delete(BlockedKey).where(BlockedKey.investigation_id == investigation_id))
+    session.execute(delete(Entity).where(Entity.investigation_id == investigation_id))
+    session.execute(delete(Investigation).where(Investigation.id == investigation_id))
+    session.expire_all()
+    return True
+
+
 def delete_case_note(session: Session, investigation_id: str, note_id: str) -> bool:
     note = session.scalar(select(CaseNote).where(CaseNote.id == note_id, CaseNote.investigation_id == investigation_id))
     if not note:
         return False
+    entity_id = note.entity_id
     children = session.scalars(select(CaseNote).where(CaseNote.parent_id == note.id)).all()
     for child in children:
         child.parent_id = note.parent_id
     session.delete(note)
     session.flush()
+    if entity_id:
+        leftover = session.scalar(select(CaseNote).where(CaseNote.entity_id == entity_id))
+        entity = session.scalar(
+            select(Entity).where(
+                Entity.id == entity_id,
+                Entity.investigation_id == investigation_id,
+                Entity.entity_type == "NOTE",
+            )
+        )
+        if entity and leftover is None:
+            _delete_entity_local(session, investigation_id, entity, block=False)
     return True
 
 

@@ -18,7 +18,7 @@
     <section class="alvo-group">
       <h2>{{ group_label }}</h2>
       {% for kind, label in items %}
-      <form class="alvo-field" method="post" action="/app/alvo">
+      <form class="alvo-field" method="post" action="/app/alvo" data-busy="Buscando nesta camada…">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="hidden" name="kind" value="{{ kind }}" />
         <label>{{ label }}
@@ -30,6 +30,25 @@
     </section>
     {% endfor %}
   </div>
+
+  <details class="case-board media-board" open>
+    <summary data-tip="A plataforma cruza nome, empresa, @user, placa, e-mail e processo — sem repetir a mesma busca genérica">Notícias e galeria do alvo</summary>
+    <p class="muted">Usa nome, CNPJ, @user, placa, e-mail ou CNJ já preenchidos. CPF não é enviado à busca web.</p>
+    <button
+      class="btn primary"
+      type="button"
+      hx-get="/app/alvo/midia"
+      hx-target="#alvo-media"
+      hx-swap="innerHTML"
+      hx-indicator="#alvo-media-wait"
+      data-tip="Consulta notícias e imagens públicas deste alvo"
+    >Buscar notícias e imagens</button>
+    <div id="alvo-media-wait" class="htmx-indicator consult-wait" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      varrendo menções públicas…
+    </div>
+    <div id="alvo-media" class="media-slot" aria-live="polite"></div>
+  </details>
 
   {% if layer %}
   <article class="result-card {% if layer.qsa_match %}kind-cnpj{% elif layer.consult %}kind-{{ layer.consult.kind|lower }}{% endif %}">
@@ -123,7 +142,7 @@
   </article>
   {% endif %}
 
-  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px">
+  <form class="result-actions" method="post" action="/app/alvo/grafo" style="margin-top:22px" data-busy="Criando caso…">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     {% if cases %}
     <label class="save-extra">Caso

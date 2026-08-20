@@ -15,6 +15,8 @@ from osint4all.web.auth import seed_admin_user
 from osint4all.web.router import router
 
 logger = get_logger(__name__)
+_DB_READY = True
+_DB_ERROR = ""
 
 
 def _warn_production_secrets() -> None:
@@ -51,7 +53,12 @@ def create_app() -> FastAPI:
             return RedirectResponse(exc.headers["Location"], status_code=exc.status_code)
         if exc.status_code == 303:
             return RedirectResponse("/login", status_code=303)
-        return RedirectResponse("/login", status_code=303) if exc.status_code in {401, 403} and not request.url.path.startswith("/app/admin") else _plain(exc)
+        if exc.status_code == 401:
+            return RedirectResponse("/login", status_code=303)
+        if exc.status_code == 403:
+            request.session["flash"] = {"level": "error", "message": "Esta ação é só para administrador."}
+            return RedirectResponse("/app", status_code=303)
+        return _plain(exc)
 
     @app.get("/health")
     def health() -> dict:
@@ -61,6 +68,8 @@ def create_app() -> FastAPI:
     def ready() -> dict:
         from sqlalchemy import text
 
+        if not _DB_READY:
+            raise HTTPException(status_code=503, detail=_DB_ERROR or "database not ready")
         with session_scope() as session:
             session.execute(text("SELECT 1"))
         return {"ok": True, "service": "osint4all"}
@@ -71,12 +80,17 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _startup() -> None:
+        global _DB_READY, _DB_ERROR
         _warn_production_secrets()
         try:
             init_db()
             with session_scope() as session:
                 seed_admin_user(session)
+            _DB_READY = True
+            _DB_ERROR = ""
         except Exception as exc:  # noqa: BLE001
+            _DB_READY = False
+            _DB_ERROR = str(exc)
             logger.exception("startup_db_failed %s", exc)
 
     return app

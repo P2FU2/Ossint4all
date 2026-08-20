@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from osint4all.db.history import kind_label, replay_spec
 from osint4all.db.models import SearchChain, SearchChainStep, User
 from osint4all.graph.layers import ALVO_KINDS
-from osint4all.identifiers import parse_seed
+from osint4all.identifiers import dedupe_seeds, parse_seed
 
 KEEP_CHAINS = 8
 MAX_STEPS = 16
@@ -330,22 +330,13 @@ def ingest_outcome(session: Session, user: User, outcome: object) -> SearchChain
 
 def chain_seeds(session: Session, chain: SearchChain) -> list:
     seeds = []
-    seen: set[str] = set()
     for step in _chain_steps(session, chain.id):
-        primary = parse_seed(step.query, forced_kind=step.kind or None)
-        candidates = [primary] if primary else []
+        seeds.append(parse_seed(step.query, forced_kind=step.kind or None))
         for item in step.identifiers or []:
             if item.get("kind") not in _SEED_KINDS:
                 continue
-            seed = parse_seed(str(item.get("value") or ""), forced_kind=str(item.get("kind") or None))
-            if seed:
-                candidates.append(seed)
-        for seed in candidates:
-            if seed.canonical_key in seen:
-                continue
-            seen.add(seed.canonical_key)
-            seeds.append(seed)
-    return seeds
+            seeds.append(parse_seed(str(item.get("value") or ""), forced_kind=str(item.get("kind") or None)))
+    return dedupe_seeds(seeds)
 
 
 def _same_query(stored: str, current: str) -> bool:

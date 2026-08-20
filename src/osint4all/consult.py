@@ -666,6 +666,7 @@ def _consult_cpf(raw: str, settings: Settings | None = None, *, quick: bool = Fa
     if _live_ok(settings, quick):
         try:
             socio = SocioSearchConnector(settings).collect_by_cpf(digits, origin)
+            notes.extend(note for note in socio.notes if note not in notes)
             for entity in socio.entities:
                 if entity.entity_type != "ORG":
                     continue

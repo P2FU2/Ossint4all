@@ -1,11 +1,30 @@
 from osint4all.config import normalize_database_url
-from osint4all.validators import format_plate, looks_like_plate, normalize_cnj, normalize_plate, validate_cnpj, validate_cpf
+from osint4all.validators import (
+    format_plate,
+    looks_like_br_mobile,
+    looks_like_cpf_mask,
+    looks_like_plate,
+    normalize_cnj,
+    normalize_plate,
+    socio_doc_matches_cpf,
+    validate_cnpj,
+    validate_cpf,
+)
 
 
 def test_cpf_valid_and_invalid() -> None:
     assert validate_cpf("529.982.247-25")
     assert not validate_cpf("111.111.111-11")
     assert not validate_cpf("123")
+    assert looks_like_cpf_mask("529.982.247-25")
+    assert not looks_like_cpf_mask("52998224725")
+    assert looks_like_br_mobile("11987654321")
+    assert not looks_like_br_mobile("52998224725")
+    assert socio_doc_matches_cpf("52998224725", "529.982.247-25")
+    assert socio_doc_matches_cpf("***982247**", "529.982.247-25")
+    assert not socio_doc_matches_cpf("11111111111", "529.982.247-25")
+    assert not socio_doc_matches_cpf("33000167000101", "529.982.247-25")
+    assert not socio_doc_matches_cpf("", "529.982.247-25")
 
 
 def test_cnpj_valid_and_invalid() -> None:

@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from osint4all.db.models import ExpansionJob
+from osint4all.db.models import ExpansionJob, Investigation
 from osint4all.db.session import session_scope
 from osint4all.graph.monitor import requeue_monitored_seeds
 from osint4all.graph.seed import create_investigation
@@ -31,8 +31,19 @@ def test_requeue_only_monitored(settings) -> None:
             monitor=True,
             created_by="t",
         )
-    queued = requeue_monitored_seeds()
-    assert queued == 1
+    assert requeue_monitored_seeds() == 0
     with session_scope() as session:
         jobs = session.scalars(select(ExpansionJob)).all()
-        assert len(jobs) >= 3
+        assert len(jobs) == 2
+        pending = [job for job in jobs if job.status == "PENDING"]
+        assert len(pending) == 2
+    with session_scope() as session:
+        inv = session.scalar(select(Investigation).where(Investigation.monitor.is_(True)))
+        assert inv
+        for job in session.scalars(select(ExpansionJob).where(ExpansionJob.investigation_id == inv.id)):
+            job.status = "DONE"
+    assert requeue_monitored_seeds() == 1
+    assert requeue_monitored_seeds() == 0
+    with session_scope() as session:
+        jobs = session.scalars(select(ExpansionJob)).all()
+        assert len(jobs) == 3

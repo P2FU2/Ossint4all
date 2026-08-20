@@ -52,7 +52,7 @@
   {% endfor %}
 
   <footer class="result-actions">
-    <form class="save-form" method="post" action="/app/consultar/atribuir">
+    <form class="save-form" method="post" action="/app/consultar/atribuir" data-busy="Guardando no caso…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       {% for part in mass.parts if part.ok %}
       <input type="hidden" name="kinds" value="{{ part.kind }}" />

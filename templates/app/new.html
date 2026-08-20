@@ -10,7 +10,7 @@
   <a class="btn" href="/app" data-tip="Consulta rápida sem criar caso">Consulta avulsa</a>
 </header>
 
-<form class="stack" method="post" action="/app/nova">
+<form class="stack" method="post" action="/app/nova" data-busy="Criando caso…">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <label data-tip="Nome curto do dossiê. Aparece na lista de casos.">Título
     <input name="title" required placeholder="Ex.: Holding do grupo X" />
@@ -27,6 +27,7 @@
     <label data-tip="Só menções públicas. Sem caixa de e-mail.">E-mail <input name="seed_email" placeholder="nome@dominio.com" /></label>
     <label data-tip="Só se já apareceu em fonte pública. Sem operadora.">Telefone <input name="seed_phone" placeholder="11 99999-0000" /></label>
     <label data-tip="Checagem de URLs públicas, sem login.">Usuário <input name="seed_username" placeholder="@usuario" /></label>
+    <label data-tip="Número unificado. DataJud e menções públicas.">Processo CNJ <input name="seed_cnj" placeholder="0000000-00.0000.0.00.0000" /></label>
     <label data-tip="Série histórica e portais. Sem dono no DETRAN.">Placa <input name="seed_plate" placeholder="ABC1D23" /></label>
     <label data-tip="Opcional. Só se você já tem de fonte lícita.">Dono da placa <input name="seed_plate_owner" placeholder="Nome" /></label>
   </fieldset>
@@ -38,8 +39,8 @@
 
   <details class="advanced">
     <summary>Profundidade e fontes</summary>
-    <label data-tip="0 = só a semente. 2 = empresas e co-sócios.">Profundidade
-      <input type="number" name="max_depth" min="0" max="4" value="{{ default_depth }}" />
+    <label data-tip="0 = só a semente. 6 = sócios e as outras empresas deles até o último grau com o alvo.">Grau máximo
+      <input type="number" name="max_depth" min="0" max="6" value="{{ default_depth }}" />
     </label>
     <div class="checks">
       {% for c in connectors %}

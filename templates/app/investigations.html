@@ -34,6 +34,7 @@
         {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
       </div>
       <p>{{ inv.hypothesis or "Sem hipótese." }}</p>
+      <p class="muted">{{ inv.created_at.strftime("%d/%m/%Y %H:%M") if inv.created_at else "" }} · {{ inv.id[:8] }}</p>
     </a>
     <div class="kpis">
       <span>{{ c.entities }} nós</span>

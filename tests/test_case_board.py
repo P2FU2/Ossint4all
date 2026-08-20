@@ -1,11 +1,14 @@
 from osint4all.connectors.base import ConnectorResult, FoundEdge, FoundEntity
-from osint4all.db.models import BlockedKey, CaseNote, Edge, Entity
+from osint4all.db.models import BlockedKey, CaseNote, Edge, Entity, Evidence, ExpansionJob, Identifier, Investigation
 from osint4all.db.repository import (
     add_case_note,
+    case_identifiers,
     blocked_key_set,
     create_manual_edge,
+    delete_case_note,
     delete_edge,
     detach_entity,
+    purge_investigation,
     update_edge,
 )
 from osint4all.graph.resolve import apply_result
@@ -93,6 +96,28 @@ def test_edge_edit_and_delete_keep_nodes(settings, db) -> None:
     assert db.scalars(select(Edge).where(Edge.investigation_id == inv.id)).all() == []
 
 
+def test_update_edge_rejects_type_clash(settings, db) -> None:
+    inv = _case(db)
+    other = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={},
+        depth=1,
+    )
+    db.add(other)
+    db.flush()
+    person = db.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON"))
+    assert person is not None
+    first = create_manual_edge(db, inv, from_id=person.id, to_id=other.id, rel_type="SOCIO")
+    second = create_manual_edge(db, inv, from_id=person.id, to_id=other.id, rel_type="ADMIN")
+    assert first and second
+    assert update_edge(db, inv.id, second.id, rel_type="SOCIO") is None
+    db.refresh(second)
+    assert second.rel_type == "ADMIN"
+
+
 def test_case_note_tree_and_graph_node(settings, db) -> None:
     inv = _case(db)
     root = add_case_note(db, inv, title="Hipótese", body="mesmo grupo", created_by="tester")
@@ -113,3 +138,84 @@ def test_case_note_tree_and_graph_node(settings, db) -> None:
     assert len(note_nodes) == 1
     assert pinned.entity_id == note_nodes[0].id
     assert any(e.rel_type == "ANOTACAO" for e in db.scalars(select(Edge).where(Edge.investigation_id == inv.id)))
+    note_id = pinned.id
+    node_id = pinned.entity_id
+    assert delete_case_note(db, inv.id, note_id)
+    assert db.get(CaseNote, note_id) is None
+    assert db.get(Entity, node_id) is None
+    assert db.scalars(select(Edge).where(Edge.investigation_id == inv.id, Edge.rel_type == "ANOTACAO")).all() == []
+
+
+def test_case_identifiers_lists_seeds(settings, db) -> None:
+    inv = _case(db)
+    rows = case_identifiers(db, inv.id)
+    kinds = {item["kind"] for item in rows}
+    assert "CPF" in kinds
+
+
+def test_diagram_note_lands_on_graph(settings, db) -> None:
+    inv = _case(db)
+    note = add_case_note(
+        db,
+        inv,
+        title="Fluxo QSA",
+        body="alvo --> empresa",
+        on_graph=True,
+        kind="diagram",
+        created_by="tester",
+    )
+    node = db.get(Entity, note.entity_id)
+    assert node is not None
+    assert node.entity_type == "NOTE"
+    assert node.attrs.get("kind") == "diagram"
+    assert node.display_name.startswith("Diagrama")
+
+
+def test_purge_investigation_removes_children(settings, db) -> None:
+    inv = _case(db)
+    person = inv.entities[0]
+    other = Entity(
+        investigation_id=inv.id,
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={},
+        depth=1,
+    )
+    db.add(other)
+    db.flush()
+    edge = create_manual_edge(db, inv, from_id=person.id, to_id=other.id, rel_type="SOCIO", note="QSA")
+    db.add(
+        Identifier(
+            entity_id=person.id,
+            kind="EMAIL",
+            value="eduardo@exemplo.com",
+            canonical_key="email:eduardo@exemplo.com",
+            strong=True,
+        )
+    )
+    db.add(
+        Evidence(
+            investigation_id=inv.id,
+            entity_id=person.id,
+            edge_id=edge.id,
+            connector="cnpj_receita",
+            source_label="Receita",
+            snippet="sócio",
+            dedup_hash="purge-test-hash",
+        )
+    )
+    db.add(ExpansionJob(investigation_id=inv.id, entity_id=person.id, depth=0))
+    add_case_note(db, inv, title="nota", body="apagar junto", created_by="tester")
+    db.flush()
+    case_id = inv.id
+    assert purge_investigation(db, case_id)
+    db.commit()
+    assert db.get(Investigation, case_id) is None
+    assert db.scalars(select(Entity).where(Entity.investigation_id == case_id)).all() == []
+    assert db.scalars(select(Edge).where(Edge.investigation_id == case_id)).all() == []
+    assert db.scalars(select(Evidence).where(Evidence.investigation_id == case_id)).all() == []
+    assert db.scalars(select(ExpansionJob).where(ExpansionJob.investigation_id == case_id)).all() == []
+    assert db.scalars(select(CaseNote).where(CaseNote.investigation_id == case_id)).all() == []
+    assert db.scalars(select(BlockedKey).where(BlockedKey.investigation_id == case_id)).all() == []
+    assert db.scalars(select(Identifier).where(Identifier.entity_id == person.id)).all() == []

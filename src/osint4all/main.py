@@ -148,12 +148,10 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("monitor queued=%s processed=%s", q, n)
         return
     if args.cmd == "purge":
-        from osint4all.db.models import Investigation
+        from osint4all.db.repository import purge_investigation
 
         with session_scope() as session:
-            inv = session.get(Investigation, args.investigation_id)
-            if inv:
-                session.delete(inv)
+            if purge_investigation(session, args.investigation_id):
                 logger.info("purged %s", args.investigation_id)
             else:
                 logger.info("not_found %s", args.investigation_id)

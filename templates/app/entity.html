@@ -6,7 +6,7 @@
   <div>
     <p class="type-tag">{{ entity.entity_type }}{% if entity.is_seed %} · semente{% endif %}{% if entity.attrs.get("status") == "unconfirmed" %} · candidato{% endif %}</p>
     <h1>{{ entity.display_name }}</h1>
-    <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · profundidade {{ entity.depth }}{% if entity.attrs.get("motivo") %} · {{ entity.attrs.get("motivo") }}{% endif %}</p>
+    <p class="lede">{{ entity.canonical_key }} · confiança {{ '%.2f'|format(entity.confidence) }} · grau {{ entity.depth }} com o alvo{% if entity.attrs.get("motivo") %} · {{ entity.attrs.get("motivo") }}{% endif %}</p>
   </div>
   <div class="graph-actions">
     <a class="btn" href="/app/ferramentas?tool={{ tool_id_for_kind(seed_kind) }}&amp;kind={{ seed_kind }}&amp;q={{ seed_q|urlencode }}" data-tip="Ferramentas públicas para este tipo">Mapa de ferramentas</a>
@@ -16,7 +16,7 @@
       <button class="btn primary" type="submit" data-tip="Marca como a mesma pessoa/empresa do alvo e libera expansão">Confirmar vínculo</button>
     </form>
     {% endif %}
-    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir">
+    <form method="post" action="/app/casos/{{ inv.id }}/entidades/{{ entity.id }}/expandir" data-busy="Expandindo nó…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn primary" type="submit" data-tip="Enfileira fontes a partir deste nó.">Expandir daqui</button>
     </form>

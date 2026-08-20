@@ -1,0 +1,38 @@
+{% if media.queries %}
+<p class="muted">Combinações testadas: {{ media.queries | join(" · ") }}. Cada par especializa; o termo sozinho só entra se ainda não foi cruzado. Miniatura e título não provam identidade.</p>
+{% endif %}
+{% for note in media.notes %}
+<p class="muted">{{ note }}</p>
+{% endfor %}
+
+{% if media.news %}
+<p class="section-kicker">notícias</p>
+<ul class="media-news">
+  {% for item in media.news %}
+  <li>
+    <button type="button" class="inspect-open" data-inspect='{{ {"title": item.title, "kind": "noticia", "meta": item.snippet, "url": item.url, "when": item.when, "facts": [["fonte", item.source], ["combinação", item.via]]}|tojson }}'>{{ item.title }}</button>
+    {% if item.when %}<span class="tl-when">{{ item.when }}</span>{% endif %}
+    {% if item.via %}<span class="muted">via {{ item.via }}</span>{% elif item.source %}<span class="muted">{{ item.source }}</span>{% endif %}
+    {% if item.snippet %}<p class="muted">{{ item.snippet }}</p>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if media.images %}
+<p class="section-kicker">galeria</p>
+<ul class="media-gallery">
+  {% for item in media.images %}
+  <li>
+    <button type="button" class="media-tile inspect-open" data-inspect='{{ {"title": item.title, "kind": "imagem", "meta": item.via or item.source, "url": item.page_url, "thumb": item.thumb, "facts": [["combinação", item.via]]}|tojson }}'>
+      <img src="{{ item.thumb }}" alt="{{ item.title }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('li').hidden = true" />
+      <span>{{ item.title }}</span>
+    </button>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if not media.news and not media.images and not media.notes %}
+<p class="muted">Nada nesta passagem.</p>
+{% endif %}

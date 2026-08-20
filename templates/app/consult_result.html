@@ -80,7 +80,7 @@
       <button class="btn primary" type="submit" data-tip="Adiciona ao caso escolhido e expande o grafo">Adicionar ao caso</button>
     </form>
     {% endif %}
-    <form class="save-form" method="post" action="/app/consultar/grafo">
+    <form class="save-form" method="post" action="/app/consultar/grafo" data-busy="Criando caso…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="kind" value="{{ result.kind }}" />
       <input type="hidden" name="value" value="{{ result.query }}" />

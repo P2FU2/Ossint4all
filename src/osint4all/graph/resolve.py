@@ -29,23 +29,28 @@ def upsert_found_entity(
     if existing:
         existing.last_seen_at = utcnow()
         existing.confidence = max(existing.confidence, found.confidence)
+        if depth < (existing.depth or 0):
+            existing.depth = depth
         if found.display_name and (
             existing.display_name == existing.canonical_key or len(found.display_name) > len(existing.display_name)
         ):
             existing.display_name = found.display_name
         attrs = dict(existing.attrs or {})
         attrs.update({k: v for k, v in found.attrs.items() if v not in (None, "")})
+        attrs["grau"] = existing.depth
         existing.attrs = attrs
         add_identifier(existing, found.kind, found.value, key)
         _merge_same_as(session, investigation, existing, found)
         return existing
 
+    attrs = dict(found.attrs or {})
+    attrs["grau"] = depth
     entity = Entity(
         investigation_id=investigation.id,
         entity_type=found.entity_type,
         canonical_key=key,
         display_name=found.display_name or found.value,
-        attrs=found.attrs,
+        attrs=attrs,
         confidence=found.confidence,
         is_seed=is_seed,
         depth=depth,
@@ -135,6 +140,11 @@ def apply_result(
             dst = find_entity_by_key(session, investigation.id, edge.to_ref)
         if not src or not dst:
             continue
+        attrs = dict(edge.attrs or {})
+        hop = max(int(src.depth or 0), int(dst.depth or 0))
+        if src.is_seed or dst.is_seed:
+            hop = 1
+        attrs["grau"] = hop
         _ensure_edge(
             session,
             investigation,
@@ -142,7 +152,7 @@ def apply_result(
             dst.id,
             edge.rel_type,
             edge.confidence,
-            edge.attrs,
+            attrs,
             connector,
         )
 

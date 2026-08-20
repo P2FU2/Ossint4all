@@ -5,37 +5,64 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=8" defer></script>
+<script src="/static/graph.js?v=14" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
   <div>
     <a class="crumb" href="/app/casos" data-tip="Volta à lista de casos guardados">Casos</a>
     <h1>{{ inv.title }}</h1>
-    <p class="lede">{{ inv.hypothesis or "Clique no nó para a ficha. Clique na linha para editar a ligação. Desligar um nó impede que ele volte na expansão." }}</p>
+    <p class="lede">{{ inv.hypothesis or "Botão direito: anotação, diagrama e seta. Clique no nó para a ficha." }}</p>
   </div>
   <div class="graph-actions">
     <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>
     <span class="kpi" data-tip="Relações já confirmadas (sócio, menção, proprietário…)">{{ edge_count }} vínculos</span>
     <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote.">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
-    <form method="post" action="/app/casos/{{ inv.id }}/explodir">
+    <form method="post" action="/app/casos/{{ inv.id }}/explodir" data-busy="Explodindo QSA…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn primary" type="submit" data-tip="Puxa o QSA oficial de cada empresa e segue sócios com CNPJ/CPF até o último nível. Nomes sem documento ficam candidatos.">Explodir QSA</button>
+      <button class="btn primary" type="submit" data-busy="Explodindo QSA…" data-tip="Puxa o QSA e, de cada sócio, as outras empresas até o último grau. A linha mostra o grau até o alvo.">Explodir QSA</button>
     </form>
-    <form method="post" action="/app/casos/{{ inv.id }}/processar">
+    <form method="post" action="/app/casos/{{ inv.id }}/processar" data-busy="Processando fila…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button class="btn" type="submit" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
+      <button class="btn" type="submit" data-busy="Processando fila…" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
     </form>
     <a class="btn" href="/app/casos/{{ inv.id }}/relatorio" data-tip="Relatório narrativo com fontes citadas">Relatório</a>
     <details class="more-menu">
-      <summary class="btn" data-tip="Editar título, hipótese e profundidade">Editar</summary>
-      <div class="more-panel">
-        <form class="stack" method="post" action="/app/casos/{{ inv.id }}/editar">
+      <summary class="btn" data-tip="Dossiê do alvo: o que já tem e o que falta">Editar</summary>
+      <div class="more-panel case-dossier">
+        <form class="stack" method="post" action="/app/casos/{{ inv.id }}/editar" data-busy="Salvando e atualizando o caso…">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <p class="type-tag">alvo neste caso</p>
           <label>Título <input name="title" value="{{ inv.title }}" required /></label>
           <label>Hipótese <textarea name="hypothesis" rows="2">{{ inv.hypothesis or "" }}</textarea></label>
-          <label>Profundidade <input type="number" name="max_depth" min="0" max="4" value="{{ inv.max_depth }}" /></label>
-          <button class="btn primary" type="submit">Salvar</button>
+          <label>Grau máximo <input type="number" name="max_depth" min="0" max="6" value="{{ inv.max_depth }}" data-tip="Quantos saltos sócio→empresa a partir do alvo" /></label>
+          <p class="section-kicker">já no grafo</p>
+          {% if dossier %}
+          <ul class="dossier-chips">
+            {% for item in dossier %}
+            <li{% if item.seed %} class="is-seed"{% endif %}><span>{{ item.label }}</span> {{ item.value }}</li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="muted">Nenhum identificador listado ainda.</p>
+          {% endif %}
+          <p class="section-kicker">adicionar e reprocessar</p>
+          <fieldset class="seed-grid compact">
+            <label>Nome <input name="seed_name" placeholder="Nome completo" autocomplete="off" /></label>
+            <label>CPF <input name="seed_cpf" placeholder="000.000.000-00" autocomplete="off" /></label>
+            <label>CNPJ <input name="seed_cnpj" placeholder="00.000.000/0001-00" autocomplete="off" /></label>
+            <label>E-mail <input name="seed_email" placeholder="nome@dominio.com" autocomplete="off" /></label>
+            <label>Telefone <input name="seed_phone" placeholder="11 99999-0000" autocomplete="off" /></label>
+            <label>Usuário <input name="seed_username" placeholder="@usuario" autocomplete="off" /></label>
+            <label>Placa <input name="seed_plate" placeholder="ABC1D23" autocomplete="off" /></label>
+            <label>Dono da placa <input name="seed_plate_owner" placeholder="Nome" autocomplete="off" /></label>
+            <label>Processo CNJ <input name="seed_cnj" placeholder="0000000-00.0000.0.00.0000" autocomplete="off" /></label>
+          </fieldset>
+          <label>Lista extra
+            <textarea name="seeds" rows="2" placeholder="Um identificador por linha"></textarea>
+          </label>
+          <p class="muted">Ao gravar infos novas o caso reprocessa e procura ligações que só essas âncoras abrem.</p>
+          <button class="btn primary" type="submit" data-tip="Grava o dossiê e reprocessa o grafo com o que entrou agora">Salvar e atualizar caso</button>
         </form>
       </div>
     </details>
@@ -74,7 +101,7 @@
     <button type="button" class="btn view-tab is-active" data-view="rede" data-tip="Layout de rede: quem se liga a quem">Rede</button>
     <button type="button" class="btn view-tab" data-view="arvore" data-tip="Árvore a partir das sementes">Árvore</button>
     <button type="button" class="btn view-tab" data-view="split" data-tip="Grafo + lista de empresas">Split</button>
-    <button type="button" class="btn view-tab" data-view="mapa" data-tip="Empresas no mapa (UF / município)">Mapa</button>
+    <button type="button" class="btn view-tab" data-view="mapa" data-tip="Grid geográfico das empresas — mesmo visual do painel">Mapa</button>
   </div>
   <label data-tip="Busca pelo nome do nó">Buscar
     <input id="graph-search" type="search" placeholder="nome, CNPJ, placa…" />
@@ -196,7 +223,45 @@
 
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
-  <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/"></div>
+  <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-status-url="/app/casos/{{ inv.id }}/status" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Carregando fontes… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+  <aside id="graph-balloon" class="graph-balloon" hidden>
+    <p class="type-tag" id="gb-kind"></p>
+    <h2 id="gb-title"></h2>
+    <p class="graph-balloon-lead" id="gb-lead"></p>
+    <dl class="fact-grid" id="gb-facts" hidden></dl>
+    <div class="graph-balloon-actions" id="gb-actions" hidden></div>
+  </aside>
   <div id="org-map" hidden></div>
+</div>
+<details class="case-board media-board" open>
+  <summary data-tip="A plataforma cruza os identificadores do caso em várias consultas especializadas">Notícias e galeria do alvo</summary>
+  <p class="muted">Busca pública (SearXNG / Brave / CSE) pelo nome, CNPJ, @user, placa, e-mail ou processo. CPF não vai para o buscador. A miniatura não é baixada no servidor e não prova identidade.</p>
+  <button
+    class="btn primary"
+    type="button"
+    hx-get="/app/casos/{{ inv.id }}/midia"
+    hx-target="#case-media"
+    hx-swap="innerHTML"
+    hx-indicator="#case-media-wait"
+    data-tip="Consulta notícias e imagens públicas deste caso"
+  >Buscar notícias e imagens</button>
+  <div id="case-media-wait" class="htmx-indicator consult-wait" role="status">
+    <span class="spinner" aria-hidden="true"></span>
+    varrendo menções públicas…
+  </div>
+  <div id="case-media" class="media-slot" aria-live="polite"></div>
+</details>
+<nav id="graph-menu" class="graph-menu" hidden></nav>
+<div id="graph-composer" class="graph-composer" hidden>
+  <form class="graph-composer-panel" id="graph-composer-form">
+    <p class="type-tag" id="gc-kind">quadro</p>
+    <h2 id="gc-title">Novo item</h2>
+    <p class="lede" id="gc-lead"></p>
+    <div id="gc-fields" class="stack"></div>
+    <div class="graph-balloon-actions">
+      <button class="btn primary" type="submit">Gravar</button>
+      <button class="btn" type="button" id="gc-cancel">Cancelar</button>
+    </div>
+  </form>
 </div>
 {% endblock %}

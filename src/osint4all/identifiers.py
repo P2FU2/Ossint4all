@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from osint4all.security import only_digits
 from osint4all.validators import (
     format_plate,
+    looks_like_br_mobile,
+    looks_like_cpf_mask,
     looks_like_email,
     looks_like_phone,
     looks_like_plate,
@@ -21,6 +23,7 @@ from osint4all.validators import (
 )
 
 STRONG_ID_KINDS = frozenset({"CPF", "CNPJ", "CNJ", "EMAIL"})
+CONSULT_MODE_KINDS = frozenset({"AUTO", "MASSA", "FILE", "PROCESSOS", "NEGATIVA", "IMOVEL", "DIARIO"})
 
 
 @dataclass(frozen=True)
@@ -89,9 +92,13 @@ def parse_seed(raw: str, *, forced_kind: str | None = None) -> ParsedSeed | None
     if not text:
         return None
     kind = (forced_kind or "").upper() or None
-    if kind == "AUTO" or kind is None:
+    if kind is None or kind in CONSULT_MODE_KINDS:
         kind = detect_kind(text)
     if not kind:
+        return None
+    if kind == "CPF" and not validate_cpf(text):
+        return None
+    if kind == "CNPJ" and not validate_cnpj(text):
         return None
     key = canonical_key(kind, text)
     display = text.lstrip("@")
@@ -123,6 +130,10 @@ def detect_kind(raw: str) -> str | None:
         return "EMAIL"
     if validate_cnpj(text):
         return "CNPJ"
+    if looks_like_cpf_mask(text) and validate_cpf(text):
+        return "CPF"
+    if looks_like_br_mobile(text) and not looks_like_cpf_mask(text):
+        return "PHONE"
     if validate_cpf(text):
         return "CPF"
     if normalize_cnj(text):
@@ -144,11 +155,48 @@ def detect_kind(raw: str) -> str | None:
 
 
 def parse_seed_lines(blob: str) -> list[ParsedSeed]:
+    return dedupe_seeds(parse_seed(line) for line in (blob or "").splitlines())
+
+
+def dedupe_seeds(seeds) -> list[ParsedSeed]:
     seen: set[str] = set()
     out: list[ParsedSeed] = []
-    for line in (blob or "").splitlines():
-        seed = parse_seed(line)
-        if seed and seed.canonical_key not in seen:
-            seen.add(seed.canonical_key)
-            out.append(seed)
+    for seed in seeds:
+        if not seed or seed.canonical_key in seen:
+            continue
+        seen.add(seed.canonical_key)
+        out.append(seed)
     return out
+
+
+def seeds_from_kind_values(items) -> list[ParsedSeed]:
+    return dedupe_seeds(parse_seed(value, forced_kind=kind or None) for kind, value in items if value)
+
+
+def collect_form_seeds(
+    seeds: str = "",
+    *,
+    seed_cpf: str = "",
+    seed_cnpj: str = "",
+    seed_name: str = "",
+    seed_email: str = "",
+    seed_phone: str = "",
+    seed_username: str = "",
+    seed_plate: str = "",
+    seed_plate_owner: str = "",
+    seed_plate_cpf: str = "",
+    seed_cnj: str = "",
+) -> list[ParsedSeed]:
+    extras = [
+        parse_seed(seed_cpf, forced_kind="CPF"),
+        parse_seed(seed_cnpj, forced_kind="CNPJ"),
+        parse_seed(seed_name, forced_kind="NAME"),
+        parse_seed(seed_email, forced_kind="EMAIL"),
+        parse_seed(seed_phone, forced_kind="PHONE"),
+        parse_seed(seed_username, forced_kind="USERNAME"),
+        parse_seed(seed_cnj, forced_kind="CNJ"),
+        parse_seed(seed_plate, forced_kind="PLATE") if looks_like_plate(seed_plate) else None,
+        parse_seed(seed_plate_cpf, forced_kind="CPF"),
+        parse_seed(seed_plate_owner, forced_kind="NAME"),
+    ]
+    return dedupe_seeds([*parse_seed_lines(seeds), *extras])

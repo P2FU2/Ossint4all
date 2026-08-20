@@ -11,7 +11,7 @@
       {% endif %}
     </div>
     <div class="chain-actions">
-      <form method="post" action="/app/cadeia/grafo">
+      <form method="post" action="/app/cadeia/grafo" data-busy="Criando caso…">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn primary" type="submit" data-tip="Cria um caso com todos os identificadores desta cadeia">guardar caso</button>
       </form>

@@ -2,7 +2,7 @@ from osint4all.connectors.base import FoundEntity
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 from osint4all.db.models import Entity
 from osint4all.db.repository import detach_entity, enqueue_qsa_network
-from osint4all.graph.identity import found_canonical_key, has_expandable_anchor, is_unconfirmed, names_match
+from osint4all.graph.identity import found_canonical_key, has_expandable_anchor, is_unconfirmed, names_match, should_enqueue_child
 from osint4all.graph.layers import confirmed_seeds, run_alvo_layer
 from osint4all.graph.resolve import apply_result
 from osint4all.graph.seed import create_investigation
@@ -67,6 +67,43 @@ def test_names_match_is_exact() -> None:
     assert not names_match("Maria Silva", "Maria Silva Souza")
 
 
+def test_qsa_partner_with_full_name_is_enqueued() -> None:
+    found = FoundEntity(
+        entity_type="PERSON",
+        kind="NAME",
+        value="JOAO PEREIRA LIMA",
+        display_name="JOAO PEREIRA LIMA",
+        attrs={"status": "unconfirmed", "papel": "Sócio", "candidate_key": "qsa:1", "documento_ausente": True},
+        confidence=0.45,
+    )
+    parent = Entity(
+        entity_type="ORG",
+        canonical_key="cnpj:33000167000101",
+        display_name="Empresa",
+        attrs={},
+        depth=1,
+    )
+    assert should_enqueue_child(found, parent) is True
+
+
+def test_profile_child_is_not_enqueued() -> None:
+    found = FoundEntity(
+        entity_type="PROFILE",
+        kind="URL",
+        value="https://vimeo.com/telegram",
+        display_name="Vimeo",
+        confidence=0.7,
+    )
+    parent = Entity(
+        entity_type="PROFILE",
+        canonical_key="url:https://t.me/telegram",
+        display_name="Telegram",
+        attrs={},
+        depth=1,
+    )
+    assert should_enqueue_child(found, parent) is False
+
+
 def test_alvo_layer_plate_offline() -> None:
     layer = run_alvo_layer({}, kind="PLATE", value="ABC1D23", live=False)
     assert layer.ok
@@ -91,7 +128,7 @@ def test_unconfirmed_name_child_not_enqueued(settings, db) -> None:
         kind="NAME",
         value="JOAO PEREIRA LIMA",
         display_name="JOAO PEREIRA LIMA",
-        attrs={"status": "unconfirmed", "candidate_key": "qsa:1"},
+        attrs={"status": "unconfirmed", "candidate_key": "homonym:1"},
         confidence=0.4,
     )
     from osint4all.connectors.base import ConnectorResult, FoundEdge
@@ -111,6 +148,54 @@ def test_unconfirmed_name_child_not_enqueued(settings, db) -> None:
     )
     jobs = [j for j in inv.jobs if j.entity_id != origin.id]
     assert jobs == []
+
+
+def test_qsa_edge_records_degree_to_target(settings, db) -> None:
+    seed = parse_seed("33000167000101", forced_kind="CNPJ")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[seed],
+        connectors=["cnpj_receita", "socio_search"],
+        max_depth=3,
+        monitor=False,
+        created_by="tester",
+    )
+    origin = next(e for e in inv.entities if e.is_seed)
+    found = FoundEntity(
+        entity_type="PERSON",
+        kind="CPF",
+        value="52998224725",
+        display_name="JOAO PEREIRA LIMA",
+        attrs={"papel": "Sócio"},
+        confidence=0.9,
+    )
+    from osint4all.connectors.base import ConnectorResult, FoundEdge
+    from osint4all.db.models import Edge
+    from sqlalchemy import select
+
+    apply_result(
+        db,
+        inv,
+        origin,
+        ConnectorResult(
+            entities=[found],
+            edges=[FoundEdge(from_ref=found_canonical_key(found), to_ref=origin.canonical_key, rel_type="SOCIO")],
+        ),
+        connector="cnpj_receita",
+        depth=0,
+        enqueue_children=True,
+        max_attempts=3,
+    )
+    person = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON")).first()
+    assert person is not None
+    assert person.depth == 1
+    assert person.attrs.get("grau") == 1
+    edge = db.scalars(select(Edge).where(Edge.investigation_id == inv.id, Edge.rel_type == "SOCIO")).first()
+    assert edge is not None
+    assert edge.attrs.get("grau") == 1
+    assert any(j.entity_id == person.id for j in inv.jobs)
 
 
 def test_unconfirmed_cnpj_child_is_enqueued(settings, db) -> None:
@@ -220,7 +305,7 @@ def test_enqueue_qsa_network_raises_depth_and_queues_cnpj(settings, db) -> None:
     db.flush()
     queued = enqueue_qsa_network(db, inv, max_attempts=3)
     db.flush()
-    assert inv.max_depth == 4
+    assert inv.max_depth == 6
     assert queued >= 1
     from osint4all.db.models import ExpansionJob
     from sqlalchemy import select

@@ -16,7 +16,7 @@
     <p class="lede">E-mail vira linha do tempo. CPF e CNPJ cruzam QSA. Processo, negativa, imóvel e diário oficial usam só portais públicos — sem cartório, PJe fechado nem antecedente policial.</p>
   </section>
 
-  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="closest form" hx-timeout="45000">
+  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="closest form" hx-timeout="45000" data-busy="Consultando…" data-done="Consulta concluída.">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="mode-rail" role="radiogroup" aria-label="Tipo de consulta">
       {% for key, label, tip, ph in modes %}

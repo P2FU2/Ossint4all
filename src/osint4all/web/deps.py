@@ -55,8 +55,19 @@ def template_context(request: Request, user: User | None = None) -> dict:
 
 
 def require_csrf(request: Request, token: str | None) -> None:
-    if not validate_csrf(request.session, token):
-        raise HTTPException(status_code=400, detail="CSRF inválido")
+    if validate_csrf(request.session, token):
+        return
+    request.session["flash"] = {
+        "level": "error",
+        "message": "Sessão expirada. Recarregue a página e tente de novo.",
+    }
+    referer = request.headers.get("referer") or ""
+    location = "/app"
+    if referer.startswith("/") and not referer.startswith("//"):
+        location = referer
+    elif referer.startswith(str(request.base_url)):
+        location = referer
+    raise HTTPException(status_code=303, headers={"Location": location})
 
 
 def login_redirect() -> RedirectResponse:

@@ -11,7 +11,7 @@ from osint4all.connectors.cnpj_receita import CnpjReceitaConnector, parse_cnpj_p
 from osint4all.connectors.socio_search import SocioSearchConnector
 from osint4all.consult import ConsultResult, run_consult
 from osint4all.graph.identity import is_weak_name, names_match
-from osint4all.identifiers import parse_seed
+from osint4all.identifiers import dedupe_seeds, parse_seed
 from osint4all.security import only_digits
 from osint4all.validators import validate_cnpj
 
@@ -66,18 +66,14 @@ def qsa_confirms_name(cnpj: str, name: str, settings: Settings | None = None) ->
 
 
 def confirmed_seeds(fields: dict[str, str], *, qsa_match: bool = False) -> list:
-    seeds = []
-    seen: set[str] = set()
     person_anchors = {"CPF", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ"}
     name_ok = bool(qsa_match or any(fields.get(k) for k in person_anchors))
+    seeds = []
     for kind, value in fields.items():
         if kind == "NAME" and not name_ok:
             continue
-        seed = parse_seed(value, forced_kind=kind)
-        if seed and seed.canonical_key not in seen:
-            seen.add(seed.canonical_key)
-            seeds.append(seed)
-    return seeds
+        seeds.append(parse_seed(value, forced_kind=kind))
+    return dedupe_seeds(seeds)
 
 
 def run_alvo_layer(

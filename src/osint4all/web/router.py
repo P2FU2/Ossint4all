@@ -19,6 +19,8 @@ from osint4all.db.models import AuditLog, Edge, Entity, Evidence, ExpansionJob, 
 from osint4all.db.repository import (
     EDGE_REL_TYPES,
     add_case_note,
+    case_identifiers,
+    case_known_keys,
     confirm_entity,
     create_manual_edge,
     delete_case_note,
@@ -30,15 +32,18 @@ from osint4all.db.repository import (
     job_counts,
     list_notes,
     note_tree,
+    purge_investigation,
     update_edge,
 )
 from osint4all.graph.expand import process_pending_jobs
 from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
+from osint4all.graph.identity import MAX_GRAPH_DEPTH
 from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
+from osint4all.graph.media import collect_target_media, fields_from_identifiers
 from osint4all.graph.seed import add_seed_entities, attach_plate_owner, create_investigation
 from osint4all.tools_suite import MassResult, get_tool, list_tools, run_embedded_tool, run_mass, seeds_from_results, tool_id_for_kind
-from osint4all.identifiers import parse_seed, parse_seed_lines
-from osint4all.validators import looks_like_plate
+from osint4all.identifiers import collect_form_seeds
+from osint4all.validators import looks_like_plate, validate_cnpj
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
 from osint4all.security import mask_identifier
 from osint4all.web.auth import (
@@ -72,6 +77,23 @@ def _with_cases(ctx: dict, request: Request, session: Session) -> dict:
     ctx["current_case_id"] = cid
     ctx["current_case"] = next((row for row in rows if row.id == cid), None)
     return ctx
+
+
+def _set_flash(request: Request, level: str, message: str) -> None:
+    request.session["flash"] = {"level": level, "message": message}
+
+
+def _sync_expand(investigation_id: str, *, rounds: int = 1) -> int:
+    settings = get_settings()
+    if not settings.expand_sync:
+        return 0
+    processed = 0
+    for _ in range(max(1, rounds)):
+        n = process_pending_jobs(investigation_id=investigation_id, limit=settings.expand_sync_limit, settings=settings)
+        if not n:
+            break
+        processed += n
+    return processed
 
 
 def _history_view(session: Session, user: User) -> list[dict]:
@@ -140,8 +162,7 @@ def _assign_seeds(
             owner_name=owner.strip(),
             max_attempts=get_settings().job_max_attempts,
         )
-    if get_settings().expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    _sync_expand(inv.id)
     return len(seeds)
 
 
@@ -334,9 +355,13 @@ def chain_to_graph(
     write_audit(session, "investigation.from_chain", username=user.username, investigation_id=inv.id, details={"steps": len(seeds)})
     session.commit()
     request.session["current_case_id"] = inv.id
-    request.session["flash"] = {"level": "ok", "message": f"Caso criado a partir da cadeia · {len(seeds)} identificador(es)."}
-    if get_settings().expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    processed = _sync_expand(inv.id)
+    _set_flash(
+        request,
+        "ok",
+        f"Caso «{inv.title}» criado a partir da cadeia · {len(seeds)} identificador(es). "
+        + (f"{processed} lote(s) carregado(s)." if processed else "Fontes em carga."),
+    )
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -383,6 +408,14 @@ def alvo_run(
     require_csrf(request, csrf_token)
     layer = _apply_alvo_layer(request, session, user, kind, value)
     write_audit(session, "alvo.layer", username=user.username, details={"kind": kind, "ok": layer.ok, "qsa": layer.qsa_match})
+    request.session["flash"] = {
+        "level": "ok" if layer.ok else "error",
+        "message": (
+            f"Camada {kind} carregada."
+            if layer.ok
+            else f"Camada {kind} sem resultado nesta passagem."
+        ),
+    }
     return _alvo_page(request, user, session, fields=layer.fields, layer=layer)
 
 
@@ -425,6 +458,7 @@ def alvo_to_graph(
         return RedirectResponse("/app/alvo", status_code=303)
     target_id = investigation_id or request.session.get("current_case_id") or ""
     inv = session.get(Investigation, target_id) if target_id else None
+    created = False
     if inv:
         add_seed_entities(session, inv, seeds, max_attempts=get_settings().job_max_attempts)
         write_audit(session, "investigation.from_alvo", username=user.username, investigation_id=inv.id, details={"added": len(seeds)})
@@ -442,10 +476,20 @@ def alvo_to_graph(
             max_attempts=get_settings().job_max_attempts,
         )
         write_audit(session, "investigation.from_alvo", username=user.username, investigation_id=inv.id, details={"seeds": len(seeds)})
+        created = True
     session.commit()
     request.session["current_case_id"] = inv.id
-    if get_settings().expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    processed = _sync_expand(inv.id)
+    _set_flash(
+        request,
+        "ok",
+        (
+            f"Caso «{inv.title}» criado com {len(seeds)} identificador(es). Fontes em carga."
+            if created
+            else f"{len(seeds)} identificador(es) adicionados a «{inv.title}». Fontes em carga."
+        )
+        + (f" {processed} lote(s) já processado(s)." if processed else ""),
+    )
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -462,18 +506,15 @@ def consult_to_graph(
     kinds: list[str] = Form(default=[]),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    seeds = []
-    seen: set[str] = set()
-    candidates = [(kind, value), *zip(kinds, values, strict=False)]
-    for item_kind, item_value in candidates:
-        if not item_value:
-            continue
-        seed = parse_seed(item_value, forced_kind=item_kind or None)
-        if seed and seed.canonical_key not in seen:
-            seen.add(seed.canonical_key)
-            seeds.append(seed)
+    parts = []
+    if value:
+        parts.append(ConsultResult(kind=kind, query=value, title=value, summary="", ok=True))
+    for item_kind, item_value in zip(kinds, values, strict=False):
+        if item_value:
+            parts.append(ConsultResult(kind=item_kind, query=item_value, title=item_value, summary="", ok=True))
+    seeds = seeds_from_results(parts)
     if not seeds:
-        request.session["flash"] = {"level": "error", "message": "Não deu para abrir o grafo com esse valor."}
+        _set_flash(request, "error", "Não deu para abrir o grafo com esse valor.")
         return RedirectResponse("/app", status_code=303)
     seed = seeds[0]
     inv = create_investigation(
@@ -499,8 +540,15 @@ def consult_to_graph(
     write_audit(session, "investigation.from_consult", username=user.username, investigation_id=inv.id, details={"kind": seed.kind, "seeds": len(seeds)})
     session.commit()
     request.session["current_case_id"] = inv.id
-    if get_settings().expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    processed = _sync_expand(inv.id)
+    _set_flash(
+        request,
+        "ok",
+        (
+            f"Caso «{inv.title}» criado com {len(seeds)} identificador(es). "
+            + (f"{processed} lote(s) carregado(s)." if processed else "Fontes em carga.")
+        ),
+    )
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -521,7 +569,7 @@ def consult_assign(
     target_id = investigation_id or request.session.get("current_case_id") or ""
     inv = session.get(Investigation, target_id) if target_id else None
     if not inv:
-        request.session["flash"] = {"level": "error", "message": "Escolha um caso corrente ou crie um em Montar caso."}
+        _set_flash(request, "error", "Escolha um caso corrente ou crie um em Montar caso.")
         return RedirectResponse("/app/casos", status_code=303)
     parts: list[ConsultResult] = []
     if value:
@@ -533,7 +581,10 @@ def consult_assign(
     request.session["current_case_id"] = inv.id
     write_audit(session, "investigation.assign_consult", username=user.username, investigation_id=inv.id, details={"added": added})
     session.commit()
-    request.session["flash"] = {"level": "ok", "message": f"{added} identificador(es) adicionados a {inv.title}."}
+    if added:
+        _set_flash(request, "ok", f"{added} identificador(es) adicionados a {inv.title}.")
+    else:
+        _set_flash(request, "error", "Nenhum identificador válido para acrescentar a este caso.")
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -599,30 +650,27 @@ def create_case(
     seed_plate: str = Form(""),
     seed_plate_owner: str = Form(""),
     seed_plate_cpf: str = Form(""),
+    seed_cnj: str = Form(""),
     max_depth: int = Form(2),
     monitor: str = Form(""),
     connectors: list[str] = Form(default=[]),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    parsed = parse_seed_lines(seeds)
-    extras = [
-        parse_seed(seed_cpf, forced_kind="CPF"),
-        parse_seed(seed_cnpj, forced_kind="CNPJ"),
-        parse_seed(seed_name, forced_kind="NAME"),
-        parse_seed(seed_email, forced_kind="EMAIL"),
-        parse_seed(seed_phone, forced_kind="PHONE"),
-        parse_seed(seed_username, forced_kind="USERNAME"),
-        parse_seed(seed_plate, forced_kind="PLATE") if looks_like_plate(seed_plate) else None,
-        parse_seed(seed_plate_cpf, forced_kind="CPF"),
-        parse_seed(seed_plate_owner, forced_kind="NAME"),
-    ]
-    seen = {s.canonical_key for s in parsed}
-    for extra in extras:
-        if extra and extra.canonical_key not in seen:
-            parsed.append(extra)
-            seen.add(extra.canonical_key)
+    parsed = collect_form_seeds(
+        seeds,
+        seed_cpf=seed_cpf,
+        seed_cnpj=seed_cnpj,
+        seed_name=seed_name,
+        seed_email=seed_email,
+        seed_phone=seed_phone,
+        seed_username=seed_username,
+        seed_plate=seed_plate,
+        seed_plate_owner=seed_plate_owner,
+        seed_plate_cpf=seed_plate_cpf,
+        seed_cnj=seed_cnj,
+    )
     if not parsed:
-        request.session["flash"] = {"level": "error", "message": "Informe ao menos uma semente válida."}
+        _set_flash(request, "error", "Informe ao menos uma semente válida.")
         return RedirectResponse("/app/nova", status_code=303)
     chosen = [c for c in connectors if c in ALL_CONNECTORS] or list(enabled_connector_names())
     inv = create_investigation(
@@ -653,10 +701,65 @@ def create_case(
         details={"seeds": len(parsed), "connectors": chosen},
     )
     session.commit()
-    settings = get_settings()
-    if settings.expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=settings.expand_sync_limit, settings=settings)
+    request.session["current_case_id"] = inv.id
+    processed = _sync_expand(inv.id)
+    _set_flash(
+        request,
+        "ok",
+        (
+            f"Caso «{inv.title}» criado com {len(parsed)} identificador(es). "
+            + (f"{processed} lote(s) carregado(s)." if processed else "Fontes em carga.")
+        ),
+    )
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+def _case_company(session: Session, investigation_id: str) -> str:
+    for entity in session.scalars(
+        select(Entity)
+        .where(Entity.investigation_id == investigation_id, Entity.entity_type == "ORG")
+        .order_by(Entity.display_name)
+    ):
+        name = (entity.display_name or "").strip()
+        if len(name) >= 3 and not name.isdigit() and not validate_cnpj(name):
+            return name
+    return ""
+
+
+def _media_page(request: Request, user: User, fields: dict[str, str], *, title: str = "") -> HTMLResponse:
+    media = collect_target_media(fields=fields, title=title)
+    ctx = template_context(request, user)
+    ctx["media"] = media
+    return templates.TemplateResponse(request, "app/media_panel.html", ctx)
+
+
+@router.get("/app/alvo/midia", response_class=HTMLResponse)
+def alvo_media(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    return _media_page(request, user, alvo_fields(session, user))
+
+
+@router.get("/app/casos/{investigation_id}/midia", response_class=HTMLResponse)
+def case_media(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        ctx = template_context(request, user)
+        ctx["media"] = collect_target_media([])
+        ctx["media"].notes = ["Investigação não encontrada."]
+        return templates.TemplateResponse(request, "app/media_panel.html", ctx, status_code=404)
+    fields = fields_from_identifiers(
+        case_identifiers(session, inv.id),
+        company=_case_company(session, inv.id),
+    )
+    return _media_page(request, user, fields, title=inv.title or "")
 
 
 @router.get("/app/casos/{investigation_id}", response_class=HTMLResponse)
@@ -692,6 +795,7 @@ def graph_page(
                 select(Entity).where(Entity.investigation_id == inv.id).order_by(Entity.display_name)
             ).all(),
             "rel_types": EDGE_REL_TYPES,
+            "dossier": case_identifiers(session, inv.id),
         }
     )
     return templates.TemplateResponse(request, "app/graph.html", ctx)
@@ -726,18 +830,72 @@ def edit_case(
     title: str = Form(""),
     hypothesis: str = Form(""),
     max_depth: int = Form(2),
+    seeds: str = Form(""),
+    seed_cpf: str = Form(""),
+    seed_cnpj: str = Form(""),
+    seed_name: str = Form(""),
+    seed_email: str = Form(""),
+    seed_phone: str = Form(""),
+    seed_username: str = Form(""),
+    seed_plate: str = Form(""),
+    seed_plate_owner: str = Form(""),
+    seed_cnj: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
     if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
         return RedirectResponse("/app/casos", status_code=303)
     if title.strip():
         inv.title = title.strip()[:255]
     inv.hypothesis = hypothesis.strip() or None
-    inv.max_depth = max(0, min(max_depth, 4))
-    write_audit(session, "investigation.edit", username=user.username, investigation_id=inv.id)
+    inv.max_depth = max(0, min(max_depth, MAX_GRAPH_DEPTH))
+    incoming = collect_form_seeds(
+        seeds,
+        seed_cpf=seed_cpf,
+        seed_cnpj=seed_cnpj,
+        seed_name=seed_name,
+        seed_email=seed_email,
+        seed_phone=seed_phone,
+        seed_username=seed_username,
+        seed_plate=seed_plate,
+        seed_plate_owner=seed_plate_owner,
+        seed_cnj=seed_cnj,
+    )
+    known = case_known_keys(session, inv.id)
+    fresh = [item for item in incoming if item.canonical_key not in known]
+    if fresh:
+        add_seed_entities(session, inv, fresh, max_attempts=get_settings().job_max_attempts, force=True)
+    if looks_like_plate(seed_plate):
+        attach_plate_owner(
+            session,
+            inv,
+            plate=seed_plate,
+            owner_name=seed_plate_owner,
+            max_attempts=get_settings().job_max_attempts,
+        )
+    queued = 0
+    if fresh:
+        queued = enqueue_qsa_network(session, inv, max_attempts=get_settings().job_max_attempts)
+    write_audit(
+        session,
+        "investigation.edit",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"added": len(fresh), "queued": queued},
+    )
     session.commit()
-    request.session["flash"] = {"level": "ok", "message": "Caso atualizado."}
+    processed = _sync_expand(inv.id) if fresh else 0
+    if fresh:
+        extra = (
+            f"{processed} lote(s) reprocessados — o grafo procura ligações que as infos novas abrem."
+            if processed
+            else "Fontes em carga para fechar ligações faltantes."
+        )
+        message = f"Caso atualizado. {len(fresh)} identificador(es) novo(s). {extra}"
+    else:
+        message = "Caso atualizado."
+    _set_flash(request, "ok", message)
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -763,6 +921,19 @@ def job_status(
     counts = job_counts(session, investigation_id)
     counts["entities"] = payload.get("entity_count") or 0
     counts["edges"] = payload.get("edge_count") or 0
+    queue = (counts.get("PENDING") or 0) + (counts.get("RUNNING") or 0)
+    if counts.get("RUNNING"):
+        counts["phase"] = "loading"
+        counts["label"] = (
+            f"Carregando fontes… {counts['RUNNING']} em curso, {counts.get('PENDING') or 0} na fila "
+            f"· {counts['entities']} nós"
+        )
+    elif counts.get("PENDING"):
+        counts["phase"] = "loading"
+        counts["label"] = f"Na fila: {counts['PENDING']} consulta(s) · {counts['entities']} nós já no grafo"
+    elif queue == 0:
+        counts["phase"] = "ok"
+        counts["label"] = f"Concluído · {counts['entities']} nós · {counts['edges']} vínculos"
     return JSONResponse(counts)
 
 
@@ -780,6 +951,7 @@ def entity_page(
         .where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
     )
     if not entity:
+        _set_flash(request, "error", "Entidade não encontrada neste caso.")
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
     edges = session.scalars(
         select(Edge).where(
@@ -847,6 +1019,7 @@ def expand_here(
     inv = session.get(Investigation, investigation_id)
     entity = session.get(Entity, entity_id)
     if not inv or not entity or entity.investigation_id != inv.id:
+        _set_flash(request, "error", "Não foi possível expandir este nó.")
         return RedirectResponse("/app", status_code=303)
     enqueue_expand(
         session,
@@ -854,23 +1027,8 @@ def expand_here(
         entity=entity,
         depth=entity.depth,
         max_attempts=get_settings().job_max_attempts,
+        force=True,
     )
-    # força reprocessamento mesmo se já DONE: cria job novo se necessário
-    existing_done = session.scalar(
-        select(ExpansionJob).where(
-            ExpansionJob.entity_id == entity.id,
-            ExpansionJob.status == "DONE",
-        )
-    )
-    if existing_done:
-        session.add(
-            ExpansionJob(
-                investigation_id=inv.id,
-                entity_id=entity.id,
-                depth=entity.depth,
-                max_attempts=get_settings().job_max_attempts,
-            )
-        )
     write_audit(
         session,
         "entity.expand",
@@ -879,8 +1037,16 @@ def expand_here(
         details={"entity_id": entity.id},
     )
     session.commit()
-    if get_settings().expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=get_settings().expand_sync_limit)
+    processed = _sync_expand(inv.id)
+    _set_flash(
+        request,
+        "ok",
+        (
+            f"Expansão de «{entity.display_name}» concluída ({processed} lote(s))."
+            if processed
+            else f"Expansão de «{entity.display_name}» enfileirada."
+        ),
+    )
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
 
@@ -900,6 +1066,7 @@ def edit_entity(
         select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
     )
     if not entity:
+        _set_flash(request, "error", "Entidade não encontrada neste caso.")
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
     if display_name.strip():
         entity.display_name = display_name.strip()[:512]
@@ -929,6 +1096,7 @@ def confirm_node(
         select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id)
     )
     if not entity:
+        _set_flash(request, "error", "Entidade não encontrada neste caso.")
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
     confirm_entity(session, entity, reason="Confirmado na ficha do alvo.")
     inv = session.get(Investigation, investigation_id)
@@ -936,9 +1104,8 @@ def confirm_node(
         enqueue_expand(session, investigation=inv, entity=entity, depth=entity.depth, max_attempts=get_settings().job_max_attempts)
     write_audit(session, "entity.confirm", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id})
     session.commit()
-    if get_settings().expand_sync:
-        process_pending_jobs(investigation_id=investigation_id, limit=get_settings().expand_sync_limit)
-    request.session["flash"] = {"level": "ok", "message": "Nó confirmado. A próxima camada pode expandir daqui."}
+    _sync_expand(investigation_id)
+    _set_flash(request, "ok", "Nó confirmado. A próxima camada pode expandir daqui.")
     return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
 
 
@@ -956,7 +1123,9 @@ def detach_node(
     if ok:
         write_audit(session, "entity.detach", username=user.username, investigation_id=investigation_id, details={"entity_id": entity_id})
         session.commit()
-        request.session["flash"] = {"level": "ok", "message": "Nó desligado e vínculos removidos."}
+        _set_flash(request, "ok", "Nó desligado e vínculos removidos.")
+    else:
+        _set_flash(request, "error", "Esse nó já não está no caso.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -971,6 +1140,7 @@ def explode_qsa(
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
     if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
         return RedirectResponse("/app/casos", status_code=303)
     queued = enqueue_qsa_network(session, inv, max_attempts=get_settings().job_max_attempts)
     write_audit(
@@ -981,20 +1151,15 @@ def explode_qsa(
         details={"queued": queued, "max_depth": inv.max_depth},
     )
     session.commit()
-    processed = 0
-    if get_settings().expand_sync:
-        for _ in range(6):
-            n = process_pending_jobs(investigation_id=inv.id, limit=10)
-            if not n:
-                break
-            processed += n
-    request.session["flash"] = {
-        "level": "ok",
-        "message": (
-            f"QSA explodido até o nível {inv.max_depth}: {queued} âncora(s) na fila, {processed} lote(s) rodado(s). "
-            "Sócios só com nome entram como candidatos; CNPJ/CPF seguem expandindo."
+    processed = _sync_expand(inv.id, rounds=12)
+    _set_flash(
+        request,
+        "ok",
+        (
+            f"QSA em cadeia até grau {inv.max_depth}: {queued} âncora(s) na fila, {processed} lote(s) rodado(s). "
+            "Cada sócio puxa as outras empresas; a linha mostra o grau até o alvo."
         ),
-    }
+    )
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -1003,10 +1168,26 @@ def process_now(
     investigation_id: str,
     request: Request,
     user: User = Depends(current_user),
+    session: Session = Depends(db_session),
     csrf_token: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    process_pending_jobs(investigation_id=investigation_id, limit=get_settings().expand_sync_limit)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    processed = process_pending_jobs(investigation_id=investigation_id, limit=get_settings().expand_sync_limit)
+    jobs = job_counts(session, investigation_id)
+    queue = (jobs.get("PENDING") or 0) + (jobs.get("RUNNING") or 0)
+    _set_flash(
+        request,
+        "ok",
+        (
+            f"Processamento concluído: {processed} lote(s)."
+            if queue == 0
+            else f"{processed} lote(s) processado(s). Ainda há {queue} na fila."
+        ),
+    )
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -1022,10 +1203,12 @@ def add_note(
     entity_id: str = Form(""),
     parent_id: str = Form(""),
     on_graph: str = Form(""),
+    kind: str = Form("note"),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
     if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
         return RedirectResponse("/app/casos", status_code=303)
     add_case_note(
         session,
@@ -1035,11 +1218,15 @@ def add_note(
         entity_id=entity_id or None,
         parent_id=parent_id or None,
         created_by=user.username,
-        on_graph=bool(on_graph),
+        on_graph=bool(on_graph) or kind == "diagram",
+        kind=kind,
     )
-    write_audit(session, "note.add", username=user.username, investigation_id=inv.id, details={"on_graph": bool(on_graph)})
+    write_audit(session, "note.add", username=user.username, investigation_id=inv.id, details={"on_graph": bool(on_graph), "kind": kind})
     session.commit()
-    request.session["flash"] = {"level": "ok", "message": "Anotação gravada no caso."}
+    request.session["flash"] = {
+        "level": "ok",
+        "message": "Diagrama colocado no grafo." if kind == "diagram" else "Anotação gravada no caso.",
+    }
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
@@ -1056,7 +1243,9 @@ def remove_note(
     if delete_case_note(session, investigation_id, note_id):
         write_audit(session, "note.delete", username=user.username, investigation_id=investigation_id, details={"note_id": note_id})
         session.commit()
-        request.session["flash"] = {"level": "ok", "message": "Anotação removida."}
+        _set_flash(request, "ok", "Anotação removida.")
+    else:
+        _set_flash(request, "error", "Essa anotação já não existe.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -1075,6 +1264,7 @@ def add_link(
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
     if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
         return RedirectResponse("/app/casos", status_code=303)
     edge = create_manual_edge(session, inv, from_id=from_id, to_id=to_id, rel_type=rel_type, note=note)
     write_audit(session, "edge.create", username=user.username, investigation_id=inv.id, details={"rel": rel_type})
@@ -1097,6 +1287,7 @@ def edge_page(
     inv = session.get(Investigation, investigation_id)
     edge = session.scalar(select(Edge).where(Edge.id == edge_id, Edge.investigation_id == investigation_id))
     if not inv or not edge:
+        _set_flash(request, "error", "Ligação não encontrada.")
         return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
     src = session.get(Entity, edge.from_entity_id)
     dst = session.get(Entity, edge.to_entity_id)
@@ -1121,7 +1312,9 @@ def edit_link(
     if edge:
         write_audit(session, "edge.edit", username=user.username, investigation_id=investigation_id, details={"rel": rel_type})
         session.commit()
-        request.session["flash"] = {"level": "ok", "message": "Ligação atualizada."}
+        _set_flash(request, "ok", "Ligação atualizada.")
+        return RedirectResponse(f"/app/casos/{investigation_id}/ligacoes/{edge_id}", status_code=303)
+    _set_flash(request, "error", "Não foi possível atualizar: já existe uma ligação desse tipo ou ela sumiu.")
     return RedirectResponse(f"/app/casos/{investigation_id}/ligacoes/{edge_id}", status_code=303)
 
 
@@ -1138,7 +1331,9 @@ def remove_link(
     if delete_edge(session, investigation_id, edge_id):
         write_audit(session, "edge.delete", username=user.username, investigation_id=investigation_id, details={"edge_id": edge_id})
         session.commit()
-        request.session["flash"] = {"level": "ok", "message": "Ligação removida. Os nós continuam no caso."}
+        _set_flash(request, "ok", "Ligação removida. Os nós continuam no caso.")
+    else:
+        _set_flash(request, "error", "Essa ligação já não existe.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -1177,10 +1372,8 @@ def add_plate(
         details={"placa": seed_plate.strip()},
     )
     session.commit()
-    settings = get_settings()
-    if settings.expand_sync:
-        process_pending_jobs(investigation_id=inv.id, limit=settings.expand_sync_limit, settings=settings)
-    request.session["flash"] = {"level": "ok", "message": "Veículo adicionado ao grafo."}
+    _sync_expand(inv.id)
+    _set_flash(request, "ok", "Veículo adicionado ao grafo.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -1259,15 +1452,18 @@ def toggle_monitor(
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
-    if inv:
-        inv.monitor = not inv.monitor
-        write_audit(
-            session,
-            "investigation.monitor",
-            username=user.username,
-            investigation_id=inv.id,
-            details={"monitor": inv.monitor},
-        )
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    inv.monitor = not inv.monitor
+    write_audit(
+        session,
+        "investigation.monitor",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"monitor": inv.monitor},
+    )
+    _set_flash(request, "ok", "Monitoramento ligado." if inv.monitor else "Monitoramento desligado.")
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
@@ -1280,10 +1476,8 @@ def purge_case(
     csrf_token: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
-    inv = session.get(Investigation, investigation_id)
-    if inv:
-        write_audit(session, "investigation.purge", username=user.username, investigation_id=inv.id)
-        session.delete(inv)
+    if purge_investigation(session, investigation_id):
+        write_audit(session, "investigation.purge", username=user.username, investigation_id=investigation_id)
         session.commit()
         upload = project_root() / "data" / "uploads" / investigation_id
         if upload.exists():
@@ -1292,7 +1486,12 @@ def purge_case(
             shutil.rmtree(upload, ignore_errors=True)
         if request.session.get("current_case_id") == investigation_id:
             request.session.pop("current_case_id", None)
-        request.session["flash"] = {"level": "ok", "message": "Caso apagado. Nós, vínculos, notas e uploads foram removidos."}
+        request.session["flash"] = {
+            "level": "ok",
+            "message": "Caso apagado. Nós, vínculos, notas e uploads foram removidos.",
+        }
+    else:
+        request.session["flash"] = {"level": "error", "message": "Esse caso já não existe."}
     return RedirectResponse("/app/casos", status_code=303)
 
 
@@ -1314,6 +1513,18 @@ def admin_page(
         }
     )
     return templates.TemplateResponse(request, "app/admin.html", ctx)
+
+
+@router.get("/app/manual", response_class=HTMLResponse)
+def manual_page(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    ctx = template_context(request, user)
+    ctx.update({"nav": "manual"})
+    _with_cases(ctx, request, session)
+    return templates.TemplateResponse(request, "app/manual.html", ctx)
 
 
 @router.get("/app/ferramentas", response_class=HTMLResponse)

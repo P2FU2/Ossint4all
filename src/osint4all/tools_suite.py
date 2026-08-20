@@ -10,7 +10,7 @@ from osint4all.config import Settings, get_settings
 from osint4all.connectors.crtsh import CrtshConnector, _DOMAIN_RE
 from osint4all.connectors.web_search import WebSearchConnector, web_search_ready
 from osint4all.consult import ConsultHit, ConsultResult, run_consult
-from osint4all.identifiers import parse_seed
+from osint4all.identifiers import seeds_from_kind_values
 from osint4all.security import only_digits
 
 
@@ -196,16 +196,11 @@ def run_mass(raw: str, *, mode: str = "auto", settings: Settings | None = None, 
 
 
 def seeds_from_results(parts: list[ConsultResult]) -> list:
-    seeds = []
-    seen: set[str] = set()
-    for part in parts:
-        if not part.ok or not part.query or part.kind in {"", "FILE"}:
-            continue
-        seed = parse_seed(part.query, forced_kind=part.kind or None)
-        if seed and seed.canonical_key not in seen:
-            seen.add(seed.canonical_key)
-            seeds.append(seed)
-    return seeds
+    return seeds_from_kind_values(
+        (part.kind, part.query)
+        for part in parts
+        if part.ok and part.query and part.kind not in {"", "FILE"}
+    )
 
 
 def _derive(primary: ConsultResult) -> list[tuple[str, str]]:

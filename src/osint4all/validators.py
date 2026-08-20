@@ -8,6 +8,22 @@ from dataclasses import dataclass
 from osint4all.security import only_digits
 
 
+_CPF_MASK = re.compile(r"^\d{3}\.\d{3}\.\d{3}-\d{2}$")
+_BR_DDD = frozenset(
+    {
+        "11", "12", "13", "14", "15", "16", "17", "18", "19",
+        "21", "22", "24", "27", "28",
+        "31", "32", "33", "34", "35", "37", "38",
+        "41", "42", "43", "44", "45", "46", "47", "48", "49",
+        "51", "53", "54", "55",
+        "61", "62", "63", "64", "65", "66", "67", "68", "69",
+        "71", "73", "74", "75", "77", "79",
+        "81", "82", "83", "84", "85", "86", "87", "88", "89",
+        "91", "92", "93", "94", "95", "96", "97", "98", "99",
+    }
+)
+
+
 def validate_cpf(cpf: str) -> bool:
     digits = only_digits(cpf)
     if len(digits) != 11 or digits == digits[0] * 11:
@@ -18,6 +34,35 @@ def validate_cpf(cpf: str) -> bool:
         if digit != int(digits[i]):
             return False
     return True
+
+
+def looks_like_cpf_mask(value: str) -> bool:
+    return bool(_CPF_MASK.match((value or "").strip()))
+
+
+def looks_like_br_mobile(value: str) -> bool:
+    """Celular BR: DDD válido + 9 + 8 dígitos. Evita tratar telefone como CPF."""
+    digits = only_digits(value)
+    return len(digits) == 11 and digits[:2] in _BR_DDD and digits[2] == "9"
+
+
+def socio_doc_matches_cpf(stored: str, cpf: str) -> bool:
+    """Só aceita o documento do QSA se for o mesmo CPF (completo ou máscara oficial)."""
+    if not validate_cpf(cpf):
+        return False
+    full = only_digits(cpf)
+    raw = (stored or "").strip()
+    if not raw:
+        return False
+    digits = only_digits(raw)
+    if validate_cnpj(digits):
+        return False
+    if validate_cpf(digits):
+        return digits == full
+    if "*" in raw:
+        visible = digits
+        return len(visible) >= 6 and visible in full
+    return False
 
 
 def validate_cnpj(cnpj: str) -> bool:

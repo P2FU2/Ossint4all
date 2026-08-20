@@ -1,14 +1,93 @@
+function escapeHtml(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+window.escapeHtml = escapeHtml;
+
+function setActionStatus(phase, message) {
+  const bar = document.getElementById("action-status");
+  if (!bar || !message) return;
+  bar.hidden = false;
+  bar.textContent = message;
+  bar.classList.remove("is-loading", "is-ok", "is-error");
+  bar.classList.add(phase === "error" ? "is-error" : phase === "ok" ? "is-ok" : "is-loading");
+}
+window.setActionStatus = setActionStatus;
+
+function formAction(form) {
+  if (!(form instanceof HTMLFormElement)) return "";
+  const submitter = form.querySelector("button[formaction], input[formaction]");
+  return (form.getAttribute("action") || (submitter && submitter.getAttribute("formaction")) || "");
+}
+
+function busyLabel(form) {
+  if (form instanceof HTMLFormElement && form.dataset.busy) return form.dataset.busy;
+  const action = formAction(form);
+  if (action.includes("/nova") || action.includes("/grafo")) return "Criando caso…";
+  if (action.includes("/explodir")) return "Explodindo QSA…";
+  if (action.includes("/processar")) return "Processando fila…";
+  if (action.includes("/expandir")) return "Expandindo nó…";
+  if (action.includes("/consultar")) return "Consultando…";
+  if (action.includes("/ferramentas")) return "Buscando…";
+  if (action.includes("/alvo")) return "Buscando nesta camada…";
+  if (action.includes("/desligar") || action.includes("/apagar")) return "Removendo…";
+  if (action.includes("/notas")) return "Gravando anotação…";
+  if (action.includes("/ligacoes")) return "Gravando ligação…";
+  return "Carregando…";
+}
+
+function doneLabel(form, ok) {
+  if (!ok) return "Falha. Tente de novo.";
+  if (form instanceof HTMLFormElement && form.dataset.done) return form.dataset.done;
+  const action = formAction(form);
+  if (action.includes("/consultar")) return "Consulta concluída.";
+  if (action.includes("/ferramentas")) return "Ferramenta concluída.";
+  if (action.includes("/alvo")) return "Camada carregada.";
+  if (action.includes("/historico")) return "Histórico atualizado.";
+  if (action.includes("/cadeia")) return "Cadeia atualizada.";
+  return "Concluído.";
+}
+
 document.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
   const csrf = document.querySelector('meta[name="csrf-token"]');
-  if (!csrf) return;
-  if (form.querySelector('input[name="csrf_token"]')) return;
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "csrf_token";
-  input.value = csrf.getAttribute("content") || "";
-  form.appendChild(input);
+  if (csrf && !form.querySelector('input[name="csrf_token"]')) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "csrf_token";
+    input.value = csrf.getAttribute("content") || "";
+    form.appendChild(input);
+  }
+  if (form.dataset.silent === "1") return;
+  const label = busyLabel(form);
+  setActionStatus("loading", label);
+  form.classList.add("is-busy");
+  const btn = event.submitter instanceof HTMLButtonElement
+    ? event.submitter
+    : form.querySelector("button[type=submit], button:not([type])");
+  if (btn && !btn.dataset.locked) {
+    btn.dataset.locked = "1";
+    btn.dataset.original = btn.textContent || "";
+    btn.textContent = label;
+  }
+});
+
+document.body.addEventListener("htmx:beforeRequest", (event) => {
+  const form = event.target && event.target.closest ? event.target.closest("form") : event.target;
+  const label = form instanceof HTMLFormElement ? busyLabel(form) : "Carregando…";
+  setActionStatus("loading", label);
+});
+document.body.addEventListener("htmx:afterRequest", (event) => {
+  const form = event.target && event.target.closest ? event.target.closest("form") : event.target;
+  const ok = !event.detail || event.detail.successful !== false;
+  setActionStatus(ok ? "ok" : "error", doneLabel(form, ok));
+});
+document.body.addEventListener("htmx:sendError", () => {
+  setActionStatus("error", "Falha de rede. Tente de novo.");
 });
 
 (function tips() {
@@ -132,6 +211,8 @@ document.addEventListener("submit", (event) => {
     plate: "Placa",
     alert: "Alerta",
     node: "Nó da árvore",
+    noticia: "Notícia",
+    imagem: "Imagem",
   };
   const KIND_WHY = {
     fonte: "Portal ou registro público citado nesta consulta. Não é acesso privilegiado.",
@@ -147,6 +228,8 @@ document.addEventListener("submit", (event) => {
     web: "Menção em busca pública. Título não é prova.",
     achado: "Item acumulado na cadeia de consultas relacionadas.",
     node: "Entidade da árvore desta consulta.",
+    noticia: "Matéria ou menção em busca pública. Título não é prova nem confirma o alvo.",
+    imagem: "Miniatura pública. Não é foto oficial nem prova de identidade.",
   };
 
   function parsePayload(raw) {
@@ -300,6 +383,18 @@ document.addEventListener("submit", (event) => {
     factsEl.appendChild(fact("leitura", KIND_WHY[kind] || "Item interno da consulta. Clique nas ações abaixo."));
     if (seed) factsEl.appendChild(fact("consultável", seed.q + " · " + seed.modo));
     if (listsEl) listsEl.replaceChildren();
+    const thumb = String(data.thumb || "").trim();
+    if (listsEl && thumb.startsWith("http")) {
+      const kicker = document.createElement("p");
+      kicker.className = "section-kicker";
+      kicker.textContent = "miniatura pública";
+      const img = document.createElement("img");
+      img.className = "inspect-thumb";
+      img.src = thumb;
+      img.alt = title;
+      img.referrerPolicy = "no-referrer";
+      listsEl.append(kicker, img);
+    }
     renderList("sócios / QSA", data.socios || []);
     renderList("participações", data.participacoes || []);
     return { title, kind, meta, url, when, seed };
@@ -769,11 +864,7 @@ document.addEventListener("submit", (event) => {
   }
 
   function escapeXml(text) {
-    return String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    return escapeHtml(text);
   }
 
   window.renderConsultGraphs = (root) => {

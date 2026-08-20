@@ -5,7 +5,8 @@ from __future__ import annotations
 from osint4all.connectors.base import FoundEntity
 from osint4all.connectors.plate_public import parse_plate_enrichment
 from osint4all.db.models import Entity, Investigation
-from osint4all.db.repository import enqueue_expand
+from osint4all.db.repository import enqueue_expand, find_entity_by_key
+from osint4all.graph.identity import MAX_GRAPH_DEPTH
 from osint4all.graph.resolve import apply_result, upsert_found_entity
 from osint4all.identifiers import ParsedSeed, parse_seed
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ def add_seed_entities(
     seeds: list[ParsedSeed],
     *,
     max_attempts: int = 3,
+    force: bool = False,
 ) -> list[Entity]:
     created: list[Entity] = []
     for seed in seeds:
@@ -29,7 +31,14 @@ def add_seed_entities(
             confidence=0.99 if seed.kind in {"CPF", "CNPJ", "CNJ"} else 0.7,
         )
         entity = upsert_found_entity(session, inv, found, depth=0, is_seed=True)
-        enqueue_expand(session, investigation=inv, entity=entity, depth=0, max_attempts=max_attempts)
+        enqueue_expand(
+            session,
+            investigation=inv,
+            entity=entity,
+            depth=0,
+            max_attempts=max_attempts,
+            force=force,
+        )
         created.append(entity)
     return created
 
@@ -46,7 +55,7 @@ def attach_plate_owner(
     plate_seed = parse_seed(plate, forced_kind="PLATE")
     if not plate_seed:
         return None
-    extras: list[ParsedSeed] = [plate_seed]
+    extras: list[ParsedSeed] = []
     if owner_cpf:
         cpf_seed = parse_seed(owner_cpf, forced_kind="CPF")
         if cpf_seed:
@@ -55,8 +64,12 @@ def attach_plate_owner(
         name_seed = parse_seed(owner_name, forced_kind="NAME")
         if name_seed:
             extras.append(name_seed)
-    entities = add_seed_entities(session, inv, extras, max_attempts=max_attempts)
-    plate_entity = next((e for e in entities if e.canonical_key == plate_seed.canonical_key), None)
+    if extras:
+        add_seed_entities(session, inv, extras, max_attempts=max_attempts)
+    plate_entity = find_entity_by_key(session, inv.id, plate_seed.canonical_key)
+    if not plate_entity:
+        created = add_seed_entities(session, inv, [plate_seed], max_attempts=max_attempts)
+        plate_entity = created[0] if created else None
     if not plate_entity:
         return None
     attrs = dict(plate_entity.attrs or {})
@@ -99,7 +112,7 @@ def create_investigation(
     inv = Investigation(
         title=title.strip() or "Investigação sem título",
         hypothesis=(hypothesis or "").strip() or None,
-        max_depth=max(0, min(max_depth, 4)),
+        max_depth=max(0, min(max_depth, MAX_GRAPH_DEPTH)),
         connectors=connectors,
         monitor=monitor,
         created_by=created_by,
