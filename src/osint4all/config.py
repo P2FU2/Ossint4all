@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     censys_api_secret: str = ""
     host_observe_enable: bool = True
     google_public_enable: bool = True
+    pncp_public_enable: bool = True
+    congresso_public_enable: bool = True
+    opensanctions_public_enable: bool = True
+    gleif_public_enable: bool = True
 
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-4"
@@ -140,4 +144,8 @@ ALL_CONNECTORS = (
     "censys_public",
     "host_observe",
     "google_public",
+    "pncp_public",
+    "congresso_public",
+    "opensanctions_public",
+    "gleif_public",
 )

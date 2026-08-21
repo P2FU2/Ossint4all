@@ -122,13 +122,21 @@ def _org_card_facts(attrs: dict[str, Any] | None, *, consulted_at: str = "") -> 
         ("telefone", "telefone"),
         ("situação", "situacao"),
         ("CNAE", "cnae"),
+        ("CNAEs secundários", "cnaes_secundarios"),
         ("porte", "porte"),
         ("natureza", "natureza_juridica"),
         ("endereço", "endereco"),
         ("razão social", "razao_social"),
+        ("CNPJ raiz", "cnpj_raiz"),
+        ("matriz/filial", "matriz_filial"),
+        ("situação em", "data_situacao"),
     )
     for label, key in mapping:
-        value = str(data.get(key) or "").strip()
+        raw = data.get(key)
+        if isinstance(raw, list):
+            value = "; ".join(str(item) for item in raw if item)
+        else:
+            value = str(raw or "").strip()
         if value and label not in skip:
             pairs.append((label, value))
             skip.add(label)
@@ -1612,9 +1620,14 @@ def _safe_web_search(settings: Settings, query: str, origin_key: str) -> list[Co
     except Exception:
         return []
     hits = [
-        ConsultHit(e.display_name, str((e.attrs or {}).get("snippet") or ""), e.value, "mencao")
+        ConsultHit(
+            e.display_name,
+            str((e.attrs or {}).get("snippet") or ""),
+            e.value,
+            str((e.attrs or {}).get("tipo") or "mencao"),
+        )
         for e in parsed.entities
-        if e.entity_type == "PUBLICATION"
+        if e.entity_type in {"PUBLICATION", "ASSET"}
     ]
     if not hits and parsed.evidence:
         hits = [ConsultHit(ev.source_label, ev.snippet or "", ev.url, "mencao") for ev in parsed.evidence[:8]]

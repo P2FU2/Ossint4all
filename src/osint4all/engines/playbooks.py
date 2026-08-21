@@ -29,6 +29,16 @@ STEP_PROBES: dict[str, list[str] | None] = {
     "key_people": ["QSA"],
     "history": ["CNPJ"],
     "verify": None,
+    "parties": ["PROCESSOS"],
+    "lawyers": ["PROCESSOS"],
+    "moves": ["CNJ"],
+    "related": ["PROCESSOS"],
+    "capa": ["CNJ"],
+    "whois": ["URL"],
+    "certs": ["URL"],
+    "hosts": ["URL"],
+    "observe": ["URL"],
+    "org": ["CNPJ"],
     "identity": ["CPF", "NAME"],
     "aliases": ["NAME"],
     "usernames": ["USERNAME"],
@@ -61,6 +71,27 @@ COMPANY_STEPS = [
     ("verify", "Verificação final"),
 ]
 
+CASE_STEPS = [
+    ("capa", "Número e capa"),
+    ("parties", "Partes"),
+    ("lawyers", "Advogados e menções"),
+    ("moves", "Movimentos públicos"),
+    ("news", "Notícias"),
+    ("related", "Mesmas partes"),
+    ("verify", "Verificação final"),
+]
+
+DOMAIN_STEPS = [
+    ("whois", "Titular do domínio"),
+    ("certs", "Certificados"),
+    ("hosts", "Subdomínios e hosts"),
+    ("infra", "Infraestrutura pública"),
+    ("org", "Empresa ligada"),
+    ("news", "Menções"),
+    ("observe", "Ficha do host"),
+    ("verify", "Verificação final"),
+]
+
 PERSON_STEPS = [
     ("identity", "Identidade"),
     ("aliases", "Aliases"),
@@ -81,6 +112,8 @@ PERSON_STEPS = [
 TEMPLATES = {
     "COMPANY": COMPANY_STEPS,
     "PERSON": PERSON_STEPS,
+    "CASE": CASE_STEPS,
+    "DOMAIN": DOMAIN_STEPS,
 }
 
 
@@ -93,8 +126,16 @@ def infer_playbook(investigation: Investigation) -> str:
             kinds.add(ident.kind)
         if entity.entity_type == "ORG":
             kinds.add("CNPJ")
+        if entity.entity_type == "CASE":
+            kinds.add("CNJ")
+        if entity.entity_type == "PROFILE":
+            kinds.add("URL")
+    if "CNJ" in kinds:
+        return "CASE"
     if "CNPJ" in kinds:
         return "COMPANY"
+    if "URL" in kinds and not ({"CPF", "NAME", "EMAIL", "PHONE"} & kinds):
+        return "DOMAIN"
     return "PERSON"
 
 

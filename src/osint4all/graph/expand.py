@@ -18,17 +18,17 @@ PROBE_CONNECTORS = {
     "EMAIL": frozenset({"email_public", "web_search", "username_public", "google_public"}),
     "USERNAME": frozenset({"username_public", "web_search", "google_public"}),
     "PHONE": frozenset({"phone_public", "web_search"}),
-    "NAME": frozenset({"socio_search", "web_search", "wikidata", "tse", "google_public"}),
-    "CPF": frozenset({"socio_search", "tse", "transparencia", "web_search"}),
-    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search", "geo_public"}),
+    "NAME": frozenset({"socio_search", "web_search", "wikidata", "tse", "google_public", "congresso_public", "opensanctions_public"}),
+    "CPF": frozenset({"socio_search", "tse", "transparencia", "web_search", "opensanctions_public"}),
+    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search", "geo_public", "pncp_public", "gleif_public", "opensanctions_public"}),
     "COMPANIES": frozenset({"socio_search", "cnpj_receita"}),
     "QSA": frozenset({"cnpj_receita", "socio_search"}),
     "PROCESSOS": frozenset({"djen", "datajud"}),
     "CNJ": frozenset({"djen", "datajud"}),
-    "INFO": frozenset({"socio_search", "djen", "transparencia", "web_search", "tse", "wikidata", "google_public"}),
+    "INFO": frozenset({"socio_search", "djen", "transparencia", "web_search", "tse", "wikidata", "google_public", "pncp_public", "congresso_public"}),
     "URL": frozenset({"host_public", "crtsh", "rdap_public", "host_observe", "web_search"}),
-    "SANCTIONS": frozenset({"transparencia", "tse", "web_search"}),
-    "CONTRACTS": frozenset({"transparencia", "web_search"}),
+    "SANCTIONS": frozenset({"transparencia", "tse", "web_search", "opensanctions_public"}),
+    "CONTRACTS": frozenset({"pncp_public", "web_search"}),
 }
 
 

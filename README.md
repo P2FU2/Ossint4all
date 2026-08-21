@@ -23,7 +23,8 @@ Uso previsto: jornalismo investigativo. Não consulta DETRAN, cartório, operado
 - TSE, Transparência, OpenCorporates, Wikidata, busca web (SearXNG público, Brave ou Google CSE) e checagem de URL pública
 - Relatório HTML/PDF com citações `[n]`, hash, finalidade e responsável
 - Qualidade de evidência: provenance, resolução de entidade, timeline, tarefas, veredito e saúde das fontes
-- Segunda geração: playbooks, hipóteses, gap analysis, caminho no grafo, clusters, memória entre casos e nota de qualidade do dossiê
+- Segunda geração: playbooks (pessoa, empresa, processo, domínio), hipóteses, gap analysis, caminho no grafo, comparar dois alvos, clusters, memória entre casos e nota de qualidade do dossiê
+- Export JSON e GraphML do caso
 - Mapa de ferramentas no modelo do [OSINT Framework](https://osintframework.com/) (árvore expansível + ramo Brasil / [OSINT Brazuca](https://github.com/osintbrazuca/osint-brazuca))
 - Anexo de PDF na investigação para ler metadados (estilo FOCA, só o arquivo que você envia)
 - Auditoria de quem buscou o quê
@@ -101,6 +102,10 @@ pytest -q
 | `censys_public` | `CENSYS_API_ID` + `CENSYS_API_SECRET` | Search API oficial. Sem FOFA scrape |
 | `host_observe` | não | Ficha do host já conhecido: status, título, tech, security.txt, links do domínio. Índice local estilo IVRE |
 | `google_public` | não | Scholar / News / Maps / YouTube públicos. Sem cookie GHunt |
+| `pncp_public` | não | Contratos e editais do PNCP |
+| `congresso_public` | não | Deputados e senadores em exercício (dados abertos) |
+| `opensanctions_public` | não | PEP e sanções internacionais |
+| `gleif_public` | não | Legal Entity Identifier |
 
 ## Mapa de ferramentas
 

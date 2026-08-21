@@ -1,6 +1,9 @@
 from osint4all.config import normalize_database_url
 from osint4all.validators import (
+    cnpj_matriz,
+    compose_cnpj,
     format_plate,
+    is_cnpj_filial,
     looks_like_br_mobile,
     looks_like_cpf_mask,
     looks_like_plate,
@@ -30,6 +33,11 @@ def test_cpf_valid_and_invalid() -> None:
 def test_cnpj_valid_and_invalid() -> None:
     assert validate_cnpj("33.000.167/0001-01")
     assert not validate_cnpj("00.000.000/0000-00")
+    filial = compose_cnpj("330001670002")
+    assert filial and validate_cnpj(filial)
+    assert is_cnpj_filial(filial)
+    assert cnpj_matriz(filial) == "33000167000101"
+    assert not is_cnpj_filial("33000167000101")
 
 
 def test_plate_normalize() -> None:

@@ -23,6 +23,10 @@ from osint4all.connectors.aleph_public import AlephPublicConnector
 from osint4all.connectors.censys_public import CensysPublicConnector
 from osint4all.connectors.host_observe import HostObserveConnector
 from osint4all.connectors.google_public import GooglePublicConnector
+from osint4all.connectors.pncp_public import PncpPublicConnector
+from osint4all.connectors.congresso_public import CongressoPublicConnector
+from osint4all.connectors.opensanctions_public import OpensanctionsPublicConnector
+from osint4all.connectors.gleif_public import GleifPublicConnector
 from osint4all.connectors.socio_search import SocioSearchConnector
 from osint4all.connectors.username_public import UsernamePublicConnector
 from osint4all.connectors.web_search import WebSearchConnector
@@ -52,6 +56,10 @@ _BUILDERS = {
     "censys_public": CensysPublicConnector,
     "host_observe": HostObserveConnector,
     "google_public": GooglePublicConnector,
+    "pncp_public": PncpPublicConnector,
+    "congresso_public": CongressoPublicConnector,
+    "opensanctions_public": OpensanctionsPublicConnector,
+    "gleif_public": GleifPublicConnector,
 }
 
 
@@ -86,6 +94,10 @@ def enabled_connector_names(settings: Settings | None = None) -> list[str]:
         "censys_public": settings.censys_enable,
         "host_observe": settings.host_observe_enable,
         "google_public": settings.google_public_enable,
+        "pncp_public": settings.pncp_public_enable,
+        "congresso_public": settings.congresso_public_enable,
+        "opensanctions_public": settings.opensanctions_public_enable,
+        "gleif_public": settings.gleif_public_enable,
     }
     return [name for name in ALL_CONNECTORS if flags.get(name)]
 

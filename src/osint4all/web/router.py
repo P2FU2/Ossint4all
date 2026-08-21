@@ -92,6 +92,7 @@ from osint4all.identifiers import (
 )
 from osint4all.validators import looks_like_plate, validate_cnpj
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
+from osint4all.report.graphml import render_graphml
 from osint4all.security import mask_identifier
 from osint4all.web.auth import (
     SESSION_USER_KEY,
@@ -181,7 +182,7 @@ def _mesa_ctx(ctx: dict, session: Session, request: Request, user: User) -> dict
     ctx["source_catalog"] = SOURCE_CATALOG
     ctx["enabled"] = enabled_connector_names(settings)
     ctx["default_depth"] = settings.default_max_depth
-    ctx["playbooks"] = ("PERSON", "COMPANY")
+    ctx["playbooks"] = ("PERSON", "COMPANY", "CASE", "DOMAIN")
     ctx["team"] = _team_names(session)
     return ctx
 
@@ -1103,7 +1104,7 @@ def new_investigation(
             "source_catalog": SOURCE_CATALOG,
             "enabled": enabled_connector_names(settings),
             "default_depth": settings.default_max_depth,
-            "playbooks": ("PERSON", "COMPANY"),
+            "playbooks": ("PERSON", "COMPANY", "CASE", "DOMAIN"),
             "team": _team_names(session),
         }
     )
@@ -1175,7 +1176,7 @@ def create_case(
     inv.purpose = purpose.strip() or None
     inv.assignee = assignee.strip() or user.username
     inv.tags = parse_case_tags(tags)
-    if playbook_key.upper() in {"COMPANY", "PERSON"}:
+    if playbook_key.upper() in {"COMPANY", "PERSON", "CASE", "DOMAIN"}:
         from osint4all.engines.playbooks import attach_playbook
 
         attach_playbook(session, inv, playbook_key.upper())
@@ -3043,6 +3044,23 @@ def export_case_json(
                 for ev in evidence
             ],
         }
+    )
+
+
+@router.get("/app/casos/{investigation_id}/export.graphml")
+def export_case_graphml(
+    investigation_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> Response:
+    inv = session.get(Investigation, investigation_id)
+    if not inv or inv.status == "DELETED":
+        return JSONResponse({"detail": "caso não encontrado"}, status_code=404)
+    xml = render_graphml(session, inv.id)
+    return Response(
+        content=xml,
+        media_type="application/graphml+xml",
+        headers={"Content-Disposition": f'attachment; filename="osint4all-{investigation_id[:8]}.graphml"'},
     )
 
 

@@ -13,6 +13,7 @@ from osint4all.engines.discovery import recent_queries
 from osint4all.engines.intelligence import (
     anomalies,
     communities,
+    compare_entities,
     cross_case_hits,
     semantic_search,
     shortest_path,
@@ -374,4 +375,21 @@ def path_page(
     ctx = _ctx(request, user, session, inv)
     ctx["path"] = shortest_path(session, inv.id, src, dst) if src and dst else None
     ctx["search_hits"] = semantic_search(session, inv.id, request.query_params.get("q") or "")
+    return templates.TemplateResponse(request, "app/investigate.html", ctx)
+
+
+@investigate_router.get("/app/casos/{investigation_id}/comparar", response_class=HTMLResponse)
+def compare_page(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+):
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        return RedirectResponse("/app/casos", status_code=303)
+    left = request.query_params.get("a") or ""
+    right = request.query_params.get("b") or ""
+    ctx = _ctx(request, user, session, inv)
+    ctx["compare"] = compare_entities(session, inv.id, left, right) if left and right else None
     return templates.TemplateResponse(request, "app/investigate.html", ctx)

@@ -49,6 +49,25 @@ def web_search_ready(settings: Settings) -> bool:
     return bool(settings.searxng_enable and searxng_bases(settings))
 
 
+_DIARIO_HINTS = ("diário oficial", "diario oficial", "in.gov.br", "querido diário", "querido diario", "djen", "imprensa nacional", "dou")
+_IMOVEL_HINTS = ("leilão", "leilao", "matrícula", "matricula", "hasta pública", "hasta publica", "sncr", "sigef", "imóvel", "imovel", "iptu")
+_CONTRATO_HINTS = ("pncp", "licitação", "licitacao", "contrato público", "compras.gov")
+
+
+def classify_public_mention(title: str, snippet: str, url: str) -> str:
+    blob = f"{title} {snippet} {url}".casefold()
+    host = url.casefold()
+    if "in.gov.br" in host or any(token in blob for token in _DIARIO_HINTS):
+        return "diario"
+    if "caixa.gov.br" in host and "imovel" in host.replace("ó", "o"):
+        return "imovel"
+    if any(token in blob for token in _IMOVEL_HINTS):
+        return "imovel"
+    if any(token in blob for token in _CONTRATO_HINTS):
+        return "contrato"
+    return "mencao"
+
+
 def parse_web_hits(hits: list[dict[str, Any]], *, origin_key: str, source: str = "Busca web (API oficial)") -> ConnectorResult:
     out = ConnectorResult()
     seen_owners: set[str] = set()
@@ -59,17 +78,27 @@ def parse_web_hits(hits: list[dict[str, Any]], *, origin_key: str, source: str =
         snippet = str(hit.get("description") or hit.get("snippet") or hit.get("content") or "")
         if not url or is_catalog_portal(url):
             continue
+        tipo = classify_public_mention(title, snippet, url)
+        entity_type = "ASSET" if tipo == "imovel" else "PUBLICATION"
+        rel = "PATRIMONIO" if tipo == "imovel" else ("CONTRATO" if tipo == "contrato" else "MENCAO")
         found = FoundEntity(
-            entity_type="PUBLICATION",
+            entity_type=entity_type,
             kind="URL",
             value=url,
             display_name=title[:160],
-            attrs={"snippet": snippet, "engine": hit.get("engine") or "", "fonte": url, "page_url": url, "tipo": "mencao"},
-            confidence=0.4,
+            attrs={
+                "snippet": snippet,
+                "engine": hit.get("engine") or "",
+                "fonte": url,
+                "page_url": url,
+                "tipo": tipo,
+                "tipo_imovel": "menção pública" if tipo == "imovel" else "",
+            },
+            confidence=0.42 if tipo != "mencao" else 0.4,
         )
         out.entities.append(found)
         ref = canonical_key("URL", url)
-        out.edges.append(FoundEdge(from_ref=origin_key, to_ref=ref, rel_type="MENCAO", confidence=0.4))
+        out.edges.append(FoundEdge(from_ref=origin_key, to_ref=ref, rel_type=rel, confidence=0.4, attrs={"tipo": tipo}))
         out.evidence.append(
             FoundEvidence(
                 source_label=source,

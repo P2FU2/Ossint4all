@@ -65,10 +65,7 @@ def socio_doc_matches_cpf(stored: str, cpf: str) -> bool:
     return False
 
 
-def validate_cnpj(cnpj: str) -> bool:
-    digits = only_digits(cnpj)
-    if len(digits) != 14 or digits == digits[0] * 14:
-        return False
+def _cnpj_check_pair(base12: str) -> str:
     weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
     weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
 
@@ -77,9 +74,39 @@ def validate_cnpj(cnpj: str) -> bool:
         rest = total % 11
         return 0 if rest < 2 else 11 - rest
 
-    d1 = calc(digits[:12], weights1)
-    d2 = calc(digits[:12] + str(d1), weights2)
-    return digits[-2:] == f"{d1}{d2}"
+    d1 = calc(base12, weights1)
+    d2 = calc(base12 + str(d1), weights2)
+    return f"{d1}{d2}"
+
+
+def compose_cnpj(base12: str) -> str | None:
+    digits = only_digits(base12)
+    if len(digits) != 12:
+        return None
+    return digits + _cnpj_check_pair(digits)
+
+
+def cnpj_raiz(cnpj: str) -> str:
+    return only_digits(cnpj)[:8]
+
+
+def cnpj_matriz(cnpj: str) -> str | None:
+    digits = only_digits(cnpj)
+    if len(digits) != 14:
+        return None
+    return compose_cnpj(digits[:8] + "0001")
+
+
+def is_cnpj_filial(cnpj: str) -> bool:
+    digits = only_digits(cnpj)
+    return validate_cnpj(digits) and digits[8:12] != "0001"
+
+
+def validate_cnpj(cnpj: str) -> bool:
+    digits = only_digits(cnpj)
+    if len(digits) != 14 or digits == digits[0] * 14:
+        return False
+    return digits[-2:] == _cnpj_check_pair(digits[:12])
 
 
 def normalize_oab_numero(numero: str) -> str:

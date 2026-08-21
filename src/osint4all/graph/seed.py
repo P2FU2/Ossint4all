@@ -221,10 +221,14 @@ def create_investigation(
     from osint4all.engines.playbooks import attach_playbook
 
     kinds = {seed.kind for seed in seeds}
-    if inv.playbook_key in {"COMPANY", "PERSON"}:
+    if inv.playbook_key in {"COMPANY", "PERSON", "CASE", "DOMAIN"}:
         key = inv.playbook_key
+    elif "CNJ" in kinds:
+        key = "CASE"
     elif "CNPJ" in kinds:
         key = "COMPANY"
+    elif "URL" in kinds and not ({"CPF", "NAME", "EMAIL", "PHONE"} & kinds):
+        key = "DOMAIN"
     else:
         key = "PERSON"
     attach_playbook(session, inv, key)

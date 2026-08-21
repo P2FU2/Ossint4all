@@ -170,7 +170,7 @@ def gap_analysis(session: Session, investigation: Investigation) -> list[dict[st
                 "detail": "Empresa sem endereço no QSA — o mapa e a coincidência geográfica ficam cegos.",
             }
         )
-    if not any(ev.connector in {"transparencia", "diario_oficial"} for ev in evidence) and orgs:
+    if not any(ev.connector in {"transparencia", "diario_oficial", "pncp_public"} for ev in evidence) and orgs:
         gaps.append(
             {
                 "code": "contracts",

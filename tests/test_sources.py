@@ -22,7 +22,7 @@ def test_catalog_covers_every_connector() -> None:
 
 def test_new_connectors_are_wired(settings) -> None:
     names = {connector.name for connector in build_connectors(settings)}
-    assert {"diario_oficial", "geo_public", "rdap_public", "shodan_public", "host_public", "email_public", "phone_public", "aleph_public", "censys_public", "host_observe", "google_public"} <= names
+    assert {"diario_oficial", "geo_public", "rdap_public", "shodan_public", "host_public", "email_public", "phone_public", "aleph_public", "censys_public", "host_observe", "google_public", "pncp_public", "congresso_public", "opensanctions_public", "gleif_public"} <= names
     enabled = enabled_connector_names(settings)
     assert "diario_oficial" in enabled
     assert "geo_public" in enabled
@@ -34,6 +34,10 @@ def test_new_connectors_are_wired(settings) -> None:
     assert "censys_public" in enabled
     assert "host_observe" in enabled
     assert "google_public" in enabled
+    assert "pncp_public" in enabled
+    assert "congresso_public" in enabled
+    assert "opensanctions_public" in enabled
+    assert "gleif_public" in enabled
 
 
 def test_parse_gazette_rows() -> None:

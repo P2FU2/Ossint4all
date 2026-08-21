@@ -137,7 +137,7 @@ def anomalies(session: Session, investigation_id: str) -> list[dict[str, Any]]:
             if ident.kind == "EMAIL":
                 by_email[ident.canonical_key].append(entity)
     for key, rows in by_addr.items():
-        if len(rows) >= 3:
+        if len(rows) >= 2:
             hits.append(
                 {
                     "kind": "address_cluster",
@@ -169,7 +169,67 @@ def anomalies(session: Session, investigation_id: str) -> list[dict[str, Any]]:
                     "note": "Padrão incomum. Não afirma irregularidade.",
                 }
             )
+    by_oab: dict[str, list[Entity]] = defaultdict(list)
+    for entity in entities:
+        for ident in entity.identifiers or []:
+            if ident.kind == "OAB":
+                by_oab[ident.canonical_key].append(entity)
+        papel = str((entity.attrs or {}).get("papel") or "").casefold()
+        oab = str((entity.attrs or {}).get("oab") or "")
+        if "advogad" in papel and oab:
+            by_oab[f"oab:{oab.casefold()}"].append(entity)
+    for key, rows in by_oab.items():
+        if len(rows) >= 2:
+            hits.append(
+                {
+                    "kind": "lawyer_cluster",
+                    "title": f"{len(rows)} nós com o mesmo advogado/OAB",
+                    "detail": key,
+                    "ids": [r.id for r in rows],
+                    "note": "Mesma inscrição pública. Não afirma conluio.",
+                }
+            )
     return hits
+
+
+def compare_entities(session: Session, investigation_id: str, left_id: str, right_id: str) -> dict[str, Any]:
+    left = session.get(Entity, left_id)
+    right = session.get(Entity, right_id)
+    if not left or not right or left.investigation_id != investigation_id or right.investigation_id != investigation_id:
+        return {"ok": False, "message": "Escolha dois nós deste caso.", "shared_ids": [], "shared_attrs": [], "neighbors": []}
+    left_ids = {ident.canonical_key: ident.kind for ident in (left.identifiers or []) if ident.canonical_key}
+    right_ids = {ident.canonical_key: ident.kind for ident in (right.identifiers or []) if ident.canonical_key}
+    shared_keys = sorted(set(left_ids) & set(right_ids))
+    shared_ids = [{"key": key, "kind": left_ids[key]} for key in shared_keys]
+    attr_fields = ("municipio", "uf", "endereco", "email", "telefone", "cnae", "cnpj_raiz", "partido")
+    shared_attrs = []
+    for field in attr_fields:
+        a = str((left.attrs or {}).get(field) or "").strip()
+        b = str((right.attrs or {}).get(field) or "").strip()
+        if a and a.casefold() == b.casefold():
+            shared_attrs.append({"field": field, "value": a})
+    edges = list(session.scalars(select(Edge).where(Edge.investigation_id == investigation_id)).all())
+    left_n = {edge.to_entity_id if edge.from_entity_id == left.id else edge.from_entity_id for edge in edges if left.id in {edge.from_entity_id, edge.to_entity_id}}
+    right_n = {edge.to_entity_id if edge.from_entity_id == right.id else edge.from_entity_id for edge in edges if right.id in {edge.from_entity_id, edge.to_entity_id}}
+    common = sorted(left_n & right_n)
+    names = {
+        row.id: row.display_name
+        for row in session.scalars(select(Entity).where(Entity.id.in_(common))).all()
+    } if common else {}
+    neighbors = [{"id": nid, "name": names.get(nid, nid)} for nid in common[:20]]
+    return {
+        "ok": True,
+        "left": {"id": left.id, "name": left.display_name, "type": left.entity_type},
+        "right": {"id": right.id, "name": right.display_name, "type": right.entity_type},
+        "shared_ids": shared_ids,
+        "shared_attrs": shared_attrs,
+        "neighbors": neighbors,
+        "message": (
+            f"{len(shared_ids)} identificador(es), {len(shared_attrs)} campo(s) e {len(neighbors)} vizinho(s) em comum."
+            if shared_ids or shared_attrs or neighbors
+            else "Nenhuma interseção pública entre estes dois nós."
+        ),
+    }
 
 
 def communities(session: Session, investigation_id: str) -> list[dict[str, Any]]:

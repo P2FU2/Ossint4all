@@ -214,6 +214,42 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "key": "",
         "url": "https://scholar.google.com/",
     },
+    "pncp_public": {
+        "label": "PNCP · contratos",
+        "group": "Público",
+        "accepts": "Empresa (CNPJ) ou nome",
+        "returns": "Editais e contratos públicos, órgão contratante e valor se publicado",
+        "how": "API de busca do Portal Nacional de Contratações Públicas. Sem chave. Não usa Portal da Transparência/CGU.",
+        "key": "",
+        "url": "https://pncp.gov.br/",
+    },
+    "congresso_public": {
+        "label": "Congresso · dados abertos",
+        "group": "Público",
+        "accepts": "Pessoa (nome e sobrenome)",
+        "returns": "Mandato de deputado ou senador em exercício, partido e UF",
+        "how": "APIs públicas da Câmara e do Senado. Sem chave e sem login. Homônimo fica candidato até você confirmar.",
+        "key": "",
+        "url": "https://dadosabertos.camara.leg.br/",
+    },
+    "opensanctions_public": {
+        "label": "OpenSanctions",
+        "group": "Investigação",
+        "accepts": "Pessoa ou empresa (nome/CNPJ)",
+        "returns": "PEP e sanções internacionais em datasets públicos",
+        "how": "Busca pública da API OpenSanctions. Sem chave. Se o endpoint pedir auth, a fonte fica vazia — sem chute.",
+        "key": "",
+        "url": "https://www.opensanctions.org/",
+    },
+    "gleif_public": {
+        "label": "GLEIF · LEI",
+        "group": "Empresa",
+        "accepts": "Empresa (razão ou CNPJ)",
+        "returns": "Legal Entity Identifier, jurisdição e registro local",
+        "how": "API pública do GLEIF. Sem chave. Complementa OpenCorporates quando a firma tem LEI.",
+        "key": "",
+        "url": "https://search.gleif.org/",
+    },
 }
 
 

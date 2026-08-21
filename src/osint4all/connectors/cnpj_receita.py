@@ -11,7 +11,7 @@ from osint4all.exceptions import FailedSource, SkippedDisabled
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
-from osint4all.validators import validate_cnpj, validate_cpf
+from osint4all.validators import cnpj_matriz, cnpj_raiz, is_cnpj_filial, validate_cnpj, validate_cpf
 
 
 def _cnpj_from_entity(entity: Entity) -> str | None:
@@ -69,6 +69,10 @@ def _company_attrs(data: dict[str, Any], razao: str, fantasia: str) -> dict[str,
         "mei": data.get("opcao_pelo_mei"),
         "telefone": data.get("ddd_telefone_1") or data.get("telefone"),
         "email": data.get("correio_eletronico") or data.get("email"),
+        "cnpj_raiz": cnpj_raiz(only_digits(str(data.get("cnpj") or data.get("taxId") or ""))),
+        "estabelecimento": only_digits(str(data.get("cnpj") or ""))[8:12],
+        "matriz_filial": "filial" if is_cnpj_filial(str(data.get("cnpj") or "")) else "matriz",
+        "cnpj_matriz": cnpj_matriz(str(data.get("cnpj") or "")),
     }
 
 
@@ -165,7 +169,46 @@ def parse_cnpj_payload(data: dict[str, Any]) -> ConnectorResult:
                 to_ref=org_key,
                 rel_type=rel,
                 confidence=0.9 if other.kind in {"CPF", "CNPJ"} else 0.45,
-                attrs={"qualificacao": qual},
+                attrs={"qualificacao": qual, "entrada": socio.get("data_entrada_sociedade")},
+            )
+        )
+    phone = str(data.get("ddd_telefone_1") or data.get("telefone") or "").strip()
+    email = str(data.get("correio_eletronico") or data.get("email") or "").strip()
+    if phone and len(only_digits(phone)) >= 10:
+        digits = only_digits(phone)
+        result.entities.append(
+            FoundEntity(entity_type="PERSON", kind="PHONE", value=digits, display_name=phone, attrs={"fonte": "qsa"}, confidence=0.55)
+        )
+        result.edges.append(
+            FoundEdge(from_ref=org_key, to_ref=canonical_key("PHONE", digits), rel_type="CONTATO", confidence=0.5, attrs={"via": "receita"})
+        )
+    if email and "@" in email:
+        mail = email.lower()
+        result.entities.append(
+            FoundEntity(entity_type="PERSON", kind="EMAIL", value=mail, display_name=mail, attrs={"fonte": "qsa"}, confidence=0.55)
+        )
+        result.edges.append(
+            FoundEdge(from_ref=org_key, to_ref=canonical_key("EMAIL", mail), rel_type="CONTATO", confidence=0.5, attrs={"via": "receita"})
+        )
+    matriz = cnpj_matriz(cnpj)
+    if matriz and is_cnpj_filial(cnpj) and matriz != cnpj:
+        result.entities.append(
+            FoundEntity(
+                entity_type="ORG",
+                kind="CNPJ",
+                value=matriz,
+                display_name=f"Matriz {matriz}",
+                attrs={"papel": "matriz", "cnpj_raiz": cnpj_raiz(cnpj)},
+                confidence=0.85,
+            )
+        )
+        result.edges.append(
+            FoundEdge(
+                from_ref=canonical_key("CNPJ", cnpj),
+                to_ref=canonical_key("CNPJ", matriz),
+                rel_type="FILIAL",
+                confidence=0.85,
+                attrs={"cnpj_raiz": cnpj_raiz(cnpj)},
             )
         )
     result.evidence.append(

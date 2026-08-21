@@ -160,6 +160,31 @@
   </ul>
   {% endif %}
   {% endif %}
+  <h3>Comparar dois alvos</h3>
+  <form class="inline-plate" method="get" action="/app/casos/{{ inv.id }}/comparar">
+    <select name="a">
+      {% for e in entities %}<option value="{{ e.id }}">{{ e.display_name }}</option>{% endfor %}
+    </select>
+    <select name="b">
+      {% for e in entities %}<option value="{{ e.id }}">{{ e.display_name }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Interseção</button>
+  </form>
+  {% if compare %}
+  <p>{{ compare.message }}</p>
+  {% if compare.shared_ids %}
+  <p class="section-kicker">identificadores</p>
+  <ul class="plain">{% for row in compare.shared_ids %}<li>{{ row.kind }} · {{ row.key }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if compare.shared_attrs %}
+  <p class="section-kicker">campos iguais</p>
+  <ul class="plain">{% for row in compare.shared_attrs %}<li>{{ row.field }} · {{ row.value }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if compare.neighbors %}
+  <p class="section-kicker">vizinhos em comum</p>
+  <ul class="plain">{% for row in compare.neighbors %}<li><a href="/app/casos/{{ inv.id }}/entidades/{{ row.id }}">{{ row.name }}</a></li>{% endfor %}</ul>
+  {% endif %}
+  {% endif %}
   <form class="stack" method="get" action="/app/casos/{{ inv.id }}/caminho">
     <label>Busca no caso
       <input name="q" placeholder="empresas relacionadas a pessoas em contratos municipais" />
