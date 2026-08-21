@@ -98,6 +98,15 @@ document.addEventListener("click", (event) => {
     if (window.setActionStatus) window.setActionStatus("ok", "Citação copiada");
     return;
   }
+  const toggle = src && src.closest("[data-nav-toggle]");
+  if (toggle) {
+    event.preventDefault();
+    const group = toggle.closest(".nav-group");
+    if (!group) return;
+    const open = group.classList.toggle("is-open");
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    return;
+  }
   const btn = src && src.closest("#case-title-btn");
   if (!btn) return;
   event.preventDefault();

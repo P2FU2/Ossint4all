@@ -170,7 +170,22 @@ a:hover { text-decoration: underline; filter: brightness(1.15); }
   text-shadow: var(--glow);
 }
 .nav-group .nav-sub { display: none; margin: 0 0 6px 10px; }
-.nav-group.is-open .nav-sub, .nav-group:hover .nav-sub { display: block; }
+.nav-group.is-open .nav-sub { display: block; }
+.sidebar button.nav-toggle {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 2px;
+  padding: 8px 12px;
+  box-shadow: none;
+}
+.sidebar button.nav-toggle::after {
+  content: "+";
+  float: right;
+  color: var(--muted);
+}
+.nav-group.is-open .nav-toggle::after { content: "−"; }
 .nav-sub .nav-link { padding: 6px 12px; font-size: 0.8rem; color: var(--muted); }
 .nav-search {
   margin: 4px 8px 10px;
