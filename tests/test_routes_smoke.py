@@ -28,6 +28,7 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "scan_target" in logged.text.lower()
     assert "Colar texto e extrair" in logged.text
     assert "mesa-tabs" in logged.text
+    assert "Radar" in logged.text
     assert "Alertas" in logged.text
     assert 'href="/app/buscar"' in logged.text
     assert 'id="global-q"' in logged.text

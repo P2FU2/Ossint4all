@@ -1,5 +1,14 @@
 {% extends "app/base.html" %}
-{% block title %}Montar caso{% endblock %}
+{% block title %}Radar{% endblock %}
 {% block content %}
-{% include "app/new_panel.html" %}
+<div class="consult-shell is-single">
+  <nav class="mesa-tabs" aria-label="Radar">
+    <a class="mesa-tab" href="/app">Consultar</a>
+    <a class="mesa-tab" href="/app?mesa=alvo">Alvo</a>
+    <a class="mesa-tab is-on" href="/app?mesa=caso">Montar caso</a>
+  </nav>
+  <div class="consult-main">
+    {% include "app/new_panel.html" %}
+  </div>
+</div>
 {% endblock %}

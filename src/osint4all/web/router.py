@@ -173,7 +173,7 @@ def _mesa_ctx(ctx: dict, session: Session, request: Request, user: User) -> dict
     if mesa not in {"consulta", "alvo", "caso"}:
         mesa = "consulta"
     ctx["mesa"] = mesa
-    ctx["nav"] = {"consulta": "consultar", "alvo": "alvo", "caso": "nova"}[mesa]
+    ctx["nav"] = "radar"
     ctx["groups"] = ALVO_GROUPS
     ctx["fields"] = alvo_fields(session, user)
     settings = get_settings()
@@ -658,7 +658,7 @@ def chain_to_graph(
 
 def _alvo_page(request: Request, user: User, session: Session, *, fields: dict | None = None, layer=None) -> HTMLResponse:
     ctx = template_context(request, user)
-    ctx.update({"nav": "alvo", "groups": ALVO_GROUPS, "fields": fields if fields is not None else alvo_fields(session, user)})
+    ctx.update({"nav": "radar", "mesa": "alvo", "groups": ALVO_GROUPS, "fields": fields if fields is not None else alvo_fields(session, user)})
     if layer is not None:
         ctx["layer"] = layer
     _with_cases(ctx, request, session)
@@ -1097,7 +1097,8 @@ def new_investigation(
     ctx = template_context(request, user)
     ctx.update(
         {
-            "nav": "nova",
+            "nav": "radar",
+            "mesa": "caso",
             "connectors": ALL_CONNECTORS,
             "source_catalog": SOURCE_CATALOG,
             "enabled": enabled_connector_names(settings),

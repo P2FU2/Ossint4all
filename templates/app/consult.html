@@ -1,89 +1,87 @@
 {% extends "app/base.html" %}
-{% block title %}Consultar{% endblock %}
+{% block title %}Radar{% endblock %}
 {% block content %}
-<div class="consult-shell">
-<nav class="mesa-tabs" aria-label="Mesa de trabalho">
-  <a class="mesa-tab {% if mesa == 'consulta' %}is-on{% endif %}" href="/app">Consultar</a>
-  <a class="mesa-tab {% if mesa == 'alvo' %}is-on{% endif %}" href="/app?mesa=alvo">Alvo</a>
-  <a class="mesa-tab {% if mesa == 'caso' %}is-on{% endif %}" href="/app?mesa=caso">Montar caso</a>
-</nav>
-{% if mesa == 'alvo' %}
-<div class="consult-wrap tools-wrap">
-  {% include "app/alvo_panel.html" %}
-</div>
-{% elif mesa == 'caso' %}
-<div class="consult-wrap">
-  {% include "app/new_panel.html" %}
-</div>
-{% else %}
-<div class="consult-wrap">
-  <ol class="flow-rail" aria-label="Como consultar">
-    <li class="is-done">Tipo</li>
-    <li class="{% if result %}is-done{% else %}is-now{% endif %}">Valor</li>
-    <li class="{% if result %}is-now{% else %}is-next{% endif %}">Resultado</li>
-    <li class="is-next">Caso (só se atribuir)</li>
-  </ol>
+<div class="consult-shell {% if mesa != 'consulta' %}is-single{% endif %}">
+  <nav class="mesa-tabs" aria-label="Radar">
+    <a class="mesa-tab {% if mesa == 'consulta' %}is-on{% endif %}" href="/app">Consultar</a>
+    <a class="mesa-tab {% if mesa == 'alvo' %}is-on{% endif %}" href="/app?mesa=alvo">Alvo</a>
+    <a class="mesa-tab {% if mesa == 'caso' %}is-on{% endif %}" href="/app?mesa=caso">Montar caso</a>
+  </nav>
+  <div class="consult-main">
+  {% if mesa == 'alvo' %}
+    {% include "app/alvo_panel.html" %}
+  {% elif mesa == 'caso' %}
+    {% include "app/new_panel.html" %}
+  {% else %}
+    <ol class="flow-rail" aria-label="Como consultar">
+      <li class="is-done">Tipo</li>
+      <li class="{% if result %}is-done{% else %}is-now{% endif %}">Valor</li>
+      <li class="{% if result %}is-now{% else %}is-next{% endif %}">Resultado</li>
+      <li class="is-next">Caso (só se atribuir)</li>
+    </ol>
 
-  <section class="consult-hero">
-    <p class="eyebrow" data-tip="Consulta pontual. Não liga a buscas anteriores nem cria caso até você atribuir.">shell de consulta</p>
-    <h1>scan_target</h1>
-    <p class="lede sr-only">Consulta pontual em fontes públicas.</p>
-  </section>
+    <section class="consult-hero">
+      <p class="eyebrow" data-tip="Consulta pontual. Não liga a buscas anteriores nem cria caso até você atribuir.">shell de consulta</p>
+      <h1>scan_target</h1>
+      <p class="lede sr-only">Consulta pontual em fontes públicas.</p>
+    </section>
 
-  <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="closest form" hx-timeout="45000" data-busy="Consultando…" data-done="Consulta concluída.">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-    <div class="mode-rail" role="radiogroup" aria-label="Tipo de consulta">
-      {% for key, label, tip, ph in modes %}
-      <label class="mode-chip" data-tip="{{ tip }}" data-ph="{{ ph }}">
-        <input type="radio" name="modo" value="{{ key }}" {% if mode == key %}checked{% endif %} />
-        <span>{{ label }}</span>
-      </label>
-      {% endfor %}
-    </div>
+    <form class="consult-form" method="post" action="/app/consultar" hx-post="/app/consultar" hx-target="#consult-result" hx-swap="innerHTML" hx-indicator="#consult-wait" hx-disabled-elt="closest form" hx-timeout="45000" data-busy="Consultando…" data-done="Consulta concluída.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="mode-rail" role="radiogroup" aria-label="Tipo de consulta">
+        {% for key, label, tip, ph in modes %}
+        <label class="mode-chip" data-tip="{{ tip }}" data-ph="{{ ph }}">
+          <input type="radio" name="modo" value="{{ key }}" {% if mode == key %}checked{% endif %} />
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
 
-    <div class="consult-bar">
-      <label class="sr-only" for="q">Identificador</label>
-      <input id="q" name="q" autofocus autocomplete="off" value="{{ q or '' }}" placeholder="ABC1D23, @jornalista, nome do sócio…" data-tip="Cole o valor e Enter. Em Detectar, o tipo é reconhecido sozinho. Atalho: /" />
-      <button class="btn primary" type="submit" data-tip="Consulta só a fonte pública deste tipo. Sem criar caso.">exec</button>
-    </div>
-    <p id="consult-hint" class="consult-hint inspect-hint" data-tip="Enter consulta · / foca o campo · cole um parágrafo para extrair vários IDs">Enter · / · cole um texto</p>
-  </form>
-  {% if desk %}
-  <section class="desk-digest" aria-label="O que mudou">
-    <p class="section-kicker">desde ontem</p>
-    <ul class="hit-list">
-      {% for item in desk %}
-      <li>
-        <a href="/app/casos/{{ item.case_id }}">{{ item.case_title }}</a>
-        <span class="muted">{% if item.monitor %}monitor · {% endif %}{{ item.field }} {{ item.old }} → {{ item.new }} · {{ item.when }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
-  {% include "app/extract_panel.html" %}
-
-  <div id="consult-wait" class="htmx-indicator consult-wait" role="status">
-    <span class="spinner" aria-hidden="true"></span>
-    varrendo nós públicos…
-  </div>
-  {% include "app/consult_chain.html" %}
-  <div id="consult-result" class="consult-result" aria-live="polite">
-    {% if extracted or extract_error %}
-    {% include "app/extract_hits.html" %}
-    {% elif mass %}
-    {% include "app/consult_mass.html" %}
-    {% elif result %}
-    {% include "app/consult_result.html" %}
-    {% else %}
-    <div class="consult-empty">
-      <p class="consult-empty-kicker">triagem</p>
-      <p>Cole um identificador ou um parágrafo. Se vier mais de um dado, o painel lista o que reconheceu — nada vai ao caso até você atribuir.</p>
-    </div>
+      <div class="consult-bar">
+        <label class="sr-only" for="q">Identificador</label>
+        <input id="q" name="q" autofocus autocomplete="off" value="{{ q or '' }}" placeholder="ABC1D23, @jornalista, nome do sócio…" data-tip="Cole o valor e Enter. Em Detectar, o tipo é reconhecido sozinho. Atalho: /" />
+        <button class="btn primary" type="submit" data-tip="Consulta só a fonte pública deste tipo. Sem criar caso.">exec</button>
+      </div>
+      <p id="consult-hint" class="consult-hint inspect-hint" data-tip="Enter consulta · / foca o campo · cole um parágrafo para extrair vários IDs">Enter · / · cole um texto</p>
+    </form>
+    {% if desk %}
+    <section class="desk-digest" aria-label="O que mudou">
+      <p class="section-kicker">desde ontem</p>
+      <ul class="hit-list">
+        {% for item in desk %}
+        <li>
+          <a href="/app/casos/{{ item.case_id }}">{{ item.case_title }}</a>
+          <span class="muted">{% if item.monitor %}monitor · {% endif %}{{ item.field }} {{ item.old }} → {{ item.new }} · {{ item.when }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
     {% endif %}
+    {% include "app/extract_panel.html" %}
+
+    <div id="consult-wait" class="htmx-indicator consult-wait" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      varrendo nós públicos…
+    </div>
+    {% include "app/consult_chain.html" %}
+    <div id="consult-result" class="consult-result" aria-live="polite">
+      {% if extracted or extract_error %}
+      {% include "app/extract_hits.html" %}
+      {% elif mass %}
+      {% include "app/consult_mass.html" %}
+      {% elif result %}
+      {% include "app/consult_result.html" %}
+      {% else %}
+      <div class="consult-empty">
+        <p class="consult-empty-kicker">triagem</p>
+        <p>Cole um identificador ou um parágrafo. Se vier mais de um dado, o painel lista o que reconheceu — nada vai ao caso até você atribuir.</p>
+      </div>
+      {% endif %}
+    </div>
+  {% endif %}
   </div>
-</div>
-{% include "app/search_history.html" %}
-{% endif %}
+  {% if mesa == 'consulta' %}
+  {% include "app/search_history.html" %}
+  {% endif %}
 </div>
 {% endblock %}
