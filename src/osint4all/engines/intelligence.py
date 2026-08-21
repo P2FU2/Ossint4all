@@ -6,10 +6,11 @@ import re
 from collections import defaultdict, deque
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from osint4all.db.models import Edge, Entity, Investigation
+from osint4all.db.models import Edge, Entity, Identifier, Investigation, SearchHistory
+from osint4all.identifiers import extract_seeds, parse_seed, seed_cards, seed_label
 from osint4all.engines.knowledge import annotate_edge
 
 _STOP = {"mostre", "empresas", "relacionadas", "pessoas", "que", "também", "aparecem", "em", "e", "a", "o", "de", "da", "do", "com", "para", "uma", "antes", "depois"}
@@ -262,6 +263,111 @@ def semantic_search(session: Session, investigation_id: str, question: str) -> l
             )
     hits.sort(key=lambda row: -row["score"])
     return hits[:30]
+
+
+def global_lookup(session: Session, query: str, *, user_id: str | None = None, limit: int = 40) -> dict[str, Any]:
+    """Onde este identificador ou nome já apareceu: casos, nós e histórico."""
+    text = (query or "").strip()
+    seeds = extract_seeds(text)
+    single = parse_seed(text)
+    if single and all(single.canonical_key != item.canonical_key for item in seeds):
+        seeds = [single, *seeds]
+    keys = [item.canonical_key for item in seeds if item]
+    like = f"%{text}%"
+    clauses = []
+    if keys:
+        clauses.append(Entity.canonical_key.in_(keys))
+    if text:
+        clauses.append(Entity.display_name.ilike(like))
+        clauses.append(Entity.canonical_key.ilike(like))
+    entities: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    if clauses:
+        rows = session.execute(
+            select(Entity, Investigation)
+            .join(Investigation, Investigation.id == Entity.investigation_id)
+            .where(Investigation.status != "DELETED", or_(*clauses))
+            .order_by(Investigation.updated_at.desc())
+            .limit(limit)
+        ).all()
+        for entity, inv in rows:
+            mark = (inv.id, entity.canonical_key)
+            if mark in seen:
+                continue
+            seen.add(mark)
+            entities.append(
+                {
+                    "id": entity.id,
+                    "name": entity.display_name,
+                    "type": entity.entity_type,
+                    "key": entity.canonical_key,
+                    "case_id": inv.id,
+                    "case_title": inv.title,
+                    "status": inv.status,
+                }
+            )
+    if keys:
+        extra = session.execute(
+            select(Identifier, Entity, Investigation)
+            .join(Entity, Identifier.entity_id == Entity.id)
+            .join(Investigation, Investigation.id == Entity.investigation_id)
+            .where(Investigation.status != "DELETED", Identifier.canonical_key.in_(keys))
+            .limit(limit)
+        ).all()
+        for ident, entity, inv in extra:
+            mark = (inv.id, ident.canonical_key)
+            if mark in seen:
+                continue
+            seen.add(mark)
+            entities.append(
+                {
+                    "id": entity.id,
+                    "name": entity.display_name,
+                    "type": entity.entity_type,
+                    "key": ident.canonical_key,
+                    "case_id": inv.id,
+                    "case_title": inv.title,
+                    "status": inv.status,
+                }
+            )
+    cases = []
+    if text:
+        for inv in session.scalars(
+            select(Investigation)
+            .where(
+                Investigation.status != "DELETED",
+                or_(Investigation.title.ilike(like), Investigation.hypothesis.ilike(like)),
+            )
+            .order_by(Investigation.updated_at.desc())
+            .limit(16)
+        ):
+            cases.append({"id": inv.id, "title": inv.title, "hypothesis": inv.hypothesis or "", "status": inv.status})
+    history = []
+    if user_id and text:
+        for row in session.scalars(
+            select(SearchHistory)
+            .where(SearchHistory.user_id == user_id, or_(SearchHistory.query.ilike(like), SearchHistory.title.ilike(like)))
+            .order_by(SearchHistory.created_at.desc())
+            .limit(16)
+        ):
+            history.append(
+                {
+                    "query": row.query,
+                    "title": row.title or row.query,
+                    "kind": row.kind,
+                    "kind_label": seed_label(row.kind or row.mode),
+                    "mode": row.mode,
+                    "ok": row.ok,
+                    "when": row.created_at.strftime("%d/%m %H:%M") if row.created_at else "",
+                }
+            )
+    return {
+        "query": text,
+        "seeds": seed_cards(seeds),
+        "entities": entities[:limit],
+        "cases": cases,
+        "history": history,
+    }
 
 
 def smart_alerts(session: Session, investigation_id: str) -> list[str]:

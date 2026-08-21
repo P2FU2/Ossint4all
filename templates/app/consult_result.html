@@ -14,7 +14,10 @@
     {% for label, value in result.facts %}
     <div>
       <dt>{{ label }}</dt>
-      <dd><button type="button" class="inspect-open" data-inspect='{{ {"title": label, "kind": "fato", "meta": value, "url": "", "when": ""}|tojson }}'>{{ value }}</button></dd>
+        <dd>
+          <button type="button" class="inspect-open" data-inspect='{{ {"title": label, "kind": "fato", "meta": value, "url": "", "when": ""}|tojson }}'>{{ value }}</button>
+          <button type="button" class="btn ghost copy-cite" data-copy="{{ citation_block(fact=value, source=label)|e }}" data-tip="Copia fato e rótulo para a matéria">copiar</button>
+        </dd>
     </div>
     {% endfor %}
   </dl>
@@ -43,8 +46,9 @@
   <ul class="hit-list">
     {% for hit in result.hits %}
     <li>
-      <button type="button" class="inspect-open" data-inspect='{{ {"title": hit.title, "kind": hit.kind or "fonte", "meta": hit.meta or "", "url": hit.url or "", "when": hit.when or ""}|tojson }}'>{{ hit.title }}</button>
-      <span class="muted">{{ hit.meta }}</span>
+        <button type="button" class="inspect-open" data-inspect='{{ {"title": hit.title, "kind": hit.kind or "fonte", "meta": hit.meta or "", "url": hit.url or "", "when": hit.when or ""}|tojson }}'>{{ hit.title }}</button>
+        <span class="muted">{{ hit.meta }}</span>
+        <button type="button" class="btn ghost copy-cite" data-copy="{{ citation_block(fact=hit.title, source=hit.meta or hit.kind, url=hit.url or '', when=hit.when or '')|e }}" data-tip="Copia título, fonte, data e URL">copiar</button>
     </li>
     {% endfor %}
   </ul>
@@ -76,9 +80,9 @@
       {% endif %}
       <label class="save-extra" data-tip="Escolha o caso. Nada vai sozinho para a consulta ou o caso anterior.">Caso
         <select name="investigation_id" required>
-          <option value="" selected>Escolha o caso</option>
+          <option value="">Escolha o caso</option>
           {% for c in cases %}
-          <option value="{{ c.id }}">{{ c.title }}</option>
+          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}{% if current_case_id == c.id %} · corrente{% endif %}</option>
           {% endfor %}
         </select>
       </label>

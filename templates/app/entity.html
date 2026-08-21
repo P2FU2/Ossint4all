@@ -400,6 +400,7 @@
       <p>{{ ev.snippet or "" }}</p>
       <span class="muted">{{ ev.method or "GET" }}{% if ev.http_status %} {{ ev.http_status }}{% endif %}{% if ev.content_sha256 %} · {{ ev.content_sha256[:12] }}{% endif %}</span>
       {% if ev.url %}<button type="button" class="inspect-open" data-inspect='{{ {"title": ev.source_label, "kind": "fonte", "meta": ev.snippet or ev.connector or "", "url": ev.url, "when": ev.collected_at.strftime("%d/%m %H:%M") if ev.collected_at else ""}|tojson }}'>fonte</button>{% endif %}
+      <button type="button" class="btn ghost copy-cite" data-copy="{{ citation_block(fact=ev.snippet or ev.source_label, source=ev.source_label, url=ev.url or '', when=ev.collected_at.strftime('%d/%m/%Y') if ev.collected_at else '')|e }}" data-tip="Copia fato, fonte, data e URL para a matéria">copiar citação</button>
       {% if ev.raw_path %}<a class="btn" href="/app/casos/{{ inv.id }}/evidencias/{{ ev.id }}/captura">captura</a>{% endif %}
     </li>
     {% else %}

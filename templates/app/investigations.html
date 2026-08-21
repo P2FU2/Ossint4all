@@ -10,13 +10,42 @@
   <div class="graph-actions page-toolbar">
     <label class="field-inline">
       <span class="sr-only">Buscar</span>
-      <input id="case-search" type="search" placeholder="título ou hipótese" data-tip="Filtra os cartões desta lista" />
+      <input id="case-search" type="search" placeholder="título, hipótese ou tag" data-tip="Filtra os cartões desta lista" />
     </label>
+    {% if case_tags %}
+    <label class="field-inline">
+      <span class="sr-only">Tag</span>
+      <select id="case-tag" onchange="if(this.value) location.href='/app/casos?tag='+encodeURIComponent(this.value); else location.href='/app/casos'">
+        <option value="">todas as tags</option>
+        {% for item in case_tags %}
+        <option value="{{ item }}" {% if tag == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    {% if show_archived %}
+    <a class="btn" href="/app/casos" data-tip="Volta aos casos ativos">Ativos</a>
+    {% else %}
+    <a class="btn" href="/app/casos?arquivo=1" data-tip="Casos arquivados, sem apagar">Arquivo</a>
+    {% endif %}
     <a class="btn" href="/app" data-tip="Placa, user, telefone, sócio — sem criar caso">Consultar</a>
     <a class="btn primary" href="/app/nova" data-tip="Vários identificadores de uma vez">Montar caso</a>
   </div>
 </header>
 
+{% if desk and not show_archived %}
+<section class="desk-digest" aria-label="O que mudou">
+  <p class="section-kicker">desde ontem · <a href="/app/alertas">todos os alertas</a></p>
+  <ul class="hit-list">
+    {% for item in desk[:4] %}
+    <li>
+      <a href="/app/casos/{{ item.case_id }}">{{ item.case_title }}</a>
+      <span class="muted">{% if item.monitor %}monitor · {% endif %}{{ item.field }} {{ item.old }} → {{ item.new }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% if not investigations %}
 <section class="empty">
   <h2>Nada guardado ainda</h2>
@@ -27,13 +56,14 @@
 <div class="card-grid">
   {% for inv in investigations %}
   {% set c = counts[inv.id] %}
-  <div class="case-card" data-search="{{ (inv.title ~ ' ' ~ (inv.hypothesis or ''))|lower }}">
+  <div class="case-card" data-search="{{ (inv.title ~ ' ' ~ (inv.hypothesis or '') ~ ' ' ~ ((inv.tags or [])|join(' ')))|lower }}">
     <a href="/app/casos/{{ inv.id }}" data-tip="Abrir o grafo deste caso">
       <div class="case-top">
         <strong>{{ inv.title }}</strong>
         <div class="case-pills">
           {% if current_case_id == inv.id %}<span class="pill is-current">corrente</span>{% endif %}
           {% if inv.monitor %}<span class="pill">monitor</span>{% endif %}
+          {% for item in inv.tags or [] %}<span class="pill">{{ item }}</span>{% endfor %}
           <span class="pill">{{ inv.status }}</span>
         </div>
       </div>
@@ -51,6 +81,15 @@
         <button class="btn" type="submit" data-tip="Consultas e a suíte passam a gravar neste caso">Usar</button>
       </form>
       <a class="btn" href="/app/casos/{{ inv.id }}" data-tip="Editar no grafo">Editar</a>
+      <form method="post" action="/app/casos/{{ inv.id }}/arquivar">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        {% if inv.status == "ARCHIVED" %}
+        <input type="hidden" name="restore" value="1" />
+        <button class="btn" type="submit" data-tip="Volta o caso para a lista ativa">Desarquivar</button>
+        {% else %}
+        <button class="btn" type="submit" data-tip="Tira da lista sem apagar o grafo">Arquivar</button>
+        {% endif %}
+      </form>
       <form method="post" action="/app/casos/{{ inv.id }}/apagar" onsubmit="return confirm('Apagar este caso, o grafo e as anotações?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn danger" type="submit" data-tip="Remove o caso persistido. Irreversível.">Apagar</button>

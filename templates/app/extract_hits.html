@@ -1,0 +1,44 @@
+{% if extract_error %}
+<div class="result-banner error" role="alert">{{ extract_error }}</div>
+{% elif extracted %}
+<article class="result-card kind-extract">
+  <header class="result-head">
+    <p class="type-tag">texto colado</p>
+    <h2>{{ extracted|length }} identificador{{ 'es' if extracted|length != 1 else '' }} neste texto</h2>
+    <p class="lede">Marque o que é desta pessoa ou empresa. Depois consulte um, mande ao alvo ou grave no caso.</p>
+  </header>
+  <form class="extract-actions" method="post" action="/app/extrair/alvo" data-busy="Aplicando identificadores…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <ul class="extract-list">
+      {% for item in extracted %}
+      <li>
+        <label class="extract-chip">
+          <input type="checkbox" name="picks" value="{{ item.kind }}|{{ item.value }}" checked />
+          <span class="type-tag">{{ item.label }}</span>
+          <strong>{{ item.display }}</strong>
+        </label>
+        <a class="btn ghost" href="/app?modo={{ item.kind }}&amp;q={{ item.value|urlencode }}" data-tip="Consulta só este valor, sem gravar">consultar</a>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="result-actions">
+      <button class="btn primary" type="submit" data-tip="Preenche o dossiê do alvo com os marcados. Sem expandir grafo.">Mandar ao alvo</button>
+      <button class="btn" type="submit" formaction="/app/extrair/caso" name="destination" value="new" data-tip="Cria um caso novo só com os marcados. Sem expandir o grafo.">Novo caso</button>
+      {% if cases %}
+      <label class="save-extra">Caso
+        <select name="investigation_id">
+          <option value="">Novo caso</option>
+          {% for c in cases %}
+          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}{% if current_case_id == c.id %} · corrente{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn" type="submit" formaction="/app/extrair/caso" data-tip="Acrescenta os marcados ao caso selecionado. Sem expandir.">Adicionar ao caso</button>
+      {% endif %}
+    </div>
+  </form>
+</article>
+{% endif %}
+{% if request.headers.get("HX-Request") and not extracted and not extract_error %}
+<p class="muted">Cole um trecho com CPF, CNPJ, e-mail, telefone, placa ou @user.</p>
+{% endif %}

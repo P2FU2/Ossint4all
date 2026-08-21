@@ -34,7 +34,19 @@ from osint4all.engines.investigation import (
     take_snapshot,
 )
 from osint4all.engines.knowledge import extract_events
-from osint4all.engines.playbooks import TEMPLATES, add_custom_step, attach_playbook, list_items, progress, set_item_status
+from osint4all.engines.playbooks import (
+    TEMPLATES,
+    add_custom_step,
+    attach_playbook,
+    enqueue_playbook_step,
+    evaluate_playbook_step,
+    list_items,
+    progress,
+    set_item_status,
+    step_can_run,
+)
+from osint4all.graph.expand import process_pending_jobs
+from osint4all.config import get_settings
 from osint4all.engines.verification import cluster_sources, quality_score
 from osint4all.paths import project_root
 from osint4all.web.auth import write_audit
@@ -67,6 +79,7 @@ def _ctx(request: Request, user: User, session: Session, inv: Investigation) -> 
             "evidence": evidence,
             "playbook_items": items,
             "playbook_progress": progress(items),
+            "playbook_runnable": {item.id: step_can_run(item) for item in items},
             "playbooks": TEMPLATES,
             "hypotheses": hypothesis_board(session, inv.id),
             "gaps": gap_analysis(session, inv),
@@ -139,6 +152,49 @@ def playbook_item(
     require_csrf(request, csrf_token)
     set_item_status(session, investigation_id, item_id, status, note)
     session.commit()
+    return RedirectResponse(f"/app/casos/{investigation_id}/investigar", status_code=303)
+
+
+@investigate_router.post("/app/casos/{investigation_id}/playbook/{item_id}/rodar")
+def playbook_run(
+    investigation_id: str,
+    item_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+):
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    from osint4all.db.models import PlaybookItem
+
+    item = session.get(PlaybookItem, item_id)
+    if not inv or not item or item.investigation_id != investigation_id:
+        _flash(request, "error", "Passo do playbook não encontrado.")
+        return RedirectResponse(f"/app/casos/{investigation_id}/investigar", status_code=303)
+    result = enqueue_playbook_step(session, inv, item, max_attempts=get_settings().job_max_attempts)
+    write_audit(
+        session,
+        "playbook.run",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"step": item.step_key, "queued": result.get("queued")},
+    )
+    session.commit()
+    since = result.get("since")
+    queued = int(result.get("queued") or 0)
+    if queued:
+        processed = process_pending_jobs(investigation_id=investigation_id, limit=min(queued, 2), settings=get_settings())
+        session.expire_all()
+        item = session.get(PlaybookItem, item_id)
+        inv = session.get(Investigation, investigation_id)
+        if item and inv:
+            result = evaluate_playbook_step(session, inv, item, since=since)
+            if queued > processed:
+                result["message"] = (result.get("message") or "") + f" Ainda há {queued - processed} na fila — use Processar no grafo."
+                result["ok"] = True
+            session.commit()
+    _flash(request, "ok" if result.get("ok") else "error", result.get("message") or "Playbook atualizado.")
     return RedirectResponse(f"/app/casos/{investigation_id}/investigar", status_code=303)
 
 

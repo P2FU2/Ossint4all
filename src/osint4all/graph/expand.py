@@ -26,6 +26,9 @@ PROBE_CONNECTORS = {
     "PROCESSOS": frozenset({"djen", "datajud"}),
     "CNJ": frozenset({"djen", "datajud"}),
     "INFO": frozenset({"socio_search", "djen", "transparencia", "web_search", "tse", "wikidata", "google_public"}),
+    "URL": frozenset({"host_public", "crtsh", "rdap_public", "host_observe", "web_search"}),
+    "SANCTIONS": frozenset({"transparencia", "tse", "web_search"}),
+    "CONTRACTS": frozenset({"transparencia", "web_search"}),
 }
 
 
@@ -36,6 +39,16 @@ def connectors_for_kinds(kinds: list[str] | tuple[str, ...] | None) -> set[str] 
     for kind in kinds:
         wanted |= PROBE_CONNECTORS.get(str(kind or "").upper(), set())
     return wanted
+
+
+def kind_for_connector(name: str) -> str | None:
+    needle = (name or "").strip()
+    if not needle:
+        return None
+    for kind, names in PROBE_CONNECTORS.items():
+        if needle in names:
+            return kind
+    return None
 
 
 class ExpansionEngine:

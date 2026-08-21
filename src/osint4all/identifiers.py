@@ -24,6 +24,35 @@ from osint4all.validators import (
 
 STRONG_ID_KINDS = frozenset({"CPF", "CNPJ", "CNJ", "EMAIL"})
 CONSULT_MODE_KINDS = frozenset({"AUTO", "MASSA", "FILE", "PROCESSOS", "NEGATIVA", "IMOVEL", "DIARIO"})
+EXTRACT_SKIP_MODES = frozenset({"massa", "negativa", "imovel", "diario", "processos"})
+SEED_LABELS = {
+    "CPF": "CPF",
+    "CNPJ": "CNPJ",
+    "CNJ": "Processo",
+    "EMAIL": "E-mail",
+    "PHONE": "Telefone",
+    "USERNAME": "Rede social",
+    "URL": "URL",
+    "PLATE": "Placa",
+    "NAME": "Nome",
+    "OAB": "OAB",
+}
+
+_RE_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_RE_URL = re.compile(r"https?://[^\s<>\"']+", re.I)
+_RE_CNPJ_MASK = re.compile(r"\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b")
+_RE_CNPJ_DIGITS = re.compile(r"(?<!\d)\d{14}(?!\d)")
+_RE_CPF_MASK = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")
+_RE_CPF_DIGITS = re.compile(r"(?<!\d)\d{11}(?!\d)")
+_RE_CNJ_MASK = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b")
+_RE_PLATE = re.compile(r"\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b", re.I)
+_RE_PHONE = re.compile(
+    r"(?<!\d)(?:\+55[\s.-]*)?(?:\(?\d{2}\)?[\s.-]*)(?:9[\s.-]*)?\d{4}[\s.-]\d{4}(?!\d)"
+)
+_RE_AT_USER = re.compile(r"(?<![A-Za-z0-9._%+-])@([A-Za-z0-9._-]{2,32})\b")
+_RE_GITHUB = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9._-]{2,32})\b", re.I)
+_RE_OAB = re.compile(r"\b(\d{3,7}[A-Z]?)\s*/\s*([A-Z]{2})\b")
+_RE_NAME_LINE = re.compile(r"^[A-Za-zÀ-ÿ]+(?:[ '-][A-Za-zÀ-ÿ]+){1,5}$")
 
 
 @dataclass(frozen=True)
@@ -250,3 +279,93 @@ def collect_form_seeds(
         parse_seed(seed_birth, forced_kind="BIRTHDATE"),
     ]
     return dedupe_seeds([*parse_seed_lines(seeds), *extras])
+
+
+def seed_label(kind: str) -> str:
+    return SEED_LABELS.get((kind or "").upper(), kind or "identificador")
+
+
+def seed_cards(seeds) -> list[dict[str, str]]:
+    return [
+        {
+            "kind": seed.kind,
+            "value": seed.value,
+            "display": seed.display_name,
+            "key": seed.canonical_key,
+            "label": seed_label(seed.kind),
+        }
+        for seed in seeds
+        if seed
+    ]
+
+
+def _overlaps(start: int, end: int, occupied: list[tuple[int, int]]) -> bool:
+    return any(start < other_end and end > other_start for other_start, other_end in occupied)
+
+
+def extract_seeds(blob: str) -> list[ParsedSeed]:
+    """Puxa CPF, CNPJ, e-mail, telefone, placa, CNJ, @user e URL de um texto colado."""
+    text = blob or ""
+    if not text.strip():
+        return []
+    occupied: list[tuple[int, int]] = []
+    found: list[ParsedSeed] = []
+
+    def take(start: int, end: int, raw: str, forced: str | None = None) -> None:
+        if start < 0 or end <= start or _overlaps(start, end, occupied):
+            return
+        seed = parse_seed(raw, forced_kind=forced)
+        if not seed:
+            return
+        occupied.append((start, end))
+        found.append(seed)
+
+    for match in _RE_EMAIL.finditer(text):
+        take(match.start(), match.end(), match.group(0), "EMAIL")
+    for match in _RE_URL.finditer(text):
+        take(match.start(), match.end(), match.group(0).rstrip(").,;]"), "URL")
+    for match in _RE_CNPJ_MASK.finditer(text):
+        take(match.start(), match.end(), match.group(0), "CNPJ")
+    for match in _RE_CNJ_MASK.finditer(text):
+        take(match.start(), match.end(), match.group(0), "CNJ")
+    for match in _RE_CPF_MASK.finditer(text):
+        take(match.start(), match.end(), match.group(0), "CPF")
+    for match in _RE_PLATE.finditer(text):
+        take(match.start(), match.end(), match.group(0), "PLATE")
+    for match in _RE_OAB.finditer(text):
+        take(match.start(), match.end(), f"{match.group(1)}/{match.group(2)}", "OAB")
+    for match in _RE_PHONE.finditer(text):
+        take(match.start(), match.end(), match.group(0), "PHONE")
+    for match in _RE_GITHUB.finditer(text):
+        take(match.start(1), match.end(1), match.group(1), "USERNAME")
+    for match in _RE_AT_USER.finditer(text):
+        take(match.start(), match.end(), match.group(1), "USERNAME")
+    for match in _RE_CNPJ_DIGITS.finditer(text):
+        take(match.start(), match.end(), match.group(0), "CNPJ")
+    for match in _RE_CPF_DIGITS.finditer(text):
+        raw = match.group(0)
+        kind = "PHONE" if looks_like_br_mobile(raw) else "CPF"
+        take(match.start(), match.end(), raw, kind)
+
+    for line in text.splitlines():
+        collapsed = _collapse_name(line)
+        if not _RE_NAME_LINE.match(collapsed):
+            continue
+        start = text.find(line)
+        if start < 0:
+            continue
+        take(start, start + len(line), collapsed, "NAME")
+    return dedupe_seeds(found)
+
+
+def looks_like_blob(raw: str, mode: str = "auto") -> bool:
+    text = raw or ""
+    mode = (mode or "auto").lower()
+    if mode in EXTRACT_SKIP_MODES:
+        return False
+    if "\n" in text or "\r" in text:
+        return True
+    seeds = extract_seeds(text)
+    if len(seeds) > 1:
+        return True
+    return len(text) >= 56 and bool(seeds)

@@ -125,6 +125,8 @@ class Investigation(Base):
     workflow: Mapped[str] = mapped_column(String(32), default="INVESTIGATING")
     retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     graph_layout: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    last_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     entities: Mapped[list[Entity]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
     edges: Mapped[list[Edge]] = relationship(back_populates="investigation", cascade="all, delete-orphan")

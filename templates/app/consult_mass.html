@@ -61,9 +61,9 @@
       {% if cases %}
       <label class="save-extra" data-tip="Escolha o caso. Nada vai sozinho para a consulta anterior.">Caso
         <select name="investigation_id" required>
-          <option value="" selected>Escolha o caso</option>
+          <option value="">Escolha o caso</option>
           {% for c in cases %}
-          <option value="{{ c.id }}">{{ c.title }}</option>
+          <option value="{{ c.id }}" {% if current_case_id == c.id %}selected{% endif %}>{{ c.title }}{% if current_case_id == c.id %} · corrente{% endif %}</option>
           {% endfor %}
         </select>
       </label>

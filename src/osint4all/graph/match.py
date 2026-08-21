@@ -32,9 +32,9 @@ SOURCE_RELIABILITY = (
 )
 
 QUEUE_BUCKETS = (
-    ("confirmed", "Confirmado"),
-    ("probable", "Provável"),
     ("unconfirmed", "Revisar"),
+    ("probable", "Provável"),
+    ("confirmed", "Confirmado"),
     ("false", "Descartado"),
 )
 

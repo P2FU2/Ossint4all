@@ -10,6 +10,12 @@ from typing import Any
 from osint4all.paths import project_root
 
 
+def citation_block(*, fact: str = "", source: str = "", url: str = "", when: str = "") -> str:
+    """Bloco para colar na matéria: fato — fonte — data — URL."""
+    parts = [str(item).strip() for item in (fact, source, when, url) if str(item or "").strip()]
+    return " — ".join(parts)
+
+
 def content_hash(payload: dict[str, Any] | None, snippet: str | None, url: str | None = None) -> str:
     raw = json.dumps(
         {"p": payload or {}, "s": (snippet or "")[:2000], "u": url or ""},

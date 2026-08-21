@@ -2,9 +2,12 @@ from osint4all.identifiers import (
     canonical_key,
     collect_form_seeds,
     detect_kind,
+    extract_seeds,
+    looks_like_blob,
     normalize_birth,
     parse_seed,
     parse_seed_lines,
+    seed_cards,
     seeds_from_kind_values,
 )
 
@@ -83,3 +86,32 @@ def test_birth_and_filiation_seeds() -> None:
     )
     kinds = {s.kind for s in seeds}
     assert kinds == {"NAME", "BIRTHDATE", "FATHER", "MOTHER"}
+
+
+def test_extract_seeds_from_pasted_blob() -> None:
+    blob = """
+    Maria Silva Souza
+    CPF 529.982.247-25
+    empresa 33.000.167/0001-01
+    e-mail ana@exemplo.com
+    tel (11) 98765-4321
+    perfil @jornalista
+    placa ABC1D23
+    processo 0000123-45.2024.8.26.0100
+    https://github.com/ana
+    """
+    seeds = extract_seeds(blob)
+    kinds = {item.kind for item in seeds}
+    assert {"CPF", "CNPJ", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ", "URL", "NAME"} <= kinds
+    assert looks_like_blob(blob)
+    assert not looks_like_blob("ABC1D23")
+    cards = seed_cards(seeds)
+    assert any(row["kind"] == "EMAIL" and "ana@exemplo.com" in row["value"] for row in cards)
+    assert not looks_like_blob("Francisco de Assis", "massa")
+
+
+def test_extract_skips_invalid_cpf_inside_cnpj() -> None:
+    seeds = extract_seeds("CNPJ 33.000.167/0001-01 e nada mais.")
+    kinds = [item.kind for item in seeds]
+    assert kinds.count("CNPJ") == 1
+    assert "CPF" not in kinds

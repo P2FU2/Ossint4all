@@ -51,6 +51,9 @@ def template_context(request: Request, user: User | None = None) -> dict:
         "app_name": "Consultar",
         "flash": request.session.pop("flash", None),
         "current_case_id": request.session.get("current_case_id"),
+        "desk": [],
+        "desk_n": 0,
+        "mesa": "consulta",
     }
 
 

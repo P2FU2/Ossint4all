@@ -1,0 +1,73 @@
+<summary id="queue-board-summary" data-tip="Job que caiu e fonte que devolveu erro aparecem em Falhou. Vazio sem erro fica à parte.">Fila das fontes{% if queue_board %} · {{ queue_board.active|length }} na fila · {{ queue_board.failed|length }} falha(s) · {{ queue_board.empty|length }} vazia(s){% endif %}</summary>
+{% if queue_board and (queue_board.active or queue_board.failed or queue_board.empty) %}
+<div class="queue-grid">
+  {% if queue_board.active %}
+  <section>
+    <h2>Na fila / rodando</h2>
+    <ul class="queue-list">
+      {% for row in queue_board.active %}
+      <li class="queue-row q-{{ row.status|lower }}">
+        <strong>{{ row.name }}</strong>
+        <span class="muted">{{ row.label }}{% if row.when %} · {{ row.when }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% if queue_board.failed %}
+  <section>
+    <h2>Falhou</h2>
+    <p class="muted">Job que estourou e fonte que devolveu erro. Reprocessa só essa consulta.</p>
+    <ul class="queue-list">
+      {% for row in queue_board.failed %}
+      <li class="queue-row q-failed">
+        <div>
+          <strong>{% if row.origin == "log" %}{{ row.label }}{% else %}{{ row.name }}{% endif %}</strong>
+          <span class="muted">{% if row.origin == "log" %}{{ row.name }} · {% endif %}{{ row.error or "erro na fonte" }}</span>
+        </div>
+        {% if row.origin == "log" and row.entity_id %}
+        <form method="post" action="/app/casos/{{ inv.id }}/fila/vazia/{{ row.id }}/reprocessar" data-busy="Reprocessando…">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn" type="submit" data-tip="Roda de novo só esta fonte no mesmo nó.">Tentar de novo</button>
+        </form>
+        {% elif row.origin != "log" %}
+        <form method="post" action="/app/casos/{{ inv.id }}/fila/{{ row.id }}/reprocessar" data-busy="Reprocessando…">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn" type="submit" data-tip="Só esta consulta. Não explode o grafo inteiro.">Reprocessar</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/app/casos/{{ inv.id }}/fila/falhas" data-busy="Reprocessando falhas…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn" type="submit">Reprocessar jobs falhos</button>
+    </form>
+  </section>
+  {% endif %}
+  {% if queue_board.empty %}
+  <section>
+    <h2>Vazio (6 h)</h2>
+    <p class="muted">Fonte respondeu sem erro e sem dado. Não é falha.</p>
+    <ul class="queue-list">
+      {% for row in queue_board.empty %}
+      <li class="queue-row q-empty">
+        <div>
+          <strong>{{ row.label }}</strong>
+          <span class="muted">{{ row.name }} · {{ row.error }}</span>
+        </div>
+        {% if row.entity_id %}
+        <form method="post" action="/app/casos/{{ inv.id }}/fila/vazia/{{ row.id }}/reprocessar" data-busy="Reprocessando…">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="btn" type="submit" data-tip="Roda de novo só esta fonte no mesmo nó.">Tentar de novo</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</div>
+{% else %}
+<p class="muted">Nada na fila. Processar puxa o próximo lote quando houver consultas pendentes.</p>
+{% endif %}

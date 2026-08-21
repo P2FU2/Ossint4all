@@ -71,6 +71,14 @@ def test_connectors_for_kinds_scopes_sources() -> None:
     assert "email_public" in mixed
     assert "cnpj_receita" in mixed
     assert connectors_for_kinds(["BIRTHDATE"]) == set()
+    url = connectors_for_kinds(["URL"])
+    assert url is not None
+    assert "host_public" in url
+    assert "transparencia" in (connectors_for_kinds(["SANCTIONS"]) or set())
+    from osint4all.graph.expand import kind_for_connector
+
+    assert kind_for_connector("cnpj_receita") == "CNPJ"
+    assert kind_for_connector("email_public") == "EMAIL"
 
 
 class _CountConnector:

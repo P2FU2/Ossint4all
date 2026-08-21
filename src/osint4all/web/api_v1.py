@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from osint4all.db.models import Entity, Evidence, Investigation, User
 from osint4all.db.repository import graph_payload
 from osint4all.engines.discovery import capability_registry, recent_queries
-from osint4all.engines.intelligence import anomalies, communities, cross_case_hits, semantic_search, shortest_path, smart_alerts
+from osint4all.engines.intelligence import anomalies, communities, cross_case_hits, global_lookup, semantic_search, shortest_path, smart_alerts
 from osint4all.engines.investigation import gap_analysis, hypothesis_board
 from osint4all.engines.playbooks import TEMPLATES, list_items, progress
 from osint4all.engines.verification import quality_score
@@ -176,6 +176,15 @@ def api_claims_alias(case_id: str, user: User = Depends(current_user), session: 
 
     rows = session.scalars(select(Claim).where(Claim.investigation_id == case_id)).all()
     return [{"id": c.id, "text": c.text, "impact": c.impact, "status": c.status} for c in rows]
+
+
+@api_router.get("/lookup")
+def api_lookup(
+    q: str = Query(""),
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+):
+    return global_lookup(session, q, user_id=user.id)
 
 
 @api_router.get("/sources")

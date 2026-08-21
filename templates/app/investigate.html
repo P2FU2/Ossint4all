@@ -41,7 +41,13 @@
     {% for item in playbook_items %}
     <li>
       <strong>{{ item.title }}</strong>
-      <span class="muted">{{ item.status }}</span>
+      <span class="muted">{{ item.status }}{% if item.note %} · {{ item.note }}{% endif %}</span>
+      {% if playbook_runnable.get(item.id) %}
+      <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/playbook/{{ item.id }}/rodar" data-busy="Rodando o passo…">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn primary" type="submit" data-tip="Dispara as fontes deste passo e marca feito se houver evidência.">Rodar este passo</button>
+      </form>
+      {% endif %}
       <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/playbook/{{ item.id }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <select name="status">

@@ -1,0 +1,10 @@
+<details class="extract-panel" id="extract-panel" {% if extract_blob %}open{% endif %}>
+  <summary data-tip="Cola e-mail de pauta, PDF ou nota. O painel puxa os identificadores e você escolhe o que entra.">Colar texto e extrair</summary>
+  <form id="extract-form" class="extract-form" method="post" action="/app/extrair" hx-post="/app/extrair" hx-target="#extract-hits" hx-swap="innerHTML" data-busy="Lendo o texto…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label class="sr-only" for="extract-blob">Texto</label>
+    <textarea id="extract-blob" name="blob" rows="5" placeholder="Cole CPF, CNPJ, e-mail, telefone, placa, processo, @user ou um parágrafo…">{{ extract_blob or "" }}</textarea>
+    <button class="btn primary" type="submit" data-tip="Não consulta fonte ainda. Só lista o que reconheceu.">Extrair identificadores</button>
+  </form>
+  <div id="extract-hits" class="extract-hits" aria-live="polite"></div>
+</details>

@@ -91,6 +91,13 @@ function openCaseDossier() {
 
 document.addEventListener("click", (event) => {
   const src = event.target instanceof Element ? event.target : event.target.parentElement;
+  const cite = src && src.closest("[data-copy]");
+  if (cite && cite.dataset.copy) {
+    event.preventDefault();
+    copyText(cite.dataset.copy);
+    if (window.setActionStatus) window.setActionStatus("ok", "Citação copiada");
+    return;
+  }
   const btn = src && src.closest("#case-title-btn");
   if (!btn) return;
   event.preventDefault();
@@ -113,9 +120,11 @@ function busyLabel(form) {
   if (action.includes("/nova") || action.includes("/grafo")) return "Criando caso…";
   if (action.includes("/explodir")) return "Explodindo QSA…";
   if (action.includes("/buscar-ferramentas")) return "Buscando com as ferramentas do grafo…";
-  if (action.includes("/processar")) return "Processando fila…";
+  if (action.includes("/processar") || action.includes("/fila")) return "Processando fila…";
+  if (action.includes("/rodar")) return "Rodando o passo…";
   if (action.includes("/expandir")) return "Expandindo nó…";
   if (action.includes("/consultar")) return "Consultando…";
+  if (action.includes("/extrair")) return "Lendo o texto…";
   if (action.includes("/ferramentas")) return "Buscando…";
   if (action.includes("/alvo")) return "Buscando nesta camada…";
   if (action.includes("/desligar") || action.includes("/apagar")) return "Removendo…";
@@ -742,6 +751,17 @@ window.addEventListener("pageshow", () => {
   });
 })();
 
+(function globalSearchUX() {
+  document.addEventListener("keydown", (event) => {
+    if (!((event.ctrlKey || event.metaKey) && (event.key === "k" || event.key === "K"))) return;
+    const box = document.getElementById("global-q") || document.getElementById("lookup-q");
+    if (!box) return;
+    event.preventDefault();
+    box.focus();
+    box.select();
+  });
+})();
+
 (function consultUX() {
   const input = document.getElementById("q");
   if (!input) return;
@@ -789,6 +809,20 @@ window.addEventListener("pageshow", () => {
     event.preventDefault();
     input.focus();
     input.select();
+  });
+
+  input.addEventListener("paste", (event) => {
+    const text = (event.clipboardData && event.clipboardData.getData("text")) || "";
+    if (!text || (!text.includes("\n") && text.length < 48)) return;
+    const box = document.getElementById("extract-blob");
+    const panel = document.getElementById("extract-panel");
+    const form = document.getElementById("extract-form");
+    if (!box || !form) return;
+    event.preventDefault();
+    box.value = text;
+    if (panel) panel.open = true;
+    if (form.requestSubmit) form.requestSubmit();
+    else form.submit();
   });
 
   const caseSearch = document.getElementById("case-search");

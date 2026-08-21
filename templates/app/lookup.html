@@ -1,0 +1,98 @@
+{% extends "app/base.html" %}
+{% block title %}Buscar{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Memória da redação</p>
+    <h1>Onde já vi isto</h1>
+    <p class="lede">Procura nos casos, no grafo e no seu histórico. Não consulta fonte nova.</p>
+  </div>
+</header>
+
+<form class="lookup-form" method="get" action="/app/buscar">
+  <label class="sr-only" for="lookup-q">Identificador ou nome</label>
+  <input id="lookup-q" name="q" value="{{ q or '' }}" autofocus autocomplete="off" placeholder="CPF, CNPJ, e-mail, placa, @user ou nome…" data-tip="Enter busca no que já está guardado. Atalho: Ctrl+K" />
+  <button class="btn primary" type="submit">Buscar</button>
+</form>
+
+{% if q and lookup %}
+  {% if lookup.seeds %}
+  <p class="section-kicker">reconhecido no pedido</p>
+  <ul class="extract-list compact">
+    {% for item in lookup.seeds %}
+    <li>
+      <span class="extract-chip">
+        <span class="type-tag">{{ item.label }}</span>
+        <strong>{{ item.display }}</strong>
+      </span>
+      <a class="btn ghost" href="/app?modo={{ item.kind }}&amp;q={{ item.value|urlencode }}">consultar de novo</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if lookup.entities %}
+  <section class="panel">
+    <h2>No grafo · {{ lookup.entities|length }}</h2>
+    <ul class="hit-list">
+      {% for hit in lookup.entities %}
+      <li>
+        <a href="/app/casos/{{ hit.case_id }}/entidades/{{ hit.id }}" data-tip="Abre a ficha neste caso">{{ hit.name }}</a>
+        <span class="muted">{{ hit.type }} · {{ hit.case_title }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if lookup.cases %}
+  <section class="panel">
+    <h2>Casos · {{ lookup.cases|length }}</h2>
+    <ul class="hit-list">
+      {% for hit in lookup.cases %}
+      <li>
+        <a href="/app/casos/{{ hit.id }}">{{ hit.title }}</a>
+        <span class="muted">{{ hit.status }}{% if hit.hypothesis %} · {{ hit.hypothesis }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if lookup.history %}
+  <section class="panel">
+    <h2>Seu histórico · {{ lookup.history|length }}</h2>
+    <ul class="hit-list">
+      {% for hit in lookup.history %}
+      <li>
+        <a href="/app?modo={{ hit.mode }}&amp;q={{ hit.query|urlencode }}">{{ hit.title }}</a>
+        <span class="muted">{{ hit.kind_label }} · {{ hit.when }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if not lookup.entities and not lookup.cases and not lookup.history %}
+  <section class="empty">
+    <h2>Nada guardado com isso</h2>
+    <p>Ainda não entrou em nenhum caso nem no seu histórico.</p>
+    {% if lookup.seeds %}
+    <a class="btn primary" href="/app?modo={{ lookup.seeds[0].kind }}&amp;q={{ lookup.seeds[0].value|urlencode }}">Consultar agora</a>
+    {% else %}
+    <a class="btn primary" href="/app?q={{ q|urlencode }}">Consultar agora</a>
+    {% endif %}
+  </section>
+  {% endif %}
+{% elif q %}
+<section class="empty">
+  <h2>Nada encontrado</h2>
+  <a class="btn primary" href="/app?q={{ q|urlencode }}">Consultar nas fontes</a>
+</section>
+{% else %}
+<section class="empty">
+  <h2>Busca só o que já está no painel</h2>
+  <p>Cole um identificador para ver em quais casos ele já aparece.</p>
+</section>
+{% endif %}
+{% endblock %}

@@ -142,8 +142,9 @@
             <tr><th>Menu</th><th>Endereço</th><th>Para que serve</th></tr>
           </thead>
           <tbody>
-            <tr><td>Consultar</td><td><code>/app</code></td><td>Consulta pontual. Não cria caso até você guardar.</td></tr>
-            <tr><td>Alvo</td><td><code>/app/alvo</code></td><td>Dossiê da pessoa em camadas. Um campo por vez.</td></tr>
+            <tr><td>Consultar</td><td><code>/app</code></td><td>Consulta pontual. Não cria caso até você guardar. Dá para colar um parágrafo e extrair vários IDs.</td></tr>
+            <tr><td>Buscar</td><td><code>/app/buscar</code></td><td>Onde este CPF/CNPJ/nome já apareceu nos casos e no histórico. Sem fonte nova. Atalho <kbd>Ctrl+K</kbd>.</td></tr>
+            <tr><td>Alvo</td><td><code>/app/alvo</code></td><td>Dossiê da pessoa em camadas. Cole um texto para preencher, ou busque a âncora mais forte de uma vez.</td></tr>
             <tr><td>Casos</td><td><code>/app/casos</code></td><td>Lista o que você já gravou. Abre o grafo.</td></tr>
             <tr><td>Montar caso</td><td><code>/app/nova</code></td><td>Vários identificadores, playbook, finalidade e responsável.</td></tr>
             <tr><td>Ferramentas</td><td><code>/app/ferramentas</code></td><td>Suíte embutida + mapa estilo OSINT Framework.</td></tr>
@@ -208,11 +209,11 @@
         <ol>
           <li>Abra <strong>Consultar</strong>.</li>
           <li>Escolha o tipo na fileira (<strong>Detectar</strong> reconhece sozinho, ou force Placa, CPF, Processo…).</li>
-          <li>Cole o valor. <kbd>Enter</kbd> ou o botão <strong>exec</strong>. Atalho <kbd>/</kbd> foca o campo.</li>
+          <li>Cole o valor. <kbd>Enter</kbd> ou o botão <strong>exec</strong>. Atalho <kbd>/</kbd> foca o campo. Um parágrafo com vários dados abre a extração — você marca o que entra.</li>
           <li>Espere o dump: fatos, linha do tempo, árvore de vínculos, hits. Clique em qualquer título para abrir a <strong>ficha</strong> (modal). Nada abre site externo.</li>
-          <li>Opcional: <strong>Novo caso</strong> cria um grafo só com este resultado. <strong>Adicionar ao caso</strong> exige escolher o caso na lista — não usa o caso anterior sozinho e não expande o grafo.</li>
+          <li>Opcional: <strong>Novo caso</strong> cria um grafo só com este resultado. <strong>Adicionar ao caso</strong> pré-seleciona o caso corrente, mas ainda exige confirmar — não expande o grafo.</li>
         </ol>
-        <p>A consulta avulsa <em>não</em> grava no grafo e <em>não</em> cola com a busca anterior. Guardar é um clique à parte.</p>
+        <p>A consulta avulsa <em>não</em> grava no grafo e <em>não</em> cola com a busca anterior. Guardar é um clique à parte. <strong>Colar texto e extrair</strong> puxa CPF, CNPJ, e-mail, telefone, placa, processo e @user de um bloco. <strong>Buscar</strong> (barra ou <kbd>Ctrl+K</kbd>) responde “onde já vi isto” nos casos e no histórico, sem consultar fonte nova.</p>
       </section>
 
       <section id="buscas" class="manual-section">
@@ -346,6 +347,7 @@
           <li>E-mail deriva o local-part como @user (você pode buscar essa camada em seguida).</li>
           <li><strong>Atribuir ao caso</strong> cria um caso novo (por omissão) ou acrescenta ao caso que você escolher. Só vai o que você digitou ou confirmou. O grafo não explode sozinho.</li>
         </ol>
+        <p><strong>Colar texto e preencher</strong> extrai os campos de um parágrafo. <strong>Buscar preenchidas</strong> roda a âncora mais forte já no dossiê (CPF, CNPJ, e-mail…) e deixa as outras para você aprofundar uma a uma.</p>
         <p><strong>Novo alvo</strong> apaga o rascunho. Não mexe em casos. Nome sozinho <em>não</em> abre grafo — precisa de CPF, CNPJ, e-mail, telefone, placa ou @user.</p>
         <p>Na mesma página, <strong>Notícias e galeria do alvo</strong> testa sozinha combinações dos campos preenchidos (nome+empresa, nome+@user…). Veja o capítulo seguinte.</p>
       </section>
@@ -414,6 +416,7 @@
             <tr><td>Explodir QSA</td><td>Fica em <strong>Mais</strong>. Só âncoras ativas ligadas ao alvo. Depois limpa pessoa/empresa sem caminho até o alvo. Clique no título do caso para ver/completar CPF e demais dados — com âncora, a busca por nome não mistura homônimo.</td></tr>
             <tr><td>Buscar e acrescentar</td><td>Em <strong>Mais</strong>: roda as ferramentas do painel nos identificadores já no grafo. O resultado entra de forma complementar — não substitui nós existentes. Você liga o que fizer sentido.</td></tr>
             <tr><td>Processar</td><td>Roda o próximo lote da fila. Repita se ainda houver pendências no kpi “fila”. Cada consulta grava log (reprodutibilidade).</td></tr>
+            <tr><td>Fila das fontes</td><td>Painel abaixo do grafo: o que espera, o que falhou e o que voltou vazio. <strong>Reprocessar</strong> só aquela fonte, sem explodir o caso.</td></tr>
             <tr><td>Investigar</td><td>Playbook, hipóteses, lacunas, planner, caminho, clusters, qualidade e snapshots.</td></tr>
             <tr><td>Relatório</td><td>Dossiê HTML com capa, qualidade, veredito e citações <code>[n]</code>.</td></tr>
             <tr><td>Editar</td><td>Dossiê do alvo + finalidade, responsável, classificação, estado, reter até. <strong>Salvar e atualizar caso</strong> só semeia o que é novo e reprocessa.</td></tr>
@@ -520,7 +523,7 @@
       <section id="playbooks" class="manual-section">
         <p class="type-tag">checklist</p>
         <h2>Playbooks</h2>
-        <p>O playbook não pesquisa sozinho. Ele diz o que ainda falta para o dossiê ser publicável.</p>
+        <p>O playbook diz o que ainda falta para o dossiê ser publicável. <strong>Rodar este passo</strong> dispara as fontes daquele item (QSA, processos, sanções…) e marca <em>feito</em> se houver evidência. Documentos, timeline e verificação final continuam manuais.</p>
         <p class="section-kicker">Empresa (COMPANY)</p>
         <ol>
           <li>Identidade legal</li>
@@ -660,6 +663,7 @@
           <li><code>/api/v1/cases/{id}/path?src=&amp;dst=</code> — caminho mais curto</li>
           <li><code>/api/v1/cases/{id}/anomalies</code> · <code>/communities</code> · <code>/cross</code> · <code>/alerts</code></li>
           <li><code>/api/v1/cases/{id}/search?q=</code> — busca no caso</li>
+          <li><code>/api/v1/lookup?q=</code> — onde este identificador já apareceu (casos, grafo, histórico)</li>
           <li><code>/api/v1/cases/{id}/sources</code> — log de consultas</li>
           <li><code>/api/v1/sources</code> — registro de capacidade (FREE/PAID, passivo)</li>
           <li><code>/api/v1/playbooks</code> — modelos Pessoa / Empresa</li>
@@ -672,6 +676,7 @@
         <h2>Atalhos, fila e erros comuns</h2>
         <ul>
           <li><kbd>/</kbd> na consulta — foca o campo.</li>
+          <li><kbd>Ctrl+K</kbd> — busca no que já está guardado (casos, grafo, histórico).</li>
           <li><kbd>Esc</kbd> — fecha ficha / balão / menu / seleção em área.</li>
           <li>Fila &gt; 0 — clique <strong>Processar</strong> (ou espere o sync, se o servidor processa sozinho).</li>
           <li>“Nenhum identificador válido” — o valor não passou na validação (CPF checksum, placa, etc.).</li>

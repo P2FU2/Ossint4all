@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -1325,12 +1326,17 @@ def add_case_note(
     return note
 
 
-def live_investigations(session: Session):
-    return session.scalars(
-        select(Investigation)
-        .where(Investigation.status != "DELETED")
-        .order_by(Investigation.created_at.desc())
-    ).all()
+def live_investigations(session: Session, *, include_archived: bool = False):
+    stmt = select(Investigation).where(Investigation.status != "DELETED")
+    if not include_archived:
+        stmt = stmt.where(Investigation.status != "ARCHIVED")
+    stamp = func.coalesce(Investigation.last_opened_at, Investigation.updated_at, Investigation.created_at)
+    return session.scalars(stmt.order_by(stamp.desc())).all()
+
+
+def parse_case_tags(raw: str) -> list[str]:
+    parts = [part.strip().casefold()[:32] for part in re.split(r"[,;#/]+", raw or "") if part.strip()]
+    return list(dict.fromkeys(parts))[:12]
 
 
 def retire_investigation(session: Session, investigation_id: str) -> bool:

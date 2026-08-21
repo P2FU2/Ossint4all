@@ -1,10 +1,12 @@
+from datetime import timedelta
+
 from sqlalchemy import select
 
 from osint4all.connectors.base import ConnectorResult, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.db.models import Edge, Entity, EntityVersion, NegativeFinding, QueryLog
-from osint4all.db.repository import detach_entity, graph_payload
+from osint4all.db.repository import detach_entity, graph_payload, live_investigations, utcnow
 from osint4all.engines.discovery import extract_document_facts, log_query, route_connectors
-from osint4all.engines.intelligence import parse_search, shortest_path
+from osint4all.engines.intelligence import global_lookup, parse_search, shortest_path
 from osint4all.engines.investigation import (
     add_claim,
     add_hypothesis,
@@ -15,7 +17,15 @@ from osint4all.engines.investigation import (
     suggest_alternatives,
 )
 from osint4all.engines.knowledge import decay_weight, strength_label
-from osint4all.engines.playbooks import PERSON_STEPS, attach_playbook, list_items, progress
+from osint4all.engines.playbooks import (
+    PERSON_STEPS,
+    attach_playbook,
+    enqueue_playbook_step,
+    evaluate_playbook_step,
+    list_items,
+    progress,
+    step_can_run,
+)
 from osint4all.engines.verification import cluster_sources, independent_count, origin_key, quality_score
 from osint4all.graph.resolve import apply_result
 from osint4all.graph.seed import create_investigation
@@ -34,6 +44,32 @@ def test_playbook_company_from_cnpj(db) -> None:
     assert progress(items)["pct"] == 0
     attach_playbook(db, inv, "COMPANY")
     assert len(list_items(db, inv.id)) == 20
+    partners = next(item for item in list_items(db, inv.id) if item.step_key in {"partners", "COMPANY:partners"} or item.title == "Sócios")
+    assert step_can_run(partners)
+    queued = enqueue_playbook_step(db, inv, partners)
+    assert queued["ok"] is True
+    assert queued["queued"] >= 1
+    assert partners.status == "doing"
+    db.add(
+        QueryLog(
+            investigation_id=inv.id,
+            entity_id=inv.entities[0].id,
+            connector="cnpj_receita",
+            params={"key": inv.entities[0].canonical_key},
+            result_count=2,
+            empty=False,
+        )
+    )
+    db.flush()
+    done = evaluate_playbook_step(db, inv, partners)
+    assert done["status"] == "done"
+    assert partners.status == "done"
+    stale = evaluate_playbook_step(db, inv, partners, since=utcnow() + timedelta(days=1))
+    assert stale["status"] == "doing"
+    inv.status = "ARCHIVED"
+    db.flush()
+    assert inv.id not in {row.id for row in live_investigations(db)}
+    assert inv.id in {row.id for row in live_investigations(db, include_archived=True)}
 
 
 def test_gaps_and_quality_for_name_only(db) -> None:
@@ -237,3 +273,15 @@ def test_detach_clears_versions_and_query_log(db) -> None:
     db.flush()
     assert db.get(Entity, extra.id) is None
     assert db.scalars(select(EntityVersion).where(EntityVersion.investigation_id == inv.id)).first() is None
+
+
+def test_global_lookup_finds_identifier_across_cases(db) -> None:
+    seed = parse_seed("33.000.167/0001-01")
+    inv = create_investigation(
+        db, title="Banco público", hypothesis="QSA", seeds=[seed], connectors=[], max_depth=1, monitor=False, created_by="t"
+    )
+    found = global_lookup(db, "33.000.167/0001-01")
+    assert found["seeds"]
+    assert any(row["case_id"] == inv.id for row in found["entities"])
+    titled = global_lookup(db, "Banco público")
+    assert any(row["id"] == inv.id for row in titled["cases"])

@@ -26,6 +26,11 @@ def test_consult_tools_assign_edit(settings) -> None:
     )
     assert logged.status_code == 200
     assert "scan_target" in logged.text.lower()
+    assert "Colar texto e extrair" in logged.text
+    assert "mesa-tabs" in logged.text
+    assert "Alertas" in logged.text
+    assert 'href="/app/buscar"' in logged.text
+    assert 'id="global-q"' in logged.text
     fontes = client.get("/app/admin")
     assert fontes.status_code == 200
     assert "Diários oficiais" in fontes.text
@@ -111,8 +116,9 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "entities" in body
     assert "PENDING" in body
     assert "label" in body
+    assert "pill" in body
     assert "Caso corrente" in created.text
-    assert "Correspondências de identidade" in created.text
+    assert "Fila de identidade" in created.text
     assert "Revisar" in created.text
     assert "Descartado" in created.text
     assert "Provável" in created.text
@@ -130,6 +136,10 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Editar" in created.text
     assert "Buscar" in created.text
     assert "Explodir QSA" in created.text
+    assert "Fila das fontes" in created.text
+    investigar = client.get(f"/app/casos/{created.url.path.split('/')[3]}/investigar")
+    assert investigar.status_code == 200
+    assert "Rodar este passo" in investigar.text
     assert "Buscar e acrescentar" in created.text
     assert "buscar-ferramentas" in created.text
     assert "canvas-tools" in created.text
@@ -176,12 +186,53 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert assigned.status_code == 200
     assert "adicionados" in assigned.text.lower() or "Caso editado" in assigned.text
 
+    mesa_alvo = client.get("/app?mesa=alvo")
+    assert mesa_alvo.status_code == 200
+    assert "desta pessoa" in mesa_alvo.text.lower()
+    assert "Buscar nesta camada" in mesa_alvo.text
+    alerts = client.get("/app/alertas")
+    assert alerts.status_code == 200
+    assert "O que mudou" in alerts.text
     alvo = client.get("/app/alvo")
     assert alvo.status_code == 200
     assert "desta pessoa" in alvo.text.lower()
     assert "Buscar nesta camada" in alvo.text
+    assert "Buscar preenchidas" in alvo.text
+    assert "Colar texto e preencher" in alvo.text
     assert "Novo alvo" in alvo.text
     assert "Atribuir ao caso" in alvo.text
+
+    token = _csrf(alvo.text)
+    extracted = client.post(
+        "/app/extrair",
+        data={
+            "csrf_token": token,
+            "blob": "CPF 529.982.247-25 e-mail ana@exemplo.com placa ABC1D23 @jornalista",
+        },
+    )
+    assert extracted.status_code == 200
+    assert "identificador" in extracted.text.lower()
+    assert "529.982.247-25" in extracted.text
+    assert "ana@exemplo.com" in extracted.text
+    assert "Mandar ao alvo" in extracted.text
+
+    lookup = client.get("/app/buscar", params={"q": "ABC1D23"})
+    assert lookup.status_code == 200
+    assert "Onde já vi isto" in lookup.text
+    assert "ABC1D23" in lookup.text or "ABC-1D23" in lookup.text
+
+    token = _csrf(logged.text)
+    blob_consult = client.post(
+        "/app/consultar",
+        data={
+            "csrf_token": token,
+            "q": "CPF 529.982.247-25\nCNPJ 33.000.167/0001-01\nana@exemplo.com",
+            "modo": "auto",
+        },
+    )
+    assert blob_consult.status_code == 200
+    assert "texto colado" in blob_consult.text.lower()
+    assert "Mandar ao alvo" in blob_consult.text
 
     midia = client.get(f"/app/casos/{created.url.path.split('/')[3]}/midia")
     assert midia.status_code == 200
@@ -206,6 +257,19 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "/api/v1" in manual.text
 
     case_id = created.url.path.split("/")[3]
+    exported = client.get(f"/app/casos/{case_id}/export.json")
+    assert exported.status_code == 200
+    assert exported.json().get("title")
+    assert "citations" in exported.json()
+    cases = client.get("/app/casos")
+    assert "Arquivar" in cases.text
+    token = _csrf(cases.text)
+    archived = client.post(f"/app/casos/{case_id}/arquivar", data={"csrf_token": token}, follow_redirects=True)
+    assert archived.status_code == 200
+    assert "Nada guardado ainda" in client.get("/app/casos").text
+    assert "Caso editado" in client.get("/app/casos?arquivo=1").text
+    token = _csrf(client.get("/app/casos?arquivo=1").text)
+    client.post(f"/app/casos/{case_id}/arquivar", data={"csrf_token": token, "restore": "1"}, follow_redirects=True)
     token = _csrf(client.get("/app/casos").text)
     purged = client.post(f"/app/casos/{case_id}/apagar", data={"csrf_token": token}, follow_redirects=True)
     assert purged.status_code == 200

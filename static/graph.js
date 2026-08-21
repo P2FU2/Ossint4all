@@ -1378,7 +1378,10 @@
   function applyPulse(jobs) {
     const pill = document.getElementById("job-pill");
     const queue = (jobs.PENDING || 0) + (jobs.RUNNING || 0);
-    if (pill) pill.textContent = queue ? "rodando " + queue : "concluído";
+    const fail = jobs.FAILED || 0;
+    if (pill) {
+      pill.textContent = jobs.pill || (queue || fail ? `fila ${queue}` + (fail ? ` · ${fail} falha` : "") : "concluído");
+    }
     if (!mutating && jobs.label && window.setActionStatus) {
       window.setActionStatus(jobs.phase || (queue ? "loading" : "ok"), jobs.label);
     }
@@ -1431,6 +1434,19 @@
         } catch (_) {
           /* próximo ciclo tenta de novo */
         }
+      }
+      if (root.dataset.queueUrl) {
+        fetch(root.dataset.queueUrl, { credentials: "same-origin" })
+          .then((res) => (res.ok ? res.text() : ""))
+          .then((html) => {
+            const board = document.getElementById("queue-board");
+            if (board && html) {
+              const keepOpen = board.open || info.queue || jobs.FAILED;
+              board.innerHTML = html;
+              board.open = keepOpen;
+            }
+          })
+          .catch(() => {});
       }
       schedulePoll(info.queue ? 2200 : 5000);
     } catch (_) {

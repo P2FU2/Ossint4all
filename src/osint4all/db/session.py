@@ -15,15 +15,17 @@ from osint4all.config import get_settings
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 _engine_url: str | None = None
+_schema_url: str | None = None
 
 
 def reset_engine() -> None:
-    global _engine, _SessionLocal, _engine_url
+    global _engine, _SessionLocal, _engine_url, _schema_url
     if _engine is not None:
         _engine.dispose()
     _engine = None
     _SessionLocal = None
     _engine_url = None
+    _schema_url = None
 
 
 def get_engine(database_url: str | None = None) -> Engine:
@@ -59,7 +61,14 @@ def get_engine(database_url: str | None = None) -> Engine:
 
 
 def get_session_factory(database_url: str | None = None) -> sessionmaker[Session]:
-    get_engine(database_url)
+    global _schema_url
+    engine = get_engine(database_url)
+    if _schema_url != _engine_url:
+        from osint4all.db.models import Base
+
+        Base.metadata.create_all(bind=engine)
+        _ensure_legacy_columns(engine)
+        _schema_url = _engine_url
     assert _SessionLocal is not None
     return _SessionLocal
 
@@ -107,6 +116,8 @@ def _ensure_legacy_columns(engine: Engine) -> None:
         add_col("investigations", "workflow", "VARCHAR(32) DEFAULT 'INVESTIGATING'")
         add_col("investigations", "retention_days", "INTEGER")
         add_col("investigations", "graph_layout", "JSON")
+        add_col("investigations", "tags", "JSON")
+        add_col("investigations", "last_opened_at", "TIMESTAMP")
     if "evidence" in tables:
         add_col("evidence", "method", "VARCHAR(16)")
         add_col("evidence", "http_status", "INTEGER")

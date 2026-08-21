@@ -56,6 +56,7 @@ from osint4all.db.repository import (
     list_notes,
     note_tree,
     live_investigations,
+    parse_case_tags,
     purge_investigation,
     retire_investigation,
     update_edge,
@@ -64,8 +65,9 @@ from osint4all.connectors.base import FoundEntity
 from osint4all.graph.expand import process_pending_jobs
 from osint4all.graph.resolve import apply_result, upsert_found_entity
 from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
+from osint4all.engines.intelligence import global_lookup
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
-from osint4all.graph.layers import ALVO_GROUPS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
+from osint4all.graph.layers import ALVO_GROUPS, ALVO_KINDS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.media import collect_target_media, fields_from_identifiers, media_picks_to_result, parse_media_picks
 from osint4all.graph.assets import add_bank_account, add_property, add_wealth_estimate
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
@@ -80,7 +82,14 @@ from osint4all.tools_suite import (
     seeds_from_results,
     tool_id_for_kind,
 )
-from osint4all.identifiers import canonical_key, collect_form_seeds, parse_seed
+from osint4all.identifiers import (
+    canonical_key,
+    collect_form_seeds,
+    extract_seeds,
+    looks_like_blob,
+    parse_seed,
+    seed_cards,
+)
 from osint4all.validators import looks_like_plate, validate_cnpj
 from osint4all.report.dossier import render_dossier_html, render_dossier_pdf
 from osint4all.security import mask_identifier
@@ -93,10 +102,12 @@ from osint4all.web.auth import (
     record_login_failure,
     write_audit,
 )
+from osint4all.quality.provenance import citation_block
 from osint4all.web.deps import current_user, db_session, require_admin, require_csrf, template_context
 
 templates = Jinja2Templates(directory=str(project_root() / "templates"))
 templates.env.globals["tool_id_for_kind"] = tool_id_for_kind
+templates.env.globals["citation_block"] = citation_block
 router = APIRouter()
 
 
@@ -106,6 +117,16 @@ def _client_ip(request: Request) -> str:
 
 def _cases(session: Session) -> list[Investigation]:
     return list(live_investigations(session))
+
+
+def _team_names(session: Session) -> list[str]:
+    return list(session.scalars(select(User.username).where(User.active.is_(True)).order_by(User.username)))
+
+
+def _desk(session: Session) -> list[dict]:
+    from osint4all.quality.changes import desk_digest
+
+    return desk_digest(session)
 
 
 def _queue_case_purge(investigation_id: str) -> None:
@@ -136,6 +157,32 @@ def _with_cases(ctx: dict, request: Request, session: Session) -> dict:
     ctx["cases"] = rows
     ctx["current_case_id"] = cid
     ctx["current_case"] = next((row for row in rows if row.id == cid), None)
+    _with_desk(ctx, session)
+    return ctx
+
+
+def _with_desk(ctx: dict, session: Session) -> dict:
+    rows = _desk(session)
+    ctx["desk"] = rows
+    ctx["desk_n"] = len(rows)
+    return ctx
+
+
+def _mesa_ctx(ctx: dict, session: Session, request: Request, user: User) -> dict:
+    mesa = (request.query_params.get("mesa") or "consulta").strip().casefold()
+    if mesa not in {"consulta", "alvo", "caso"}:
+        mesa = "consulta"
+    ctx["mesa"] = mesa
+    ctx["nav"] = {"consulta": "consultar", "alvo": "alvo", "caso": "nova"}[mesa]
+    ctx["groups"] = ALVO_GROUPS
+    ctx["fields"] = alvo_fields(session, user)
+    settings = get_settings()
+    ctx["connectors"] = ALL_CONNECTORS
+    ctx["source_catalog"] = SOURCE_CATALOG
+    ctx["enabled"] = enabled_connector_names(settings)
+    ctx["default_depth"] = settings.default_max_depth
+    ctx["playbooks"] = ("PERSON", "COMPANY")
+    ctx["team"] = _team_names(session)
     return ctx
 
 
@@ -177,6 +224,12 @@ def _source_errors(session: Session, investigation_id: str):
     from osint4all.quality.health import recent_job_errors
 
     return recent_job_errors(session, investigation_id)
+
+
+def _queue_board(session: Session, investigation_id: str):
+    from osint4all.quality.queue import queue_board
+
+    return queue_board(session, investigation_id)
 
 
 def _resolution(entity: Entity):
@@ -254,6 +307,12 @@ def _case_pulse(session: Session, investigation_id: str) -> dict:
         counts["phase"] = "ok"
         counts["label"] = f"Concluído · {counts['entities']} nós · {counts['edges']} vínculos"
     counts["queue"] = queue
+    failed = counts.get("FAILED") or 0
+    counts["pill"] = (
+        f"fila {queue}" + (f" · {failed} falha" if failed else "")
+        if queue or failed
+        else "concluído"
+    )
     return counts
 
 
@@ -294,6 +353,23 @@ def _with_history(ctx: dict, session: Session, user: User) -> dict:
 def _with_chain(ctx: dict, session: Session, user: User, *, current_query: str = "") -> dict:
     ctx["chain"] = chain_view(session, user, current_query=current_query)
     return ctx
+
+
+def _extract_ctx(seeds, blob: str = "") -> dict:
+    return {"extracted": seed_cards(seeds), "extract_blob": blob}
+
+
+def _seeds_from_pairs(kinds: list[str], values: list[str]) -> list:
+    return [seed for seed in (parse_seed(value, forced_kind=kind or None) for kind, value in zip(kinds, values, strict=False)) if seed]
+
+
+def _seeds_from_picks(picks: list[str]) -> list:
+    pairs: list[tuple[str, str]] = []
+    for pick in picks:
+        kind, sep, value = (pick or "").partition("|")
+        if sep and value:
+            pairs.append((kind, value))
+    return _seeds_from_pairs([kind for kind, _ in pairs], [value for _, value in pairs])
 
 
 def _save_search(session: Session, user: User, query: str, mode: str, outcome: object) -> None:
@@ -435,7 +511,20 @@ def consult_home(
     _with_cases(ctx, request, session)
     _with_history(ctx, session, user)
     _with_chain(ctx, session, user)
+    _mesa_ctx(ctx, session, request, user)
     return templates.TemplateResponse(request, "app/consult.html", ctx)
+
+
+@router.get("/app/alertas", response_class=HTMLResponse)
+def desk_alerts(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    ctx = template_context(request, user)
+    ctx["nav"] = "alertas"
+    _with_cases(ctx, request, session)
+    return templates.TemplateResponse(request, "app/alerts.html", ctx)
 
 
 @router.post("/app/consultar", response_class=HTMLResponse)
@@ -451,6 +540,19 @@ def consult_run(
     ctx = template_context(request, user)
     ctx.update({"q": q, "modo": modo, "nav": "consultar", "modes": MODES, "mode": modo})
     _with_cases(ctx, request, session)
+    _mesa_ctx(ctx, session, request, user)
+    if looks_like_blob(q, modo):
+        seeds = extract_seeds(q)
+        if len(seeds) == 1:
+            q = seeds[0].value
+            modo = seeds[0].kind
+            ctx.update({"q": q, "modo": modo, "mode": modo})
+        elif len(seeds) > 1:
+            ctx.update(_extract_ctx(seeds, q))
+            _with_history(ctx, session, user)
+            _with_chain(ctx, session, user, current_query=q)
+            template = "app/extract_hits.html" if request.headers.get("HX-Request") else "app/consult.html"
+            return templates.TemplateResponse(request, template, ctx)
     if (modo or "").lower() == "massa":
         try:
             mass = run_mass(q)
@@ -634,6 +736,61 @@ def alvo_clear(
     return RedirectResponse("/app/alvo", status_code=303)
 
 
+@router.post("/app/alvo/extrair")
+def alvo_extract(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    blob: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    seeds = extract_seeds(blob)
+    fields = alvo_fields(session, user)
+    added = 0
+    for seed in seeds:
+        if seed.kind not in ALVO_KINDS:
+            continue
+        fields[seed.kind] = seed.display_name
+        added += 1
+    if not added:
+        _set_flash(request, "error", "Nenhum campo de alvo neste texto. Cole CPF, nome, e-mail, telefone, @user, placa, CNPJ ou processo.")
+        return RedirectResponse("/app/alvo", status_code=303)
+    save_alvo_fields(session, user, fields)
+    write_audit(session, "alvo.from_extract", username=user.username, details={"fields": added})
+    _set_flash(request, "ok", f"{added} campo(s) preenchidos a partir do texto. Use Buscar preenchidas para a camada mais forte.")
+    return RedirectResponse("/app/alvo", status_code=303)
+
+
+@router.post("/app/alvo/tudo", response_class=HTMLResponse)
+def alvo_run_filled(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> HTMLResponse:
+    require_csrf(request, csrf_token)
+    fields = alvo_fields(session, user)
+    order = ("CPF", "CNPJ", "EMAIL", "PHONE", "USERNAME", "PLATE", "CNJ", "NAME")
+    filled = [kind for kind in order if fields.get(kind)]
+    if not filled:
+        _set_flash(request, "error", "Nenhum campo preenchido. Cole um texto ou digite um identificador.")
+        return _alvo_page(request, user, session, fields=fields)
+    kind = filled[0]
+    layer = _apply_alvo_layer(request, session, user, kind, fields[kind])
+    rest = [item for item in filled if item != kind]
+    if rest:
+        layer.notes.append(
+            "Camadas já no dossiê, sem busca nesta passagem: " + ", ".join(rest) + ". Abra cada uma se quiser aprofundar."
+        )
+    write_audit(session, "alvo.batch", username=user.username, details={"kind": kind, "pending": rest})
+    request.session["flash"] = {
+        "level": "ok" if layer.ok else "error",
+        "message": f"Camada {kind} rodou primeiro — é a âncora mais forte que você já tem.",
+    }
+    return _alvo_page(request, user, session, fields=layer.fields, layer=layer)
+
+
 @router.post("/app/alvo/grafo")
 def alvo_to_graph(
     request: Request,
@@ -790,13 +947,125 @@ def consult_assign(
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
 
 
+@router.get("/app/buscar", response_class=HTMLResponse)
+def lookup_home(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    query = (request.query_params.get("q") or "").strip()
+    ctx = template_context(request, user)
+    ctx.update({"nav": "buscar", "lookup": global_lookup(session, query, user_id=user.id) if query else None, "q": query})
+    _with_cases(ctx, request, session)
+    return templates.TemplateResponse(request, "app/lookup.html", ctx)
+
+
+@router.post("/app/extrair", response_class=HTMLResponse)
+def extract_run(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    blob: str = Form(""),
+) -> HTMLResponse:
+    require_csrf(request, csrf_token)
+    seeds = extract_seeds(blob)
+    ctx = template_context(request, user)
+    ctx.update(_extract_ctx(seeds, blob))
+    _with_cases(ctx, request, session)
+    if not seeds:
+        ctx["extract_error"] = "Nenhum CPF, CNPJ, e-mail, telefone, placa, processo, @user ou URL neste texto."
+    return templates.TemplateResponse(request, "app/extract_hits.html", ctx)
+
+
+@router.post("/app/extrair/alvo")
+def extract_to_alvo(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    picks: list[str] = Form(default=[]),
+    kinds: list[str] = Form(default=[]),
+    values: list[str] = Form(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    seeds = _seeds_from_picks(picks) or _seeds_from_pairs(kinds, values)
+    fields = alvo_fields(session, user)
+    added = 0
+    for seed in seeds:
+        if seed.kind not in ALVO_KINDS:
+            continue
+        fields[seed.kind] = seed.display_name
+        added += 1
+    if not added:
+        _set_flash(request, "error", "Nada deste texto cabe no alvo. Marque CPF, nome, e-mail, telefone, @user, placa, CNPJ ou processo.")
+        return RedirectResponse("/app", status_code=303)
+    save_alvo_fields(session, user, fields)
+    write_audit(session, "alvo.from_extract", username=user.username, details={"fields": added})
+    _set_flash(request, "ok", f"{added} campo(s) preenchidos no alvo. Confira e busque as camadas.")
+    return RedirectResponse("/app/alvo", status_code=303)
+
+
+@router.post("/app/extrair/caso")
+def extract_to_case(
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    investigation_id: str = Form(""),
+    destination: str = Form(""),
+    picks: list[str] = Form(default=[]),
+    kinds: list[str] = Form(default=[]),
+    values: list[str] = Form(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    seeds = _seeds_from_picks(picks) or _seeds_from_pairs(kinds, values)
+    if not seeds:
+        _set_flash(request, "error", "Marque pelo menos um identificador.")
+        return RedirectResponse("/app", status_code=303)
+    parts = [ConsultResult(kind=seed.kind, query=seed.value, title=seed.display_name, summary="", ok=True) for seed in seeds]
+    target_id = "" if destination == "new" else (investigation_id or "").strip()
+    inv = session.get(Investigation, target_id) if target_id else None
+    if inv:
+        added = _assign_seeds(session, inv, parts)
+        request.session["current_case_id"] = inv.id
+        write_audit(session, "investigation.from_extract", username=user.username, investigation_id=inv.id, details={"added": added})
+        session.commit()
+        _set_flash(request, "ok" if added else "error", f"{added} identificador(es) adicionados a «{inv.title}»." if added else "Nada novo para este caso.")
+        return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+    title = seeds[0].display_name
+    inv = create_investigation(
+        session,
+        title=f"Consulta · {title}",
+        hypothesis="Gerada a partir de identificadores extraídos do texto. Expanda no grafo só o que validar.",
+        seeds=seeds,
+        connectors=list(enabled_connector_names()),
+        max_depth=get_settings().default_max_depth,
+        monitor=False,
+        created_by=user.username,
+        max_attempts=get_settings().job_max_attempts,
+        enqueue=False,
+    )
+    write_audit(session, "investigation.from_extract", username=user.username, investigation_id=inv.id, details={"seeds": len(seeds)})
+    session.commit()
+    request.session["current_case_id"] = inv.id
+    _set_flash(request, "ok", f"Caso «{inv.title}» criado com {len(seeds)} identificador(es) do texto. Nada foi expandido.")
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
 @router.get("/app/casos", response_class=HTMLResponse)
 def investigations(
     request: Request,
     user: User = Depends(current_user),
     session: Session = Depends(db_session),
 ) -> HTMLResponse:
-    rows = list(live_investigations(session))
+    show_archived = (request.query_params.get("arquivo") or "") in {"1", "sim", "true"}
+    tag = (request.query_params.get("tag") or "").strip().casefold()
+    rows = list(live_investigations(session, include_archived=show_archived))
+    if tag:
+        rows = [inv for inv in rows if tag in {str(item).casefold() for item in (inv.tags or [])}]
+    if show_archived:
+        rows = [inv for inv in rows if inv.status == "ARCHIVED"]
     counts = {
         inv.id: {
             "entities": session.scalar(
@@ -811,8 +1080,10 @@ def investigations(
         }
         for inv in rows
     }
+    tags = sorted({str(item) for inv in live_investigations(session, include_archived=True) for item in (inv.tags or []) if item})
     ctx = template_context(request, user)
-    ctx.update({"nav": "casos", "investigations": rows, "counts": counts})
+    ctx.update({"nav": "casos", "investigations": rows, "counts": counts, "case_tags": tags, "tag": tag, "show_archived": show_archived})
+    _with_desk(ctx, session)
     return templates.TemplateResponse(request, "app/investigations.html", ctx)
 
 
@@ -820,6 +1091,7 @@ def investigations(
 def new_investigation(
     request: Request,
     user: User = Depends(current_user),
+    session: Session = Depends(db_session),
 ) -> HTMLResponse:
     settings = get_settings()
     ctx = template_context(request, user)
@@ -831,6 +1103,7 @@ def new_investigation(
             "enabled": enabled_connector_names(settings),
             "default_depth": settings.default_max_depth,
             "playbooks": ("PERSON", "COMPANY"),
+            "team": _team_names(session),
         }
     )
     return templates.TemplateResponse(request, "app/new.html", ctx)
@@ -864,6 +1137,7 @@ def create_case(
     purpose: str = Form(""),
     assignee: str = Form(""),
     playbook_key: str = Form(""),
+    tags: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     parsed = collect_form_seeds(
@@ -899,6 +1173,7 @@ def create_case(
     )
     inv.purpose = purpose.strip() or None
     inv.assignee = assignee.strip() or user.username
+    inv.tags = parse_case_tags(tags)
     if playbook_key.upper() in {"COMPANY", "PERSON"}:
         from osint4all.engines.playbooks import attach_playbook
 
@@ -1107,6 +1382,9 @@ def graph_page(
         request.session["flash"] = {"level": "error", "message": "Investigação não encontrada."}
         return RedirectResponse("/app", status_code=303)
     request.session["current_case_id"] = inv.id
+    from osint4all.db.repository import utcnow
+
+    inv.last_opened_at = utcnow()
     consolidate_identities(session, inv.id)
     from osint4all.graph.satellite import ensure_satellite_cards
 
@@ -1114,6 +1392,7 @@ def graph_page(
     notes = list_notes(session, inv.id)
     dossier = case_identifiers(session, inv.id)
     ctx = template_context(request, user)
+    _with_desk(ctx, session)
     ctx.update(
         {
             "nav": "casos",
@@ -1146,6 +1425,8 @@ def graph_page(
             "source_errors": _source_errors(session, inv.id),
             "case_statuses": ("ACTIVE", "DRAFT", "INVESTIGATING", "REVIEW", "VERIFIED", "PUBLISHED", "CLOSED", "ARCHIVED"),
             "identity_queue": _identity_queue(session, inv.id),
+            "queue_board": _queue_board(session, inv.id),
+            "team": _team_names(session),
         }
     )
     from osint4all.engines.playbooks import list_items, progress
@@ -1201,6 +1482,7 @@ def edit_case(
     classification: str = Form("interno"),
     retain_until: str = Form(""),
     case_status: str = Form(""),
+    tags: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     inv = session.get(Investigation, investigation_id)
@@ -1212,6 +1494,7 @@ def edit_case(
     inv.hypothesis = hypothesis.strip() or None
     inv.purpose = purpose.strip() or None
     inv.assignee = assignee.strip() or inv.assignee
+    inv.tags = parse_case_tags(tags)
     inv.classification = (classification or "interno").strip()[:32] or "interno"
     inv.retain_until = _parse_retain(retain_until)
     if case_status in {"ACTIVE", "DRAFT", "INVESTIGATING", "REVIEW", "VERIFIED", "PUBLISHED", "CLOSED", "ARCHIVED"}:
@@ -1612,6 +1895,7 @@ def verify_node(
     csrf_token: str = Form(""),
     verdict: str = Form("unconfirmed"),
     reason: str = Form(""),
+    next_url: str = Form(""),
 ) -> RedirectResponse:
     require_csrf(request, csrf_token)
     entity = session.scalar(select(Entity).where(Entity.id == entity_id, Entity.investigation_id == investigation_id))
@@ -1631,7 +1915,10 @@ def verify_node(
     if _wants_json(request):
         return _json_case(session, investigation_id, ok=True, verdict=verdict)
     _set_flash(request, "ok", f"Veredito: {verdict_label(verdict)}.")
-    return RedirectResponse(f"/app/casos/{investigation_id}/entidades/{entity_id}", status_code=303)
+    return RedirectResponse(
+        _safe_next(investigation_id, next_url, f"/app/casos/{investigation_id}/entidades/{entity_id}"),
+        status_code=303,
+    )
 
 
 @router.post("/app/casos/{investigation_id}/entidades/{entity_id}/desligar")
@@ -2189,6 +2476,125 @@ def process_now(
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
+@router.post("/app/casos/{investigation_id}/fila/{job_id}/reprocessar")
+def reprocess_job(
+    investigation_id: str,
+    job_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    from osint4all.quality.queue import requeue_job
+
+    job = requeue_job(session, investigation_id, job_id)
+    if not job:
+        _set_flash(request, "error", "Consulta da fila não encontrada.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    write_audit(session, "queue.retry", username=user.username, investigation_id=inv.id, details={"job": job_id})
+    session.commit()
+    processed = process_pending_jobs(investigation_id=investigation_id, limit=1, settings=get_settings())
+    _set_flash(request, "ok", f"Fonte reprocessada ({processed} lote). Veja a fila se ainda falhar.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/fila/vazia/{log_id}/reprocessar")
+def reprocess_empty(
+    investigation_id: str,
+    log_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    from osint4all.quality.queue import retry_empty_log
+
+    job = retry_empty_log(session, inv, log_id, max_attempts=get_settings().job_max_attempts)
+    if not job:
+        _set_flash(request, "error", "Não deu para reprocessar esta fonte.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    write_audit(session, "queue.retry_empty", username=user.username, investigation_id=inv.id, details={"log": log_id})
+    session.commit()
+    processed = process_pending_jobs(investigation_id=investigation_id, limit=1, settings=get_settings())
+    _set_flash(request, "ok", f"Fonte vazia reenfileirada ({processed} lote).")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/fila/falhas")
+def reprocess_failed(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    from osint4all.quality.queue import retry_all_failed
+
+    n = retry_all_failed(session, investigation_id)
+    write_audit(session, "queue.retry_failed", username=user.username, investigation_id=inv.id, details={"count": n})
+    session.commit()
+    processed = process_pending_jobs(investigation_id=investigation_id, limit=min(3, max(n, 1)), settings=get_settings()) if n else 0
+    _set_flash(request, "ok", f"{n} falha(s) de volta à fila · {processed} lote(s) processado(s)." if n else "Nenhuma falha para reprocessar.")
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.get("/app/casos/{investigation_id}/fila", response_class=HTMLResponse)
+def queue_fragment(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> HTMLResponse:
+    inv = session.get(Investigation, investigation_id)
+    if not inv or inv.status == "DELETED":
+        return HTMLResponse("", status_code=404)
+    ctx = template_context(request, user)
+    ctx.update({"inv": inv, "queue_board": _queue_board(session, investigation_id)})
+    return templates.TemplateResponse(request, "app/queue_board.html", ctx)
+
+
+@router.post("/app/casos/{investigation_id}/arquivar")
+def archive_case(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    restore: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv or inv.status == "DELETED":
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    if restore:
+        inv.status = "ACTIVE"
+        _set_flash(request, "ok", f"«{inv.title}» voltou à lista.")
+    else:
+        inv.status = "ARCHIVED"
+        if request.session.get("current_case_id") == inv.id:
+            request.session.pop("current_case_id", None)
+        _set_flash(request, "ok", f"«{inv.title}» arquivado. Não apaga o grafo.")
+    write_audit(session, "investigation.archive", username=user.username, investigation_id=inv.id, details={"restore": bool(restore)})
+    session.commit()
+    return RedirectResponse("/app/casos" + ("?arquivo=1" if not restore else ""), status_code=303)
+
+
 @router.post("/app/casos/{investigation_id}/notas")
 def add_note(
     investigation_id: str,
@@ -2604,6 +3010,39 @@ async def import_host_intel(
     session.commit()
     request.session["flash"] = {"level": "ok", "message": f"{len(rows)} host(s) indexados no caso. Sem scan."}
     return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+
+
+@router.get("/app/casos/{investigation_id}/export.json")
+def export_case_json(
+    investigation_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> JSONResponse:
+    inv = session.get(Investigation, investigation_id)
+    if not inv or inv.status == "DELETED":
+        return JSONResponse({"detail": "caso não encontrado"}, status_code=404)
+    evidence = list(session.scalars(select(Evidence).where(Evidence.investigation_id == inv.id).order_by(Evidence.collected_at.desc()).limit(80)))
+    entities = list(session.scalars(select(Entity).where(Entity.investigation_id == inv.id).order_by(Entity.is_seed.desc(), Entity.display_name)))
+    return JSONResponse(
+        {
+            "id": inv.id,
+            "title": inv.title,
+            "hypothesis": inv.hypothesis,
+            "tags": inv.tags or [],
+            "assignee": inv.assignee,
+            "status": inv.status,
+            "entities": [{"id": e.id, "name": e.display_name, "type": e.entity_type, "key": e.canonical_key, "seed": e.is_seed} for e in entities],
+            "citations": [
+                citation_block(
+                    fact=ev.snippet or ev.source_label or "",
+                    source=ev.source_label or ev.connector or "",
+                    url=ev.url or "",
+                    when=ev.collected_at.strftime("%d/%m/%Y") if ev.collected_at else "",
+                )
+                for ev in evidence
+            ],
+        }
+    )
 
 
 @router.get("/app/casos/{investigation_id}/relatorio", response_class=HTMLResponse)

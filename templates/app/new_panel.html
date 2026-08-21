@@ -1,0 +1,84 @@
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Quando a consulta avulsa não basta</p>
+    <h1>Montar um caso</h1>
+    <p class="lede sr-only">Vários identificadores no mesmo caso.</p>
+  </div>
+</header>
+
+<form class="stack" method="post" action="/app/nova" data-busy="Criando caso" data-done="Caso criado.">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <label data-tip="Nome curto do dossiê. Aparece na lista de casos.">Título
+    <input name="title" required placeholder="Ex.: Holding do grupo X" />
+  </label>
+  <label data-tip="A pergunta que o grafo deve ajudar a responder.">Hipótese
+    <textarea name="hypothesis" rows="2" placeholder="O que você está tentando verificar?"></textarea>
+  </label>
+  <label data-tip="Finalidade lícita do dossiê. Aparece no relatório.">Finalidade
+    <textarea name="purpose" rows="2" placeholder="Reportagem, checagem de hipótese, pedido de pauta…"></textarea>
+  </label>
+  <label data-tip="Série ou pasta curta. Filtra a lista de casos.">Tags
+    <input name="tags" placeholder="eleições, holding" />
+  </label>
+  <label data-tip="Quem conduz o caso.">Responsável
+    {% if team %}
+    <select name="assignee">
+      <option value="">eu ({{ user.username }})</option>
+      {% for name in team %}
+      <option value="{{ name }}">{{ name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input name="assignee" placeholder="seu nome ou equipe" />
+    {% endif %}
+  </label>
+  <label data-tip="O playbook vira checklist no motor de investigação. CNPJ escolhe empresa sozinho se deixar em branco.">Playbook
+    <select name="playbook_key">
+      <option value="">Automático (CNPJ → empresa, senão pessoa)</option>
+      <option value="PERSON">Pessoa</option>
+      <option value="COMPANY">Empresa</option>
+    </select>
+  </label>
+
+  <fieldset class="seed-grid">
+    <legend>Identificadores</legend>
+    <label data-tip="Pessoa. A Receita não devolve o nome pelo CPF.">CPF <input name="seed_cpf" data-mask="cpf" inputmode="numeric" placeholder="000.000.000-00" /></label>
+    <label data-tip="Empresa. Puxa QSA oficial.">CNPJ <input name="seed_cnpj" data-mask="cnpj" inputmode="numeric" placeholder="00.000.000/0001-00" /></label>
+    <label data-tip="Rede societária na base aberta da Receita.">Nome <input name="seed_name" placeholder="Nome completo" /></label>
+    <label data-tip="Só menções públicas. Sem caixa de e-mail.">E-mail <input name="seed_email" placeholder="nome@dominio.com" /></label>
+    <label data-tip="Só se já apareceu em fonte pública. Sem operadora.">Telefone <input name="seed_phone" data-mask="phone" inputmode="numeric" placeholder="11 99999-0000" /></label>
+    <label data-tip="Data que você já tem de fonte lícita.">Data de nascimento <input name="seed_birth" data-mask="date" inputmode="numeric" placeholder="00/00/0000" /></label>
+    <label data-tip="Filiação. Entra no dossiê e no grafo como pessoa.">Nome do pai <input name="seed_father" placeholder="Nome completo" /></label>
+    <label data-tip="Filiação. Entra no dossiê e no grafo como pessoa.">Nome da mãe <input name="seed_mother" placeholder="Nome completo" /></label>
+    <label data-tip="Checagem de URLs públicas, sem login.">Usuário <input name="seed_username" placeholder="@usuario" /></label>
+    <label data-tip="Número unificado. DataJud e menções públicas.">Processo CNJ <input name="seed_cnj" placeholder="0000000-00.0000.0.00.0000" /></label>
+    <label data-tip="Série histórica e portais. Sem dono no DETRAN.">Placa <input name="seed_plate" placeholder="ABC1D23" /></label>
+    <label data-tip="Opcional. Só se você já tem de fonte lícita.">Dono da placa <input name="seed_plate_owner" placeholder="Nome" /></label>
+  </fieldset>
+  <input type="hidden" name="seed_plate_cpf" value="" />
+
+  <label data-tip="Um identificador por linha. O tipo é detectado.">Lista
+    <textarea name="seeds" rows="4" placeholder="ABC1D23"></textarea>
+  </label>
+
+  <details class="advanced">
+    <summary>Profundidade e fontes</summary>
+    <label data-tip="0 = só a semente. 6 = sócios e as outras empresas deles até o último grau com o alvo.">Grau máximo
+      <input type="number" name="max_depth" min="0" max="6" value="{{ default_depth }}" />
+    </label>
+    <div class="checks">
+      {% for c in connectors %}
+      <label class="check" data-tip="{{ source_catalog[c].how if source_catalog and source_catalog.get(c) else 'Liga ou desliga esta fonte neste caso.' }}">
+        <input type="checkbox" name="connectors" value="{{ c }}" {% if c in enabled %}checked{% endif %} />
+        {{ source_catalog[c].label if source_catalog and source_catalog.get(c) else c }}
+      </label>
+      {% endfor %}
+    </div>
+    <label class="check" data-tip="Reconsulta as sementes no cron.">
+      <input type="checkbox" name="monitor" />
+      Monitorar
+    </label>
+  </details>
+
+  <button class="btn primary" type="submit" data-tip="Cria o caso e começa a expansão.">Abrir grafo</button>
+</form>

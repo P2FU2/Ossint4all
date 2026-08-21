@@ -1,0 +1,27 @@
+{% extends "app/base.html" %}
+{% block title %}Alertas{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Monitor</p>
+    <h1>O que mudou</h1>
+    <p class="lede">Mudanças das últimas 48 h. Casos com monitor ligado vêm primeiro. Sem e-mail — o aviso é aqui e no badge da barra.</p>
+  </div>
+  <a class="btn" href="/app/casos" data-tip="Volta à lista de casos">Casos</a>
+</header>
+{% if desk %}
+<ul class="hit-list desk-digest">
+  {% for item in desk %}
+  <li>
+    <a href="/app/casos/{{ item.case_id }}">{{ item.case_title }}</a>
+    <span class="muted">{% if item.monitor %}monitor · {% endif %}{{ item.field }} {{ item.old }} → {{ item.new }} · {{ item.when }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<section class="empty">
+  <h2>Nada desde ontem</h2>
+  <p>Ligue o monitor no dossiê do caso para reconsultar as sementes no cron. As mudanças aparecem aqui.</p>
+</section>
+{% endif %}
+{% endblock %}

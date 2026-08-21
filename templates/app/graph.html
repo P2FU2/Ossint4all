@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=38" defer></script>
+<script src="/static/graph.js?v=40" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -18,13 +18,14 @@
   <div class="graph-actions">
     <span class="kpi" data-tip="Pessoas, empresas, processos e outros nós deste caso">{{ entity_count }} nós</span>
     <span class="kpi" data-tip="Relações já confirmadas (sócio, menção, proprietário…)">{{ edge_count }} vínculos</span>
-    <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote.">fila {{ jobs.PENDING + jobs.RUNNING }}</span>
+    <span class="kpi" id="job-pill" data-tip="Consultas ainda na fila. Processar puxa o próximo lote. Falhas aparecem no painel Fila das fontes.">{% if jobs.PENDING + jobs.RUNNING or jobs.FAILED %}fila {{ jobs.PENDING + jobs.RUNNING }}{% if jobs.FAILED %} · {{ jobs.FAILED }} falha{% endif %}{% else %}concluído{% endif %}</span>
     <form method="post" action="/app/casos/{{ inv.id }}/processar" data-busy="Processando fila…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <button class="btn" type="submit" data-busy="Processando fila…" data-tip="Roda o próximo lote de fontes públicas.">Processar</button>
     </form>
     <a class="btn" href="/app/casos/{{ inv.id }}/investigar" data-tip="Hipóteses, playbook, lacunas e caminho">Investigar</a>
     <a class="btn" href="/app/casos/{{ inv.id }}/relatorio" data-tip="Relatório narrativo com fontes citadas">Relatório</a>
+    <a class="btn" href="/app/casos/{{ inv.id }}/export.json" data-tip="JSON com nós e citações para colar ou arquivar">Exportar JSON</a>
     <details class="more-menu" id="case-dossier">
       <summary class="btn" data-tip="Dossiê do alvo: o que já tem e o que falta">Editar</summary>
       <div class="more-panel case-dossier">
@@ -34,7 +35,19 @@
           <label>Título <input name="title" value="{{ inv.title }}" required /></label>
           <label>Hipótese <textarea name="hypothesis" rows="2">{{ inv.hypothesis or "" }}</textarea></label>
           <label>Finalidade <textarea name="purpose" rows="2" placeholder="Por que este dossiê existe">{{ inv.purpose or "" }}</textarea></label>
-          <label>Responsável <input name="assignee" value="{{ inv.assignee or "" }}" placeholder="quem conduz" /></label>
+          <label>Tags <input name="tags" value="{{ (inv.tags or [])|join(', ') }}" placeholder="eleições, holding" /></label>
+          <label>Responsável
+            {% if team %}
+            <select name="assignee">
+              <option value="">—</option>
+              {% for name in team %}
+              <option value="{{ name }}" {% if inv.assignee == name %}selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input name="assignee" value="{{ inv.assignee or "" }}" placeholder="quem conduz" />
+            {% endif %}
+          </label>
           <label>Classificação
             <select name="classification">
               <option value="interno" {% if inv.classification == "interno" %}selected{% endif %}>interno</option>
@@ -245,7 +258,7 @@
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
   <div class="graph-canvas">
-    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-asset-url="/app/casos/{{ inv.id }}/patrimonio" data-property-url="/app/casos/{{ inv.id }}/imoveis" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-queue-url="/app/casos/{{ inv.id }}/fila" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-asset-url="/app/casos/{{ inv.id }}/patrimonio" data-property-url="/app/casos/{{ inv.id }}/imoveis" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
   </div>
   <div class="canvas-tools" aria-label="Canvas">
     <div class="canvas-tools-group">
@@ -307,6 +320,10 @@
 </div>
 </div>
 
+<details class="case-board queue-board" id="queue-board" {% if queue_board and queue_board.open %}open{% endif %}>
+  {% include "app/queue_board.html" %}
+</details>
+
 <details class="case-board" open>
   <summary data-tip="Anotações, tarefas, timeline e ligações manuais">Quadro do caso · anotações e ligações</summary>
   <div class="board-grid">
@@ -335,11 +352,7 @@
       {% endif %}
       {% if source_errors %}
       <h3>Fontes com falha</h3>
-      <ul class="plain">
-        {% for job in source_errors %}
-        <li>{{ job.last_error }}</li>
-        {% endfor %}
-      </ul>
+      <p class="muted">Detalhe e reprocessar estão em <strong>Fila das fontes</strong>.</p>
       {% endif %}
     </section>
     <section>
@@ -431,7 +444,7 @@
 </details>
 
 <details class="case-board identity-board" id="identity-board" open>
-  <summary data-tip="O motor sugere; você confirma. Score abaixo de 75 não entra no dossiê sozinho">Correspondências de identidade</summary>
+  <summary data-tip="Homônimo fica em Revisar até você confirmar. Score abaixo de 75 não entra no dossiê sozinho">Fila de identidade{% for bucket in identity_queue or [] %}{% if bucket.key == 'unconfirmed' and bucket.rows %} · {{ bucket.rows|length }} para revisar{% endif %}{% endfor %}</summary>
   <p class="muted">Três perguntas: é a mesma pessoa? a fonte é confiável? a afirmação está corroborada? Cidade diferente não é contradição — processo ou imóvel em outro Estado é lugar associado.</p>
   <div class="identity-queue">
     {% for bucket in identity_queue or [] %}
@@ -448,6 +461,7 @@
           {% if not row.seed and bucket.key != 'confirmed' %}
           <form class="inline-plate" method="post" action="/app/casos/{{ inv.id }}/entidades/{{ row.id }}/verificar">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <input type="hidden" name="next_url" value="/app/casos/{{ inv.id }}" />
             <input type="hidden" name="reason" value="Fila de identidade." />
             {% if bucket.key != 'probable' %}
             <button class="btn ghost" type="submit" name="verdict" value="probable">Provável</button>
