@@ -9,6 +9,7 @@ from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge,
 from osint4all.db.models import Entity
 from osint4all.exceptions import SkippedDisabled
 from osint4all.http_client import RateLimitedClient
+from osint4all.graph.preview import opensanctions_entity_url
 from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
 from osint4all.validators import validate_cnpj
@@ -58,7 +59,7 @@ def parse_opensanctions_hits(rows: list[Any], *, origin_key: str) -> ConnectorRe
         raw_topics = props.get("topics") if isinstance(props, dict) else []
         if isinstance(raw_topics, list):
             topics = [str(t) for t in raw_topics[:8]]
-        url = f"https://www.opensanctions.org/entities/{ident}"
+        url = opensanctions_entity_url(ident)
         kind = "PERSON" if schema.lower() in {"person"} else "ORG"
         found = FoundEntity(
             entity_type=kind,
@@ -67,7 +68,8 @@ def parse_opensanctions_hits(rows: list[Any], *, origin_key: str) -> ConnectorRe
             display_name=caption[:180],
             attrs={
                 "schema": schema,
-                "fonte": "opensanctions",
+                "fonte": url,
+                "page_url": url,
                 "datasets": [str(d) for d in datasets[:8]],
                 "topics": topics,
                 "tipo": "sancao" if "sanction" in " ".join(topics).casefold() or any("sanction" in str(d).casefold() for d in datasets) else "pep",

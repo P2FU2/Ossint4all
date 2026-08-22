@@ -257,6 +257,8 @@ def apply_result(
 
     enrich_found_entities(result.entities)
     for found in result.entities:
+        if (found.attrs or {}).get("_drop"):
+            continue
         key = found_canonical_key(found)
         if key in blocked or canonical_key(found.kind, found.value) in blocked:
             continue

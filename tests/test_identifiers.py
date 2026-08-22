@@ -31,6 +31,7 @@ def test_canonical_keys() -> None:
     assert canonical_key("CNPJ", "33.000.167/0001-01") == "cnpj:33000167000101"
     assert canonical_key("EMAIL", "Ana@Exemplo.com") == "email:ana@exemplo.com"
     assert canonical_key("USERNAME", "@Foo") == "username:foo"
+    assert canonical_key("URL", "https://www.opensanctions.org/entities/Q10325423") == "url:https://www.opensanctions.org/entities/Q10325423"
     bank = parse_seed("Itaú / 0001 / 12345-6", forced_kind="BANK")
     assert bank is not None
     assert bank.entity_type == "ASSET"

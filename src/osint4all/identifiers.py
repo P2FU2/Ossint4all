@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from osint4all.security import only_digits
 from osint4all.validators import (
@@ -93,7 +94,16 @@ def canonical_key(kind: str, value: str) -> str:
     if kind == "USERNAME":
         return f"username:{(value or '').strip().lstrip('@').lower()}"
     if kind == "URL":
-        return f"url:{(value or '').strip().rstrip('/').lower()}"
+        raw = (value or "").strip().rstrip("/")
+        parsed = urlparse(raw)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            host = parsed.netloc.casefold()
+            path = parsed.path or ""
+            rebuilt = f"{parsed.scheme.lower()}://{host}{path}"
+            if parsed.query:
+                rebuilt += "?" + parsed.query
+            return f"url:{rebuilt}"
+        return f"url:{raw.lower()}"
     if kind == "PLATE":
         return f"plate:{normalize_plate(value)}"
     if kind == "NAME":

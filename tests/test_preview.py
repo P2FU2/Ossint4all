@@ -3,14 +3,19 @@ from osint4all.connectors.username_public import parse_public_hits
 from osint4all.connectors.web_search import parse_web_hits
 from osint4all.graph.preview import (
     attach_preview,
+    build_entity_thumb,
     decorate_graph_attrs,
     enrich_found_entities,
     is_public_http_url,
     looks_like_pdf,
+    normalize_official_url,
+    opensanctions_entity_url,
     parse_open_graph,
     preview_from_html,
     preview_kind_for_url,
+    render_card_svg,
     social_avatar_url,
+    verify_source_url,
     youtube_embed,
 )
 
@@ -56,8 +61,11 @@ def test_social_avatar_and_public_url() -> None:
         {"network": "YouTube", "username": "lulaoficial", "preview_kind": "social"},
         url="https://www.youtube.com/@lulaoficial",
         entity_type="PROFILE",
+        entity_id="e1",
+        investigation_id="c1",
     )
-    assert bag["thumb"].startswith("https://unavatar.io/youtube/")
+    assert bag["thumb"] == "/app/casos/c1/entidades/e1/thumb"
+    assert bag["tipo"] == "social"
 
 
 def test_preview_from_html_social_resolves_relative_image() -> None:
@@ -65,6 +73,69 @@ def test_preview_from_html_social_resolves_relative_image() -> None:
     assert attrs["preview_kind"] == "social"
     assert attrs["thumb"] == "https://github.com/alice.png"
     assert attrs["og_title"] == "Alice / GitHub"
+
+
+def test_official_url_is_normalized_and_verified_offline() -> None:
+    assert opensanctions_entity_url("q10325423") == "https://www.opensanctions.org/entities/Q10325423"
+    assert (
+        normalize_official_url("https://www.opensanctions.org/entities/q10325423")
+        == "https://www.opensanctions.org/entities/Q10325423"
+    )
+    check = verify_source_url("https://www.opensanctions.org/entities/q10325423")
+    assert check["ok"] is True
+    assert check["final_url"].endswith("/Q10325423")
+    dead = FoundEntity(
+        entity_type="PERSON",
+        kind="URL",
+        value="https://www.opensanctions.org/entities/q10325423",
+        display_name="Q10325423",
+        attrs={"_drop": True, "fonte_ok": False},
+    )
+    enrich_found_entities([dead])
+    assert dead.attrs.get("_drop") is True
+
+
+def test_card_svg_and_offline_thumb() -> None:
+    svg = render_card_svg(kicker="PDF", title="Portaria", body="Dispõe sobre o ato.", kind="pdf")
+    assert svg.startswith(b"<svg")
+    assert b"Portaria" in svg
+    assert b"Disp" in svg
+    entity = type(
+        "E",
+        (),
+        {
+            "id": "n1",
+            "investigation_id": "",
+            "display_name": "Flickr · @lulaoficial",
+            "entity_type": "PROFILE",
+            "canonical_key": "url:https://www.flickr.com/people/lulaoficial/",
+            "attrs": {
+                "network": "Flickr",
+                "username": "lulaoficial",
+                "preview_kind": "social",
+                "page_url": "https://www.flickr.com/people/lulaoficial/",
+            },
+        },
+    )()
+    data, ctype = build_entity_thumb(entity)
+    assert ctype == "image/svg+xml"
+    assert b"Flickr" in data or b"lulaoficial" in data
+    news = type(
+        "E",
+        (),
+        {
+            "id": "n2",
+            "investigation_id": "",
+            "display_name": "Biografia",
+            "entity_type": "PUBLICATION",
+            "canonical_key": "url:https://g1.exemplo/a",
+            "attrs": {"preview_kind": "article", "og_title": "Biografia do presidente", "description": "Texto da matéria."},
+        },
+    )()
+    card, kind = build_entity_thumb(news)
+    assert kind == "image/svg+xml"
+    assert b"Biografia" in card
+    assert b"Texto da" in card
 
 
 def test_attach_preview_pdf_skips_http() -> None:

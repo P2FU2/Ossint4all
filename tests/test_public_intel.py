@@ -57,6 +57,7 @@ def test_pncp_and_gleif_and_sanctions_parsers() -> None:
         origin_key="name:example person",
     )
     assert sanctions.entities[0].attrs["tipo"] == "sancao"
+    assert sanctions.entities[0].attrs["page_url"].endswith("/entities/NK-1")
     assert sanctions.edges[0].rel_type == "SANCAO"
 
     gleif = parse_gleif_records(

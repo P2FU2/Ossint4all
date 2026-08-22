@@ -255,11 +255,42 @@ def test_graph_payload_keeps_preview_attrs(db) -> None:
     )
     db.flush()
     payload = graph_payload(db, inv.id)
-    attrs = next(n["attrs"] for n in payload["nodes"] if n["type"] == "PUBLICATION")
+    pub = next(n for n in payload["nodes"] if n["type"] == "PUBLICATION")
+    attrs = pub["attrs"]
     assert attrs["preview_kind"] == "article"
     assert attrs["og_title"] == "Título da matéria"
     assert attrs["description"] == "Lead da reportagem."
-    assert attrs["thumb"] == "https://img.exemplo/foto.jpg"
+    assert attrs["thumb"] == f"/app/casos/{inv.id}/entidades/{pub['id']}/thumb"
+
+
+def test_apply_result_drops_dead_official_source(db) -> None:
+    seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db, title="404", hypothesis=None, seeds=[seed], connectors=[], max_depth=1, monitor=False, created_by="t"
+    )
+    apply_result(
+        db,
+        inv,
+        inv.entities[0],
+        ConnectorResult(
+            entities=[
+                FoundEntity(
+                    entity_type="PERSON",
+                    kind="URL",
+                    value="https://www.opensanctions.org/entities/Q10325423",
+                    display_name="Q10325423",
+                    attrs={"_drop": True, "fonte_ok": False, "page_url": "https://www.opensanctions.org/entities/Q10325423"},
+                )
+            ]
+        ),
+        connector="opensanctions_public",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=1,
+    )
+    db.flush()
+    payload = graph_payload(db, inv.id)
+    assert not any((n.get("attrs") or {}).get("page_url", "").endswith("Q10325423") for n in payload["nodes"])
 
 
 def test_failed_query_skips_negative_finding(db) -> None:

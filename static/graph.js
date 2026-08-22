@@ -82,12 +82,13 @@
   }
 
   function nodeThumb(n) {
+    if ((n.type === "PROFILE" || n.type === "PUBLICATION") && n.id && root.dataset.entityBase) {
+      return root.dataset.entityBase + n.id + "/thumb";
+    }
     const attrs = n.attrs || {};
     const thumb = attrs.thumb || attrs.profile_photo || "";
-    if (thumb) return thumb;
-    const url = officialSourceUrl(n);
-    if (previewKindOf(n) === "pdf" || urlLooksPdf(url) || urlLooksPdf(n.key || "")) {
-      return pdfPlaceholder(url || n.key || n.label, n.label);
+    if (thumb && (thumb.indexOf("/app/casos/") === 0 || /^https?:\/\//i.test(thumb) || thumb.indexOf("data:image") === 0)) {
+      return thumb;
     }
     return "";
   }
@@ -265,7 +266,7 @@
         },
       },
       {
-        selector: 'node[tipo = "pdf"]',
+        selector: 'node[tipo = "pdf"][?thumb]',
         style: {
           "background-image": "data(thumb)",
           "background-fit": "cover",
@@ -506,12 +507,49 @@
     return node.data("kind") === "category";
   }
 
+  function isSatelliteCard(node) {
+    const attrs = node.data("attrs") || {};
+    const tipo = String(attrs.tipo || "").toLowerCase();
+    const papel = String(attrs.papel || "").toLowerCase();
+    const via = String(attrs.via || "").toLowerCase();
+    const name = String(node.data("name") || node.data("label") || "").toLowerCase();
+    return (
+      tipo === "imagem" &&
+      (papel === "sede" ||
+        papel === "local" ||
+        via === "google_maps" ||
+        name.indexOf("satélite") >= 0 ||
+        name.indexOf("satelite") >= 0)
+    );
+  }
+
+  function satelliteHost(node) {
+    let host = null;
+    node.connectedEdges().forEach((edge) => {
+      const other = edge.source().id() === node.id() ? edge.target() : edge.source();
+      if (isCategoryLabel(other) || isSatelliteCard(other)) return;
+      const kind = String(edge.data("label") || "");
+      const type = other.data("type");
+      if (/SEDE|LOCAL/i.test(kind) || type === "ORG" || type === "ASSET" || type === "VEHICLE") {
+        if (type === "ORG" || type === "ASSET" || type === "VEHICLE") host = other;
+      }
+    });
+    return host;
+  }
+
   function nodeCategory(node) {
     const type = node.data("type") || "";
     const attrs = node.data("attrs") || {};
     const tipo = String(attrs.tipo || attrs.preview_kind || "").toLowerCase();
     if (type === "PERSON") return "person";
     if (type === "ORG") return "org";
+    if (isSatelliteCard(node)) {
+      const host = satelliteHost(node);
+      if (host && host.data("type") === "ORG") return "org";
+      if (host && host.data("type") === "ASSET") return "asset";
+      if (host && host.data("type") === "VEHICLE") return "vehicle";
+      return "org";
+    }
     if (type === "PROFILE" || tipo === "social") return "social";
     if (tipo === "pdf" || tipo === "diario") return "doc";
     if (tipo === "imagem" || tipo === "image") return "image";
@@ -521,6 +559,43 @@
     if (type === "VEHICLE") return "vehicle";
     if (type === "NOTE") return "note";
     return "other";
+  }
+
+  function orderCategoryNodes(list) {
+    const mains = [];
+    const satByHost = new Map();
+    list.forEach((node) => {
+      if (isSatelliteCard(node)) {
+        const host = satelliteHost(node);
+        const hid = host ? host.id() : "";
+        if (!satByHost.has(hid)) satByHost.set(hid, []);
+        satByHost.get(hid).push(node);
+        return;
+      }
+      mains.push(node);
+    });
+    mains.sort((a, b) => {
+      if (!!a.data("seed") !== !!b.data("seed")) return a.data("seed") ? -1 : 1;
+      return String(a.data("name") || a.data("label") || "").localeCompare(
+        String(b.data("name") || b.data("label") || ""),
+        "pt"
+      );
+    });
+    const out = [];
+    const used = new Set();
+    mains.forEach((node) => {
+      out.push(node);
+      (satByHost.get(node.id()) || []).forEach((sat) => {
+        out.push(sat);
+        used.add(sat.id());
+      });
+    });
+    satByHost.forEach((sats) => {
+      sats.forEach((sat) => {
+        if (!used.has(sat.id())) out.push(sat);
+      });
+    });
+    return out;
   }
 
   function removeCategoryLabels() {
@@ -547,15 +622,8 @@
     const wrapAfter = 14;
     let cursorX = 0;
     CATEGORY_ORDER.forEach((cat) => {
-      const list = groups.get(cat.id) || [];
+      const list = orderCategoryNodes(groups.get(cat.id) || []);
       if (!list.length) return;
-      list.sort((a, b) => {
-        if (!!a.data("seed") !== !!b.data("seed")) return a.data("seed") ? -1 : 1;
-        return String(a.data("name") || a.data("label") || "").localeCompare(
-          String(b.data("name") || b.data("label") || ""),
-          "pt"
-        );
-      });
       const cols = Math.max(1, Math.ceil(list.length / wrapAfter));
       const heights = Array.from({ length: cols }, () => 58);
       cy.add({
@@ -1119,14 +1187,21 @@
     return wrap;
   }
 
+  function normalizeOfficialUrl(url) {
+    return String(url || "")
+      .replace(/(\/entities\/)q(\d+)/i, "$1Q$2")
+      .replace(/(\/wiki\/)q(\d+)/i, "$1Q$2");
+  }
+
   function officialUrl(rec, el) {
     const bag = (rec && rec.attrs) || (el && el.data && el.data("attrs")) || {};
+    if (bag.fonte_ok === false) return "";
     for (const key of ["maps_url", "page_url", "fonte"]) {
       const val = String(bag[key] || "");
-      if (/^https?:\/\//i.test(val)) return val;
+      if (/^https?:\/\//i.test(val)) return normalizeOfficialUrl(val);
     }
     const key = (rec && rec.key) || (el && el.data && el.data("key")) || "";
-    if (String(key).indexOf("url:") === 0) return String(key).slice(4);
+    if (String(key).indexOf("url:") === 0) return normalizeOfficialUrl(String(key).slice(4));
     return "";
   }
 
@@ -1136,13 +1211,19 @@
 
   function applyPreviewMap(previews) {
     Object.entries(previews || {}).forEach(([id, bag]) => {
-      if (!bag || !bag.thumb) return;
       const rec = nodeIndex.get(id);
-      if (rec) rec.attrs = { ...(rec.attrs || {}), ...bag };
+      const proxy = root.dataset.entityBase ? root.dataset.entityBase + id + "/thumb" : (bag && bag.thumb) || "";
+      if (rec) rec.attrs = { ...(rec.attrs || {}), ...bag, thumb: proxy };
       const el = cy.getElementById(id);
       if (!el.nonempty()) return;
-      const attrs = { ...(el.data("attrs") || {}), ...bag };
-      el.data({ thumb: bag.thumb, attrs, tipo: attrs.tipo || el.data("tipo") || "" });
+      const attrs = { ...(el.data("attrs") || {}), ...bag, thumb: proxy };
+      el.data({
+        thumb: proxy,
+        attrs,
+        tipo: attrs.tipo || el.data("tipo") || "",
+        name: bag.og_title || el.data("name"),
+        label: cardLabel({ ...rec, label: bag.og_title || (rec && rec.label) || el.data("name"), attrs, type: el.data("type"), id }),
+      });
     });
   }
 
@@ -1413,10 +1494,32 @@
         const src = document.createElement("a");
         src.className = "btn primary";
         src.href = sourceUrl;
-        src.target = "_blank";
         src.rel = "noopener noreferrer";
         src.textContent = /google\.com\/maps/i.test(sourceUrl) ? "Abrir no Google Maps" : "Abrir fonte oficial";
-        src.addEventListener("click", (event) => event.stopPropagation());
+        src.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (/google\.com\/maps/i.test(sourceUrl)) {
+            window.open(sourceUrl, "_blank", "noopener,noreferrer");
+            return;
+          }
+          const statusUrl = root.dataset.entityBase ? root.dataset.entityBase + el.id() + "/fonte-status" : "";
+          src.textContent = "Verificando fonte…";
+          try {
+            const res = await fetch(statusUrl, { credentials: "same-origin", headers: { Accept: "application/json" } });
+            const data = res.ok ? await res.json() : {};
+            if (data.ok && data.final_url) {
+              window.open(data.final_url, "_blank", "noopener,noreferrer");
+              src.href = data.final_url;
+              src.textContent = /google\.com\/maps/i.test(sourceUrl) ? "Abrir no Google Maps" : "Abrir fonte oficial";
+              return;
+            }
+          } catch (_) {}
+          src.removeAttribute("href");
+          src.classList.remove("primary");
+          src.textContent = "Fonte não encontrada";
+          if (gbLead) gbLead.textContent = "A página oficial não existe (404). Esta fonte não será aberta.";
+        });
         gbActions.appendChild(src);
       }
       const probe = document.createElement("button");

@@ -1633,6 +1633,44 @@ def entity_source_file(
     )
 
 
+@router.get("/app/casos/{investigation_id}/entidades/{entity_id}/fonte-status")
+def entity_source_status(
+    investigation_id: str,
+    entity_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> JSONResponse:
+    """Confere se a fonte oficial ainda existe — evita abrir 404."""
+    from osint4all.graph.preview import entity_source_url, normalize_official_url, verify_source_url
+
+    entity = session.get(Entity, entity_id)
+    if not entity or entity.investigation_id != investigation_id:
+        return JSONResponse({"ok": False, "reason": "não encontrado"}, status_code=404)
+    raw = entity_source_url(entity) or (
+        entity.canonical_key[4:] if str(entity.canonical_key or "").startswith("url:") else ""
+    )
+    url = normalize_official_url(raw)
+    check = verify_source_url(url)
+    return JSONResponse(check)
+
+
+@router.get("/app/casos/{investigation_id}/entidades/{entity_id}/thumb")
+def entity_thumb(
+    investigation_id: str,
+    entity_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> Response:
+    """Miniatura sempre válida: foto da fonte ou cartão com o texto (PDF/matéria/perfil)."""
+    from osint4all.graph.preview import build_entity_thumb
+
+    entity = session.get(Entity, entity_id)
+    if not entity or entity.investigation_id != investigation_id:
+        return JSONResponse({"detail": "não encontrado"}, status_code=404)
+    data, ctype = build_entity_thumb(entity)
+    return Response(content=data, media_type=ctype or "image/svg+xml", headers={"Cache-Control": "private, max-age=300"})
+
+
 @router.post("/app/casos/{investigation_id}/previews")
 async def graph_previews_refresh(
     investigation_id: str,

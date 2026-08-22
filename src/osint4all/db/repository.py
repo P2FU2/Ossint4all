@@ -853,9 +853,11 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "bairro",
                     "cnae_codigo",
                     "description",
+                    "remote_thumb",
+                    "fonte_ok",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
-            }, url=entity_source_url(e), entity_type=e.entity_type),
+            }, url=entity_source_url(e), entity_type=e.entity_type, entity_id=e.id, investigation_id=investigation_id),
         }
         for e in entities
     ]
@@ -958,8 +960,8 @@ def save_graph_layout(session: Session, investigation_id: str, payload: dict[str
     return layout
 
 
-def persist_missing_previews(session: Session, investigation_id: str, *, limit: int = 16) -> dict[str, dict[str, str]]:
-    """Preenche foto/título em perfil e publicação que ainda não têm prévia."""
+def persist_missing_previews(session: Session, investigation_id: str, *, limit: int = 24) -> dict[str, dict[str, str]]:
+    """Guarda título, texto e URL remota da foto. A miniatura do grafo sai pelo proxy do caso."""
     rows = session.scalars(select(Entity).where(Entity.investigation_id == investigation_id)).all()
     out: dict[str, dict[str, str]] = {}
     fetched = 0
@@ -970,32 +972,37 @@ def persist_missing_previews(session: Session, investigation_id: str, *, limit: 
         url = entity_source_url(entity)
         if not url.startswith("http"):
             continue
-        if attrs.get("thumb") and (attrs.get("og_title") or entity.entity_type == "PROFILE"):
-            if attrs.get("thumb"):
-                out[entity.id] = {key: str(attrs[key]) for key in ("thumb", "og_title", "description", "preview_kind") if attrs.get(key)}
-            continue
-        extra = fetch_preview(url) if fetched < limit else {}
-        if extra:
+        ready = bool(attrs.get("og_title") or attrs.get("description") or attrs.get("remote_thumb") or attrs.get("snippet"))
+        extra = {}
+        if not ready and fetched < limit:
+            extra = fetch_preview(url)
             fetched += 1
         changed = False
         for key, val in extra.items():
-            if val not in (None, "", [], {}) and not attrs.get(key):
+            if val in (None, "", [], {}):
+                continue
+            if key == "thumb" and str(val).startswith("http"):
+                if not attrs.get("remote_thumb"):
+                    attrs["remote_thumb"] = val
+                    changed = True
+                continue
+            if not attrs.get(key):
                 attrs[key] = val
                 changed = True
-        if not attrs.get("thumb"):
+        if entity.entity_type == "PROFILE" and not attrs.get("remote_thumb"):
             avatar = social_avatar_url(url, str(attrs.get("username") or ""), str(attrs.get("network") or ""))
             if avatar:
-                attrs["thumb"] = avatar
+                attrs["remote_thumb"] = avatar
                 changed = True
         if changed:
             entity.attrs = attrs
             flag_modified(entity, "attrs")
-        if attrs.get("thumb") or attrs.get("og_title"):
-            out[entity.id] = {
-                key: str(attrs[key])
-                for key in ("thumb", "og_title", "description", "preview_kind")
-                if attrs.get(key)
-            }
+        out[entity.id] = {
+            key: str(attrs[key])
+            for key in ("og_title", "description", "preview_kind", "snippet", "remote_thumb")
+            if attrs.get(key)
+        }
+        out[entity.id]["thumb"] = f"/app/casos/{investigation_id}/entidades/{entity.id}/thumb"
     return out
 
 
