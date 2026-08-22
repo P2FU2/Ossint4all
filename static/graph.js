@@ -81,12 +81,32 @@
     return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
   }
 
+  function isBrandThumb(url) {
+    return /opensanctions|favicon|wordmark|apple-touch|\/logo[./_-]|brand-logo|og-logo/i.test(String(url || ""));
+  }
+
+  function isPersonPortrait(n) {
+    const attrs = (n && n.attrs) || {};
+    const photo = String(attrs.profile_photo || "");
+    const source = String(attrs.profile_photo_source || "");
+    if (!photo || isBrandThumb(photo)) return false;
+    if (/^\/app\/casos\//.test(photo)) return true;
+    if (/^(wikidata|wikipedia|tse|oficial|manual|camara|senado)$/i.test(source)) return true;
+    return /upload\.wikimedia|commons\.wikimedia|divulgacandcontas\.tse|camara\.leg\.br|senado\.leg\.br/i.test(photo);
+  }
+
   function nodeThumb(n) {
     if ((n.type === "PROFILE" || n.type === "PUBLICATION") && n.id && root.dataset.entityBase) {
       return root.dataset.entityBase + n.id + "/thumb";
     }
+    if (n.type === "PERSON") {
+      if (!isPersonPortrait(n)) return "";
+      const photo = String((n.attrs || {}).profile_photo || (n.attrs || {}).thumb || "");
+      return photo;
+    }
     const attrs = n.attrs || {};
     const thumb = attrs.thumb || attrs.profile_photo || "";
+    if (isBrandThumb(thumb)) return "";
     if (thumb && (thumb.indexOf("/app/casos/") === 0 || /^https?:\/\//i.test(thumb) || thumb.indexOf("data:image") === 0)) {
       return thumb;
     }
@@ -95,9 +115,11 @@
 
   function isPhotoCard(n) {
     const attrs = n.attrs || {};
+    if (n.type === "PERSON") return isPersonPortrait(n);
     if (attrs.tipo === "imagem" || attrs.tipo === "pdf" || attrs.preview_kind === "pdf") return true;
+    if (n.type === "PUBLICATION" || n.type === "PROFILE") return true;
     if (attrs.thumb || attrs.profile_photo) {
-      return n.type === "PERSON" || n.type === "PUBLICATION" || n.type === "PROFILE";
+      return n.type === "PUBLICATION" || n.type === "PROFILE";
     }
     return false;
   }
@@ -1272,7 +1294,8 @@
         const url = officialUrl({ attrs, key: node.data("key") }, node);
         const kind = attrs.preview_kind || attrs.tipo || "";
         const thumb = String(node.data("thumb") || "");
-        return (kind === "pdf" || urlLooksPdf(url)) && (!thumb || thumb.indexOf("data:image/svg") === 0);
+        const alreadyPage = thumb.indexOf("data:image/jpeg") === 0 || thumb.indexOf("data:image/png") === 0;
+        return (kind === "pdf" || urlLooksPdf(url)) && !alreadyPage;
       });
       if (setupPdfJs()) {
         const list = pdfs.toArray().slice(0, 14);
@@ -1328,12 +1351,28 @@
       wrap.appendChild(kicker);
     }
 
-    if (isPdf && (entityId || sourceUrl)) {
-      const frame = document.createElement("iframe");
-      frame.className = "graph-balloon-embed graph-balloon-pdf";
-      frame.src = fonteUrl(entityId) || sourceUrl;
-      frame.title = "Prévia do PDF";
-      wrap.appendChild(frame);
+    const proxyThumb = entityId && root.dataset.entityBase ? root.dataset.entityBase + entityId + "/thumb" : "";
+    const showThumb = (src) => {
+      if (!src) return;
+      const pic = document.createElement("img");
+      pic.className = "graph-balloon-thumb" + (isPdf ? " graph-balloon-pdf-thumb" : "");
+      pic.src = src;
+      pic.alt = title || "";
+      pic.referrerPolicy = "no-referrer";
+      wrap.appendChild(pic);
+      return pic;
+    };
+
+    if (isPdf) {
+      const pic = showThumb(
+        (thumb && thumb.indexOf("data:image") === 0) ? thumb : (proxyThumb || thumb)
+      );
+      if (entityId && setupPdfJs()) {
+        renderPdfThumb(entityId).then((dataUrl) => {
+          if (!dataUrl || !pic) return;
+          pic.src = dataUrl;
+        }).catch(() => {});
+      }
     } else if (embed) {
       const frame = document.createElement("iframe");
       frame.className = "graph-balloon-embed";
@@ -1341,13 +1380,10 @@
       frame.title = "Prévia";
       frame.allow = "accelerometer; autoplay; encrypted-media; picture-in-picture";
       wrap.appendChild(frame);
-    } else if (thumb && (/^https?:\/\//i.test(thumb) || thumb.indexOf("data:image") === 0)) {
-      const pic = document.createElement("img");
-      pic.className = "graph-balloon-thumb";
-      pic.src = thumb;
-      pic.alt = title || "";
-      pic.referrerPolicy = "no-referrer";
-      wrap.appendChild(pic);
+    } else if (isStory || isSocial) {
+      showThumb((thumb && (thumb.indexOf("data:image") === 0 || thumb.indexOf("/app/casos/") === 0)) ? thumb : (proxyThumb || thumb));
+    } else if (thumb && (/^https?:\/\//i.test(thumb) || thumb.indexOf("data:image") === 0 || thumb.indexOf("/app/casos/") === 0)) {
+      showThumb(thumb);
     }
 
     if (isStory || isSocial) {

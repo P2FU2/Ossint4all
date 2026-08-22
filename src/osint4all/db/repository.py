@@ -51,7 +51,8 @@ from osint4all.graph.identity import (
     names_same_person,
     profile_from_fields,
 )
-from osint4all.graph.preview import decorate_graph_attrs, entity_source_url, fetch_preview, social_avatar_url
+from osint4all.graph.preview import decorate_graph_attrs, entity_source_url, fetch_preview, looks_like_pdf, social_avatar_url
+from osint4all.graph.public_links import is_brand_image
 from osint4all.security import only_digits
 from osint4all.identifiers import STRONG_ID_KINDS
 
@@ -972,7 +973,10 @@ def persist_missing_previews(session: Session, investigation_id: str, *, limit: 
         url = entity_source_url(entity)
         if not url.startswith("http"):
             continue
+        is_pdf = looks_like_pdf(url) or str(attrs.get("preview_kind") or attrs.get("tipo") or "") == "pdf"
         ready = bool(attrs.get("og_title") or attrs.get("description") or attrs.get("remote_thumb") or attrs.get("snippet"))
+        if is_pdf and not attrs.get("description"):
+            ready = False
         extra = {}
         if not ready and fetched < limit:
             extra = fetch_preview(url)
@@ -982,6 +986,8 @@ def persist_missing_previews(session: Session, investigation_id: str, *, limit: 
             if val in (None, "", [], {}):
                 continue
             if key == "thumb" and str(val).startswith("http"):
+                if is_brand_image(str(val)):
+                    continue
                 if not attrs.get("remote_thumb"):
                     attrs["remote_thumb"] = val
                     changed = True
@@ -991,7 +997,7 @@ def persist_missing_previews(session: Session, investigation_id: str, *, limit: 
                 changed = True
         if entity.entity_type == "PROFILE" and not attrs.get("remote_thumb"):
             avatar = social_avatar_url(url, str(attrs.get("username") or ""), str(attrs.get("network") or ""))
-            if avatar:
+            if avatar and not is_brand_image(avatar):
                 attrs["remote_thumb"] = avatar
                 changed = True
         if changed:

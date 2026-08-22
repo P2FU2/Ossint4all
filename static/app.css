@@ -1539,6 +1539,11 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
 .graph-balloon-pdf {
   height: 260px;
 }
+.graph-balloon-pdf-thumb {
+  max-height: 280px;
+  object-fit: contain;
+  background: #120e08;
+}
 .graph-balloon h2 {
   margin: 4px 0 6px;
   font-size: 0.95rem;

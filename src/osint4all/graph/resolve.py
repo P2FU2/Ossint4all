@@ -24,6 +24,7 @@ from osint4all.db.repository import (
 )
 from osint4all.graph.identity import bind_found_to_profile, found_canonical_key, is_unconfirmed, should_enqueue_child
 from osint4all.graph.preview import enrich_found_entities
+from osint4all.graph.public_links import is_real_person_photo
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
 
 
@@ -33,7 +34,8 @@ def _attach_profile_photo(attrs: dict[str, Any], found: FoundEntity, existing: E
         return
     incoming = dict(found.attrs or {})
     thumb = str(incoming.get("profile_photo") or incoming.get("thumb") or "").strip()
-    if not thumb.startswith(("http://", "https://", "/app/casos/")):
+    source = str(incoming.get("profile_photo_source") or "")
+    if not is_real_person_photo(thumb, source):
         return
     raw_match = incoming.get("identity_match")
     try:

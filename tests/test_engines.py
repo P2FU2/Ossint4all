@@ -263,6 +263,43 @@ def test_graph_payload_keeps_preview_attrs(db) -> None:
     assert attrs["thumb"] == f"/app/casos/{inv.id}/entidades/{pub['id']}/thumb"
 
 
+def test_graph_payload_person_keeps_name_not_opensanctions_logo(db) -> None:
+    seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db, title="PEP", hypothesis=None, seeds=[seed], connectors=[], max_depth=1, monitor=False, created_by="t"
+    )
+    apply_result(
+        db,
+        inv,
+        inv.entities[0],
+        ConnectorResult(
+            entities=[
+                FoundEntity(
+                    entity_type="PERSON",
+                    kind="URL",
+                    value="https://www.opensanctions.org/entities/Q37181",
+                    display_name="Paulo Tarciso Okamotto",
+                    attrs={
+                        "thumb": "https://www.opensanctions.org/static/logo.png",
+                        "page_url": "https://www.opensanctions.org/entities/Q37181",
+                        "tipo": "pep",
+                    },
+                )
+            ]
+        ),
+        connector="opensanctions_public",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=1,
+    )
+    db.flush()
+    payload = graph_payload(db, inv.id)
+    pep = next(n for n in payload["nodes"] if "Okamotto" in (n.get("label") or ""))
+    assert pep["type"] == "PERSON"
+    assert not (pep.get("attrs") or {}).get("thumb")
+    assert not (pep.get("attrs") or {}).get("profile_photo")
+
+
 def test_apply_result_drops_dead_official_source(db) -> None:
     seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
     inv = create_investigation(

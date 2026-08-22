@@ -66,6 +66,29 @@ def test_social_avatar_and_public_url() -> None:
     )
     assert bag["thumb"] == "/app/casos/c1/entidades/e1/thumb"
     assert bag["tipo"] == "social"
+    person = decorate_graph_attrs(
+        {
+            "thumb": "https://www.opensanctions.org/static/opensanctions-logo.png",
+            "page_url": "https://www.opensanctions.org/entities/Q37181",
+            "tipo": "pep",
+        },
+        url="https://www.opensanctions.org/entities/Q37181",
+        entity_type="PERSON",
+        entity_id="p1",
+        investigation_id="c1",
+    )
+    assert not person.get("thumb")
+    assert not person.get("profile_photo")
+    portrait = decorate_graph_attrs(
+        {
+            "profile_photo": "https://upload.wikimedia.org/wikipedia/commons/lula.jpg",
+            "profile_photo_source": "wikidata",
+        },
+        entity_type="PERSON",
+        entity_id="p2",
+        investigation_id="c1",
+    )
+    assert portrait["thumb"].endswith("lula.jpg")
 
 
 def test_preview_from_html_social_resolves_relative_image() -> None:
@@ -136,6 +159,46 @@ def test_card_svg_and_offline_thumb() -> None:
     assert kind == "image/svg+xml"
     assert b"Biografia" in card
     assert b"Texto da" in card
+    assert b"MAT" in card.upper()
+    news_photo = type(
+        "E",
+        (),
+        {
+            "id": "n3",
+            "investigation_id": "",
+            "display_name": "Matéria",
+            "entity_type": "PUBLICATION",
+            "canonical_key": "url:https://g1.exemplo/b",
+            "attrs": {
+                "preview_kind": "article",
+                "og_title": "Título da reportagem",
+                "description": "Lead da matéria impressa.",
+                "remote_thumb": "https://img.exemplo/foto.jpg",
+            },
+        },
+    )()
+    printed, printed_type = build_entity_thumb(news_photo)
+    assert printed_type == "image/svg+xml"
+    assert b"T" in printed and b"reportagem" in printed
+    assert printed.startswith(b"<svg")
+    person = type(
+        "E",
+        (),
+        {
+            "id": "n4",
+            "investigation_id": "",
+            "display_name": "Paulo Tarciso Okamotto",
+            "entity_type": "PERSON",
+            "canonical_key": "url:https://www.opensanctions.org/entities/Q1",
+            "attrs": {
+                "thumb": "https://www.opensanctions.org/static/logo.png",
+                "page_url": "https://www.opensanctions.org/entities/Q1",
+            },
+        },
+    )()
+    name_card, name_type = build_entity_thumb(person)
+    assert name_type == "image/svg+xml"
+    assert b"Paulo" in name_card or b"Okamotto" in name_card
 
 
 def test_attach_preview_pdf_skips_http() -> None:

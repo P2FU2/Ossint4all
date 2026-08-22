@@ -1,4 +1,4 @@
-from osint4all.graph.public_links import is_catalog_portal, is_site_chrome
+from osint4all.graph.public_links import is_brand_image, is_catalog_portal, is_real_person_photo, is_registry_entity_url, is_site_chrome
 from osint4all.graph.media import (
     collect_target_media,
     fields_from_identifiers,
@@ -25,6 +25,10 @@ def test_catalog_portal_and_chrome() -> None:
         "https://www.gstatic.com/images/branding/googlelogo/1x/googlelogo_color_white_background_272x92dp.png"
     )
     assert not is_site_chrome("https://img.exemplo/foto-alvo.jpg", "Eduardo em evento")
+    assert is_brand_image("https://www.opensanctions.org/static/logo.png")
+    assert is_registry_entity_url("https://www.opensanctions.org/entities/Q37181")
+    assert not is_real_person_photo("https://www.opensanctions.org/static/logo.png", "")
+    assert is_real_person_photo("https://upload.wikimedia.org/wikipedia/commons/a.jpg", "wikidata")
 
 
 def test_plan_skips_cpf_and_short_name() -> None:

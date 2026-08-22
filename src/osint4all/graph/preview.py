@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from osint4all.connectors.base import FoundEntity
+from osint4all.graph.public_links import is_brand_image, is_real_person_photo, is_registry_entity_url
 
 _META_RE = re.compile(r"<meta\b[^>]*>", re.I)
 _LINK_RE = re.compile(r"<link\b[^>]*>", re.I)
@@ -195,6 +196,9 @@ def social_avatar_url(url: str, username: str = "", network: str = "") -> str:
     return ""
 
 
+_PRINT_KINDS = frozenset({"article", "social", "pdf", "noticia", "mencao", "diario"})
+
+
 def decorate_graph_attrs(
     attrs: dict[str, Any],
     *,
@@ -206,6 +210,16 @@ def decorate_graph_attrs(
     """Completa thumb/título no payload do grafo. Foto de perfil/matéria vai pelo proxy do caso."""
     source = url or str(attrs.get("page_url") or attrs.get("fonte") or "")
     kind = str(attrs.get("preview_kind") or attrs.get("tipo") or "")
+    if entity_type == "PERSON":
+        attrs.pop("preview_kind", None)
+        photo = str(attrs.get("profile_photo") or attrs.get("thumb") or "")
+        src = str(attrs.get("profile_photo_source") or "")
+        if is_real_person_photo(photo, src):
+            attrs["thumb"] = photo
+        else:
+            attrs.pop("thumb", None)
+            attrs.pop("profile_photo", None)
+        return attrs
     if source and not kind:
         kind = preview_kind_for_url(source)
         attrs["preview_kind"] = kind
@@ -214,7 +228,7 @@ def decorate_graph_attrs(
         attrs.setdefault("preview_kind", "social")
         attrs.setdefault("tipo", "social")
         remote = str(attrs.get("thumb") or attrs.get("remote_thumb") or "")
-        if remote.startswith("http") and "/entidades/" not in remote:
+        if remote.startswith("http") and "/entidades/" not in remote and not is_brand_image(remote):
             attrs.setdefault("remote_thumb", remote)
     if entity_type in {"PROFILE", "PUBLICATION"} and investigation_id and entity_id:
         attrs["thumb"] = f"/app/casos/{investigation_id}/entidades/{entity_id}/thumb"
@@ -391,12 +405,16 @@ def attach_preview(found: FoundEntity) -> FoundEntity:
     url = str(found.value or found.attrs.get("page_url") or "").strip()
     if not url.startswith("http"):
         return found
+    if found.entity_type in {"PERSON", "ORG"} and is_registry_entity_url(url):
+        return found
     attrs = dict(found.attrs or {})
     if attrs.get("thumb") and attrs.get("preview_kind"):
         return found
     extra = fetch_preview(url)
     for key, val in extra.items():
         if val not in (None, "", [], {}) and not attrs.get(key):
+            if key == "thumb" and is_brand_image(str(val)):
+                continue
             attrs[key] = val
     if extra.get("og_title") and (not found.display_name or found.display_name.startswith("http")):
         found.display_name = str(extra["og_title"])[:160]
@@ -412,6 +430,8 @@ def enrich_found_entities(entities: list[FoundEntity]) -> None:
             continue
         url = str(found.value or "").strip()
         if not url.startswith("http"):
+            continue
+        if found.entity_type in {"PERSON", "ORG"} and is_registry_entity_url(url):
             continue
         attrs = dict(found.attrs or {})
         kind = preview_kind_for_url(url)
@@ -461,32 +481,71 @@ def _wrap_lines(text: str, width: int, limit: int) -> list[str]:
     return rows
 
 
-def render_card_svg(*, kicker: str = "", title: str = "", body: str = "", kind: str = "article") -> bytes:
-    """Cartão SVG sempre válido — o nó nunca fica preto."""
+def _inset_jpeg(data: bytes) -> bytes | None:
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        image = Image.open(BytesIO(data))
+        image = image.convert("RGB")
+        image.thumbnail((264, 100))
+        out = BytesIO()
+        image.save(out, "JPEG", quality=70)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def render_card_svg(
+    *,
+    kicker: str = "",
+    title: str = "",
+    body: str = "",
+    kind: str = "article",
+    photo: bytes | None = None,
+) -> bytes:
+    """Cartão no formato de print: cabeçalho + texto (e foto só como faixa, nunca o nó inteiro)."""
+    import base64
+
     pdf = kind == "pdf"
+    social = kind == "social"
     bg = "#120e08" if pdf else "#0c1410"
+    paper = "#1a140c" if pdf else "#101810"
     ink = "#d4b45a" if pdf else "#8fbc8f"
-    title_lines = _wrap_lines(title, 21, 3)
-    body_lines = _wrap_lines(body, 23, 9 if pdf else 6)
-    y = 26
+    inset = _inset_jpeg(photo) if photo else None
+    band = 50 if inset else 0
+    title_lines = _wrap_lines(title, 21, 2 if inset else 3)
+    body_lines = _wrap_lines(body, 23, 5 if inset else (8 if pdf else 6))
+    y = 10 + band
     parts = [
         '<svg xmlns="http://www.w3.org/2000/svg" width="132" height="156" viewBox="0 0 132 156">',
         f'<rect width="132" height="156" fill="{bg}"/>',
-        f'<rect x="5" y="5" width="122" height="146" fill="none" stroke="{ink}" stroke-width="1.2"/>',
-        f'<text x="12" y="{y}" fill="{ink}" font-size="8" font-family="IBM Plex Mono,monospace">{_xml((kicker or kind).upper()[:26])}</text>',
+        f'<rect x="4" y="4" width="124" height="148" fill="{paper}" stroke="{ink}" stroke-width="1.2"/>',
     ]
-    y += 16
+    if inset:
+        b64 = base64.b64encode(inset).decode("ascii")
+        parts.append(
+            f'<image href="data:image/jpeg;base64,{b64}" x="5" y="5" width="122" height="{band - 2}" preserveAspectRatio="xMidYMid slice"/>'
+        )
+        parts.append(f'<rect x="5" y="5" width="122" height="{band - 2}" fill="none" stroke="{ink}" stroke-width="0.6"/>')
+    parts.append(
+        f'<text x="12" y="{y + 12}" fill="{ink}" font-size="7" font-family="IBM Plex Mono,monospace">{_xml((kicker or kind).upper()[:28])}</text>'
+    )
+    y += 24
     for line in title_lines:
         parts.append(
             f'<text x="12" y="{y}" fill="#d7e4dc" font-size="10" font-family="IBM Plex Mono,monospace">{_xml(line)}</text>'
         )
         y += 13
-    y += 4
+    y += 3
     for line in body_lines:
         parts.append(
             f'<text x="12" y="{y}" fill="#8aa394" font-size="8" font-family="IBM Plex Mono,monospace">{_xml(line)}</text>'
         )
         y += 11
+    if social:
+        parts.append(f'<rect x="10" y="148" width="40" height="2" fill="{ink}"/>')
     parts.append("</svg>")
     return "".join(parts).encode("utf-8")
 
@@ -549,7 +608,7 @@ def _thumb_cache_file(entity: Any, suffix: str):
         return None
     from osint4all.paths import project_root
 
-    folder = project_root() / "data" / "uploads" / inv / "thumbs"
+    folder = project_root() / "data" / "uploads" / inv / "thumbs-v2"
     folder.mkdir(parents=True, exist_ok=True)
     return folder / f"{eid}{suffix}"
 
@@ -579,7 +638,7 @@ def _write_thumb_cache(entity: Any, data: bytes, ctype: str) -> None:
 
 
 def build_entity_thumb(entity: Any) -> tuple[bytes, str]:
-    """Devolve sempre uma imagem (foto real ou cartão com o texto da fonte)."""
+    """Print da fonte (PDF/matéria/perfil) ou foto só quando for imagem real."""
     cached = _read_thumb_cache(entity)
     if cached:
         return cached
@@ -588,8 +647,21 @@ def build_entity_thumb(entity: Any) -> tuple[bytes, str]:
     body = str(attrs.get("description") or attrs.get("snippet") or "")
     url = entity_source_url(entity)
     kind = str(attrs.get("preview_kind") or attrs.get("tipo") or (preview_kind_for_url(url) if url else "article"))
+    if kind in {"noticia", "mencao", "diario"}:
+        kind = "article"
     network = str(attrs.get("network") or "")
     user = str(attrs.get("username") or username_from_url(url))
+    entity_type = str(getattr(entity, "entity_type", "") or "")
+    photo: bytes | None = None
+    if entity_type == "PERSON":
+        portrait = str(attrs.get("profile_photo") or "")
+        if _live() and is_real_person_photo(portrait, str(attrs.get("profile_photo_source") or "")):
+            raw, ctype = _fetch_bytes(portrait)
+            if _is_image_bytes(raw, ctype):
+                _write_thumb_cache(entity, raw, ctype or "image/jpeg")
+                return raw, ctype or "image/jpeg"
+        svg = render_card_svg(kicker="Pessoa", title=title, body=body, kind="article")
+        return svg, "image/svg+xml"
     if _live():
         seen: set[str] = set()
         for cand in (
@@ -598,24 +670,27 @@ def build_entity_thumb(entity: Any) -> tuple[bytes, str]:
             str(attrs.get("profile_photo") or ""),
             social_avatar_url(url, user, network) if kind == "social" else "",
         ):
-            if not cand.startswith("http") or "/entidades/" in cand or cand in seen:
+            if not cand.startswith("http") or "/entidades/" in cand or cand in seen or is_brand_image(cand):
                 continue
             seen.add(cand)
             raw, ctype = _fetch_bytes(cand)
             if _is_image_bytes(raw, ctype):
+                if kind in _PRINT_KINDS:
+                    photo = raw
+                    break
                 _write_thumb_cache(entity, raw, ctype or "image/jpeg")
                 return raw, ctype or "image/jpeg"
         if is_public_http_url(url):
             raw, ctype = _fetch_bytes(url)
             if raw.startswith(b"%PDF") or "pdf" in ctype or looks_like_pdf(url):
                 text = pdf_first_page_text(raw) or body
-                svg = render_card_svg(kicker="PDF · documento", title=title, body=text or title, kind="pdf")
+                svg = render_card_svg(kicker="PDF · 1ª página", title=title, body=text or title, kind="pdf")
                 _write_thumb_cache(entity, svg, "image/svg+xml")
                 return svg, "image/svg+xml"
-            if _is_image_bytes(raw, ctype):
+            if _is_image_bytes(raw, ctype) and kind in {"image", "imagem"}:
                 _write_thumb_cache(entity, raw, ctype or "image/jpeg")
                 return raw, ctype or "image/jpeg"
-            if raw:
+            if raw and kind != "pdf":
                 html = raw.decode("utf-8", errors="ignore")[:80000]
                 og = parse_open_graph(html, base_url=url)
                 if og.get("og_title"):
@@ -623,21 +698,26 @@ def build_entity_thumb(entity: Any) -> tuple[bytes, str]:
                 if og.get("description"):
                     body = og["description"]
                 image = og.get("thumb") or ""
-                if image.startswith("http"):
+                if image.startswith("http") and not is_brand_image(image) and photo is None:
                     img, ictype = _fetch_bytes(image)
                     if _is_image_bytes(img, ictype):
-                        _write_thumb_cache(entity, img, ictype or "image/jpeg")
-                        return img, ictype or "image/jpeg"
+                        photo = img
     if kind == "social":
-        kicker = network or "Rede social"
+        kicker = (network or "Rede social") + (f" · @{user}" if user else "")
         if user and (not title or title.startswith("http")):
-            title = f"{kicker} · @{user}"
+            title = f"@{user}"
         body = body or (f"perfil público @{user}" if user else "perfil público")
     elif kind == "pdf":
         kicker = "PDF · documento"
     else:
         kicker = "Matéria"
-    svg = render_card_svg(kicker=kicker, title=title, body=body or title, kind="pdf" if kind == "pdf" else kind)
+    svg = render_card_svg(
+        kicker=kicker,
+        title=title,
+        body=body or title,
+        kind="pdf" if kind == "pdf" else kind,
+        photo=photo,
+    )
     if _live():
         _write_thumb_cache(entity, svg, "image/svg+xml")
     return svg, "image/svg+xml"
