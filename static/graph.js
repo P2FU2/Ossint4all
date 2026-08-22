@@ -447,10 +447,7 @@
     const view = activeView();
     const pan = cy.pan();
     const prev = payload.layout || {};
-    const nodes =
-      view === "arvore" || view === "ordenar"
-        ? { ...savedNodeMap(), ...((prev.nodes) || {}) }
-        : capturePositions();
+    const nodes = capturePositions();
     const snap = {
       view,
       zoom: cy.zoom(),
@@ -596,6 +593,54 @@
     const box = visibleElements();
     if (box.nodes().length) cy.fit(box, 56);
     laidOnce = true;
+    layoutLocked = true;
+    scheduleSaveLayout();
+  }
+
+  function placeCategoryLabelsFromPositions() {
+    removeCategoryLabels();
+    const groups = new Map(CATEGORY_ORDER.map((cat) => [cat.id, []]));
+    cy.nodes().forEach((node) => {
+      if (isCategoryLabel(node) || node.style("display") === "none") return;
+      const id = nodeCategory(node);
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(node);
+    });
+    CATEGORY_ORDER.forEach((cat) => {
+      const list = groups.get(cat.id) || [];
+      if (!list.length) return;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      list.forEach((node) => {
+        const pos = node.position();
+        minX = Math.min(minX, pos.x);
+        maxX = Math.max(maxX, pos.x);
+        minY = Math.min(minY, pos.y - node.outerHeight() / 2);
+      });
+      cy.add({
+        group: "nodes",
+        selectable: false,
+        grabbable: false,
+        data: {
+          id: "cat:" + cat.id,
+          name: cat.label,
+          label: cat.label,
+          type: "NOTE",
+          kind: "category",
+          cat: cat.id,
+          attrs: {},
+          ids: [],
+          thumb: "",
+          tipo: "",
+          seed: false,
+          status: "confirmed",
+          depth: 0,
+          key: "",
+        },
+        position: { x: (minX + maxX) / 2, y: minY - 36 },
+      });
+    });
   }
 
   function applyLayout(view) {
@@ -858,7 +903,8 @@
     return (active && active.dataset.view) || "rede";
   }
 
-  function setView(view) {
+  function setView(view, opts) {
+    const restore = !!(opts && opts.restore);
     document.querySelectorAll(".view-tab").forEach((btn) => {
       btn.classList.toggle("is-active", btn.dataset.view === view);
     });
@@ -879,14 +925,26 @@
     if (view === "mapa") renderMap();
     const sortBtn = document.getElementById("ct-sort");
     if (sortBtn) sortBtn.setAttribute("aria-pressed", view === "ordenar" ? "true" : "false");
-    if (view === "arvore" || view === "ordenar") applyLayout(view);
-    else if (view !== "mapa") {
+    if (view === "mapa") {
       removeCategoryLabels();
-      if (hasLockedLayout()) applySavedPositions(savedNodeMap());
-      else applyLayout(view);
-    } else {
-      removeCategoryLabels();
+      return;
     }
+    if (restore && hasLockedLayout()) {
+      applySavedPositions(savedNodeMap());
+      if (view === "ordenar") placeCategoryLabelsFromPositions();
+      else removeCategoryLabels();
+      laidOnce = true;
+      return;
+    }
+    if (view === "arvore" || view === "ordenar") {
+      applyLayout(view);
+      layoutLocked = true;
+      scheduleSaveLayout();
+      return;
+    }
+    removeCategoryLabels();
+    if (hasLockedLayout()) applySavedPositions(savedNodeMap());
+    else applyLayout(view);
   }
 
   function patchElements(data) {
@@ -974,22 +1032,21 @@
       laidOnce = true;
       if (nextView === "split") renderSplit();
       if (nextView === "mapa") renderMap();
+      if (nextView === "ordenar") placeCategoryLabelsFromPositions();
     } else {
-      setView(nextView);
-      if (layoutLocked && nextView !== "arvore" && nextView !== "ordenar") {
-        const layout = payload.layout || {};
-        if (layout.zoom) {
-          applySnapshot({ kind: "cy", zoom: layout.zoom, x: (layout.pan || {}).x || 0, y: (layout.pan || {}).y || 0 });
-        } else {
-          cy.fit(undefined, 48);
-        }
-        laidOnce = true;
-      } else if (!layoutLocked) {
-        scheduleSaveLayout();
+      setView(nextView, { restore: true });
+      const layout = payload.layout || {};
+      if (layout.zoom) {
+        applySnapshot({ kind: "cy", zoom: layout.zoom, x: (layout.pan || {}).x || 0, y: (layout.pan || {}).y || 0 });
+      } else {
+        cy.fit(undefined, 48);
       }
+      laidOnce = true;
+      if (!layoutLocked) scheduleSaveLayout();
       applyFilters();
     }
     lastLoadAt = Date.now();
+    hydrateMedia();
   }
 
   const TYPE_LABEL = {
@@ -1073,7 +1130,89 @@
     return "";
   }
 
-  function buildSourcePreview(attrs, sourceUrl, type, fallbackThumb) {
+  function fonteUrl(id) {
+    return id && root.dataset.entityBase ? root.dataset.entityBase + id + "/fonte" : "";
+  }
+
+  function applyPreviewMap(previews) {
+    Object.entries(previews || {}).forEach(([id, bag]) => {
+      if (!bag || !bag.thumb) return;
+      const rec = nodeIndex.get(id);
+      if (rec) rec.attrs = { ...(rec.attrs || {}), ...bag };
+      const el = cy.getElementById(id);
+      if (!el.nonempty()) return;
+      const attrs = { ...(el.data("attrs") || {}), ...bag };
+      el.data({ thumb: bag.thumb, attrs, tipo: attrs.tipo || el.data("tipo") || "" });
+    });
+  }
+
+  function setupPdfJs() {
+    const lib = window.pdfjsLib;
+    if (!lib) return null;
+    if (!lib.GlobalWorkerOptions.workerSrc) {
+      lib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+    }
+    return lib;
+  }
+
+  async function renderPdfThumb(entityId) {
+    const lib = setupPdfJs();
+    if (!lib) throw new Error("pdfjs");
+    const pdf = await lib.getDocument({ url: fonteUrl(entityId), withCredentials: true }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 0.55 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(viewport.width));
+    canvas.height = Math.max(1, Math.floor(viewport.height));
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport, intent: "display" }).promise;
+    return canvas.toDataURL("image/jpeg", 0.74);
+  }
+
+  let hydrating = false;
+  async function hydrateMedia() {
+    if (hydrating) return;
+    hydrating = true;
+    try {
+      if (root.dataset.previewUrl) {
+        const res = await fetch(root.dataset.previewUrl, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csrf_token: csrfToken() }),
+        });
+        if (res.ok) {
+          const body = await res.json();
+          applyPreviewMap(body.previews);
+        }
+      }
+      const pdfs = cy.nodes().filter((node) => {
+        if (isCategoryLabel(node)) return false;
+        const attrs = node.data("attrs") || {};
+        const url = officialUrl({ attrs, key: node.data("key") }, node);
+        const kind = attrs.preview_kind || attrs.tipo || "";
+        const thumb = String(node.data("thumb") || "");
+        return (kind === "pdf" || urlLooksPdf(url)) && (!thumb || thumb.indexOf("data:image/svg") === 0);
+      });
+      if (setupPdfJs()) {
+        const list = pdfs.toArray().slice(0, 14);
+        for (let i = 0; i < list.length; i += 1) {
+          try {
+            const node = list[i];
+            const dataUrl = await renderPdfThumb(node.id());
+            node.data("thumb", dataUrl);
+            const attrs = { ...(node.data("attrs") || {}), thumb: dataUrl };
+            node.data("attrs", attrs);
+            const rec = nodeIndex.get(node.id());
+            if (rec) rec.attrs = attrs;
+          } catch (_) {}
+        }
+      }
+    } finally {
+      hydrating = false;
+    }
+  }
+
+  function buildSourcePreview(attrs, sourceUrl, type, fallbackThumb, entityId) {
     const wrap = document.createElement("div");
     wrap.className = "graph-balloon-preview";
     const kind = String(attrs.preview_kind || attrs.tipo || (urlLooksPdf(sourceUrl) ? "pdf" : "") || "");
@@ -1108,10 +1247,10 @@
       wrap.appendChild(kicker);
     }
 
-    if (isPdf && sourceUrl) {
+    if (isPdf && (entityId || sourceUrl)) {
       const frame = document.createElement("iframe");
       frame.className = "graph-balloon-embed graph-balloon-pdf";
-      frame.src = sourceUrl;
+      frame.src = fonteUrl(entityId) || sourceUrl;
       frame.title = "Prévia do PDF";
       wrap.appendChild(frame);
     } else if (embed) {
@@ -1121,7 +1260,7 @@
       frame.title = "Prévia";
       frame.allow = "accelerometer; autoplay; encrypted-media; picture-in-picture";
       wrap.appendChild(frame);
-    } else if (thumb && /^https?:\/\//i.test(thumb)) {
+    } else if (thumb && (/^https?:\/\//i.test(thumb) || thumb.indexOf("data:image") === 0)) {
       const pic = document.createElement("img");
       pic.className = "graph-balloon-thumb";
       pic.src = thumb;
@@ -1236,7 +1375,7 @@
       const lng = Number(attrs.lng);
       const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
       if (!hasGeo) {
-        const preview = buildSourcePreview(attrs, sourceUrl, type, el.data("thumb") || "");
+        const preview = buildSourcePreview(attrs, sourceUrl, type, el.data("thumb") || "", el.id());
         if (preview.childNodes.length) gbFacts.appendChild(preview);
       }
       if (hasGeo) {
@@ -1526,7 +1665,10 @@
     closeBalloon();
     window.clearTimeout(filterTimer);
     filterTimer = window.setTimeout(() => {
-      if (activeView() === "arvore" || activeView() === "ordenar" || !hasLockedLayout()) applyLayout(activeView());
+      const view = activeView();
+      if (view === "mapa") return;
+      if (!hasLockedLayout()) applyLayout(view);
+      else if (view === "ordenar") placeCategoryLabelsFromPositions();
     }, 160);
   }
   const filterBox = document.getElementById("graph-filters");

@@ -3,11 +3,14 @@ from osint4all.connectors.username_public import parse_public_hits
 from osint4all.connectors.web_search import parse_web_hits
 from osint4all.graph.preview import (
     attach_preview,
+    decorate_graph_attrs,
     enrich_found_entities,
+    is_public_http_url,
     looks_like_pdf,
     parse_open_graph,
     preview_from_html,
     preview_kind_for_url,
+    social_avatar_url,
     youtube_embed,
 )
 
@@ -41,6 +44,20 @@ def test_open_graph_and_kinds() -> None:
     assert preview_kind_for_url("https://g1.globo.com/politica/a") == "article"
     assert looks_like_pdf("https://in.gov.br/arquivo.pdf?download=1")
     assert youtube_embed("https://www.youtube.com/watch?v=dQw4w9wgGcQ") == "https://www.youtube.com/embed/dQw4w9wgGcQ"
+
+
+def test_social_avatar_and_public_url() -> None:
+    assert social_avatar_url("https://github.com/alice", "alice", "GitHub") == "https://github.com/alice.png?size=240"
+    assert "unavatar.io/twitter/lulaoficial" in social_avatar_url("https://x.com/lulaoficial", "lulaoficial", "X")
+    assert is_public_http_url("https://in.gov.br/ato.pdf")
+    assert not is_public_http_url("http://127.0.0.1/x")
+    assert not is_public_http_url("http://192.168.0.8/x")
+    bag = decorate_graph_attrs(
+        {"network": "YouTube", "username": "lulaoficial", "preview_kind": "social"},
+        url="https://www.youtube.com/@lulaoficial",
+        entity_type="PROFILE",
+    )
+    assert bag["thumb"].startswith("https://unavatar.io/youtube/")
 
 
 def test_preview_from_html_social_resolves_relative_image() -> None:

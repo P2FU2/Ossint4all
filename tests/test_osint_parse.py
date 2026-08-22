@@ -121,6 +121,7 @@ def test_username_public_hits() -> None:
     result = parse_public_hits([("GitHub", "https://github.com/alice")], origin_key="username:alice", user="alice")
     assert result.entities[0].entity_type == "PROFILE"
     assert "@alice" in result.entities[0].display_name
+    assert result.entities[0].attrs["thumb"] == "https://github.com/alice.png?size=240"
 
 
 def test_username_rejects_platform_brand_overlap() -> None:

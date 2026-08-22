@@ -633,6 +633,14 @@ def test_graph_layout_persists_on_case(settings, db) -> None:
     payload = graph_payload(db, inv.id)
     assert payload["layout"]["pan"]["x"] == 40
     assert payload["layout"]["nodes"][entity.id]["y"] == 222.8
+    ordered = save_graph_layout(
+        db,
+        inv.id,
+        {"view": "ordenar", "zoom": 0.9, "pan": {"x": 0, "y": 0}, "nodes": {entity.id: {"x": 10, "y": 20}}},
+    )
+    assert ordered is not None
+    assert ordered["view"] == "ordenar"
+    assert ordered["nodes"][entity.id] == {"x": 10.0, "y": 20.0}
 
 
 def test_person_profile_birth_and_parents(settings, db) -> None:

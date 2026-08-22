@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, or_, select, update
 
 _SYNC_OFF = {"synchronize_session": False}
 from sqlalchemy.orm import Session, load_only, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from osint4all.db.models import (
     BlockedKey,
@@ -50,6 +51,7 @@ from osint4all.graph.identity import (
     names_same_person,
     profile_from_fields,
 )
+from osint4all.graph.preview import decorate_graph_attrs, entity_source_url, fetch_preview, social_avatar_url
 from osint4all.security import only_digits
 from osint4all.identifiers import STRONG_ID_KINDS
 
@@ -777,7 +779,7 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
             "key": e.canonical_key,
             "status": entity_status(e),
             "ids": _card_ids(e),
-            "attrs": {
+            "attrs": decorate_graph_attrs({
                 k: e.attrs.get(k)
                 for k in (
                     "razao_social",
@@ -853,7 +855,7 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "description",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
-            },
+            }, url=entity_source_url(e), entity_type=e.entity_type),
         }
         for e in entities
     ]
@@ -920,7 +922,7 @@ def save_graph_layout(session: Session, investigation_id: str, payload: dict[str
         nodes[str(entity_id)] = {"x": round(x, 2), "y": round(y, 2)}
         if len(nodes) >= 2500:
             break
-    view = payload.get("view") if payload.get("view") in {"rede", "arvore", "split", "mapa"} else "rede"
+    view = payload.get("view") if payload.get("view") in {"rede", "arvore", "split", "mapa", "ordenar"} else "rede"
     try:
         zoom = float(payload.get("zoom"))
     except (TypeError, ValueError):
@@ -954,6 +956,47 @@ def save_graph_layout(session: Session, investigation_id: str, payload: dict[str
         layout["map"] = map_view
     inv.graph_layout = layout
     return layout
+
+
+def persist_missing_previews(session: Session, investigation_id: str, *, limit: int = 16) -> dict[str, dict[str, str]]:
+    """Preenche foto/título em perfil e publicação que ainda não têm prévia."""
+    rows = session.scalars(select(Entity).where(Entity.investigation_id == investigation_id)).all()
+    out: dict[str, dict[str, str]] = {}
+    fetched = 0
+    for entity in rows:
+        if entity.entity_type not in {"PROFILE", "PUBLICATION"}:
+            continue
+        attrs = dict(entity.attrs or {})
+        url = entity_source_url(entity)
+        if not url.startswith("http"):
+            continue
+        if attrs.get("thumb") and (attrs.get("og_title") or entity.entity_type == "PROFILE"):
+            if attrs.get("thumb"):
+                out[entity.id] = {key: str(attrs[key]) for key in ("thumb", "og_title", "description", "preview_kind") if attrs.get(key)}
+            continue
+        extra = fetch_preview(url) if fetched < limit else {}
+        if extra:
+            fetched += 1
+        changed = False
+        for key, val in extra.items():
+            if val not in (None, "", [], {}) and not attrs.get(key):
+                attrs[key] = val
+                changed = True
+        if not attrs.get("thumb"):
+            avatar = social_avatar_url(url, str(attrs.get("username") or ""), str(attrs.get("network") or ""))
+            if avatar:
+                attrs["thumb"] = avatar
+                changed = True
+        if changed:
+            entity.attrs = attrs
+            flag_modified(entity, "attrs")
+        if attrs.get("thumb") or attrs.get("og_title"):
+            out[entity.id] = {
+                key: str(attrs[key])
+                for key in ("thumb", "og_title", "description", "preview_kind")
+                if attrs.get(key)
+            }
+    return out
 
 
 def _delete_entity_local(session: Session, investigation_id: str, entity: Entity, *, block: bool = True) -> None:

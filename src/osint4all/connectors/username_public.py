@@ -9,7 +9,7 @@ from osint4all.config import Settings
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.db.models import Entity
 from osint4all.exceptions import SkippedDisabled
-from osint4all.graph.preview import preview_from_html
+from osint4all.graph.preview import preview_from_html, social_avatar_url
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
 
@@ -246,6 +246,10 @@ def parse_public_hits(
             extra["preview_kind"] = "social"
             extra["tipo"] = "social"
             attrs.update({key: val for key, val in extra.items() if val not in (None, "", [], {})})
+        if not attrs.get("thumb"):
+            avatar = social_avatar_url(url, handle, label)
+            if avatar:
+                attrs["thumb"] = avatar
         found = FoundEntity(
             entity_type="PROFILE",
             kind="URL",

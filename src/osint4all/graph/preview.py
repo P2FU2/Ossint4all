@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlparse
 from osint4all.connectors.base import FoundEntity
 
 _META_RE = re.compile(r"<meta\b[^>]*>", re.I)
+_LINK_RE = re.compile(r"<link\b[^>]*>", re.I)
 _ATTR_RE = re.compile(r"""([a-zA-Z_:-]+)\s*=\s*["']([^"']*)["']""")
 _TITLE_RE = re.compile(r"<title[^>]*>([^<]{1,200})</title>", re.I)
 _SOCIAL_HOSTS = (
@@ -53,11 +54,107 @@ def looks_like_image(url: str) -> bool:
     return path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
 
 
-def is_social_url(url: str) -> bool:
+def _host(url: str) -> str:
     host = urlparse(url or "").netloc.casefold()
-    if host.startswith("www."):
-        host = host[4:]
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_social_url(url: str) -> bool:
+    host = _host(url)
     return any(host == item or host.endswith("." + item) for item in _SOCIAL_HOSTS)
+
+
+def is_public_http_url(url: str) -> bool:
+    parsed = urlparse(url or "")
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").casefold()
+    if not host or host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost"):
+        return False
+    if host.startswith(("10.", "192.168.", "169.254.")):
+        return False
+    if host.startswith("172."):
+        try:
+            second = int(host.split(".")[1])
+        except (IndexError, ValueError):
+            return True
+        if 16 <= second <= 31:
+            return False
+    return True
+
+
+def entity_source_url(entity: Any = None, *, key: str = "", attrs: dict[str, Any] | None = None) -> str:
+    bag = attrs if attrs is not None else dict(getattr(entity, "attrs", None) or {})
+    for field in ("page_url", "fonte", "maps_url"):
+        val = str(bag.get(field) or "").strip()
+        if val.startswith("http"):
+            return val
+    raw_key = key or str(getattr(entity, "canonical_key", "") or "")
+    if raw_key.startswith("url:"):
+        return raw_key[4:]
+    return ""
+
+
+def username_from_url(url: str) -> str:
+    path = urlparse(url or "").path.strip("/")
+    if not path:
+        return ""
+    part = path.split("/")[-1]
+    if part.casefold() in {"people", "user", "users", "profile", "channel", "c"}:
+        parts = path.split("/")
+        part = parts[-1] if len(parts) == 1 else (parts[-1] or (parts[-2] if len(parts) > 1 else ""))
+    return part.lstrip("@").split("?")[0].split("#")[0]
+
+
+def social_avatar_url(url: str, username: str = "", network: str = "") -> str:
+    """Avatar público conhecido — sem chave. Serve para o nó já nascer com foto."""
+    user = (username or username_from_url(url) or "").strip().lstrip("@")
+    host = _host(url)
+    net = (network or "").casefold()
+    if not user or user.casefold() in {"www", "http", "https"}:
+        return ""
+    if "github.com" in host or net == "github":
+        return f"https://github.com/{user}.png?size=240"
+    if "gitlab.com" in host or net == "gitlab":
+        return f"https://gitlab.com/{user}.png"
+    if "gravatar.com" in host or net == "gravatar":
+        return f"https://www.gravatar.com/avatar/{user}?s=240&d=identicon"
+    if host in {"x.com", "twitter.com"} or net in {"x", "twitter"}:
+        return f"https://unavatar.io/twitter/{user}"
+    if "instagram.com" in host or net == "instagram":
+        return f"https://unavatar.io/instagram/{user}"
+    if "youtube.com" in host or "youtu.be" in host or net == "youtube":
+        return f"https://unavatar.io/youtube/{user}"
+    if "tiktok.com" in host or net == "tiktok":
+        return f"https://unavatar.io/tiktok/{user}"
+    if "reddit.com" in host or net == "reddit":
+        return f"https://unavatar.io/reddit/{user}"
+    if "twitch.tv" in host or net == "twitch":
+        return f"https://unavatar.io/twitch/{user}"
+    if "facebook.com" in host or "fb.com" in host or net == "facebook":
+        return f"https://unavatar.io/facebook/{user}"
+    if "linkedin.com" in host or net == "linkedin":
+        return f"https://unavatar.io/linkedin/{user}"
+    if host:
+        return f"https://unavatar.io/{host}/{user}"
+    return ""
+
+
+def decorate_graph_attrs(attrs: dict[str, Any], *, url: str = "", entity_type: str = "") -> dict[str, Any]:
+    """Completa thumb/título no payload do grafo sem nova consulta HTTP."""
+    source = url or str(attrs.get("page_url") or attrs.get("fonte") or "")
+    kind = str(attrs.get("preview_kind") or attrs.get("tipo") or "")
+    if source and not kind:
+        kind = preview_kind_for_url(source)
+        attrs["preview_kind"] = kind
+    social = entity_type == "PROFILE" or kind == "social" or attrs.get("tipo") == "social"
+    if social and not attrs.get("thumb"):
+        avatar = social_avatar_url(source, str(attrs.get("username") or ""), str(attrs.get("network") or ""))
+        if avatar:
+            attrs["thumb"] = avatar
+        attrs.setdefault("preview_kind", "social")
+        attrs.setdefault("tipo", "social")
+    return attrs
 
 
 def youtube_embed(url: str) -> str:
@@ -100,6 +197,20 @@ def parse_open_graph(html: str, *, base_url: str = "") -> dict[str, str]:
                 image = urljoin(base_url, image)
             if image.startswith("http"):
                 bag["thumb"] = image
+    if "thumb" not in bag:
+        for tag in _LINK_RE.findall(html or ""):
+            attrs = {key.casefold(): val.strip() for key, val in _ATTR_RE.findall(tag)}
+            rel = (attrs.get("rel") or "").casefold()
+            href = attrs.get("href") or ""
+            if rel in {"image_src", "apple-touch-icon", "icon"} and href:
+                image = href
+                if image.startswith("//"):
+                    image = "https:" + image
+                elif image.startswith("/") and base_url:
+                    image = urljoin(base_url, image)
+                if image.startswith("http") and rel == "image_src":
+                    bag["thumb"] = image
+                    break
     if "og_title" not in bag:
         title = _TITLE_RE.search(html or "")
         if title:
@@ -133,6 +244,10 @@ def preview_from_html(html: str, url: str) -> dict[str, Any]:
         attrs["thumb"] = url
         return attrs
     attrs.update(parse_open_graph(html, base_url=url))
+    if kind == "social" and not attrs.get("thumb"):
+        avatar = social_avatar_url(url)
+        if avatar:
+            attrs["thumb"] = avatar
     if attrs.get("og_title") and not attrs.get("snippet"):
         attrs["snippet"] = attrs["og_title"]
     return attrs
@@ -146,7 +261,12 @@ def fetch_preview(url: str) -> dict[str, Any]:
     if kind == "image":
         return preview_from_html("", url)
     if not _live() or not str(url).startswith("http"):
-        return {"preview_kind": kind, "page_url": url, "tipo": kind}
+        extra = {"preview_kind": kind, "page_url": url, "tipo": kind}
+        if kind == "social":
+            avatar = social_avatar_url(url)
+            if avatar:
+                extra["thumb"] = avatar
+        return extra
     from osint4all.http_client import RateLimitedClient
 
     http = RateLimitedClient(

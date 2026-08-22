@@ -5,7 +5,8 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=43" defer></script>
+<script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="/static/graph.js?v=44" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -271,7 +272,7 @@
 <div class="graph-stage">
   <aside id="split-list" class="split-list" hidden></aside>
   <div class="graph-canvas">
-    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-queue-url="/app/casos/{{ inv.id }}/fila" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-asset-url="/app/casos/{{ inv.id }}/patrimonio" data-property-url="/app/casos/{{ inv.id }}/imoveis" data-photo-url="/app/casos/{{ inv.id }}/foto" data-search-all-url="/app/casos/{{ inv.id }}/pesquisar-tudo" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
+    <div id="cy" data-graph-url="/app/casos/{{ inv.id }}/grafo.json" data-layout-url="/app/casos/{{ inv.id }}/grafo/layout" data-preview-url="/app/casos/{{ inv.id }}/previews" data-status-url="/app/casos/{{ inv.id }}/status" data-tick-url="/app/casos/{{ inv.id }}/tick" data-queue-url="/app/casos/{{ inv.id }}/fila" data-entity-base="/app/casos/{{ inv.id }}/entidades/" data-edge-base="/app/casos/{{ inv.id }}/ligacoes/" data-note-url="/app/casos/{{ inv.id }}/notas" data-link-url="/app/casos/{{ inv.id }}/ligacoes" data-company-url="/app/casos/{{ inv.id }}/empresas" data-asset-url="/app/casos/{{ inv.id }}/patrimonio" data-property-url="/app/casos/{{ inv.id }}/imoveis" data-photo-url="/app/casos/{{ inv.id }}/foto" data-search-all-url="/app/casos/{{ inv.id }}/pesquisar-tudo" data-batch-url="/app/casos/{{ inv.id }}/entidades/lote/desligar" data-rel-types='{{ rel_types | tojson }}' data-status-phase="{% if jobs.PENDING + jobs.RUNNING %}loading{% else %}ok{% endif %}" data-status-init="{% if jobs.PENDING + jobs.RUNNING %}Rodando… {{ jobs.PENDING + jobs.RUNNING }} na fila{% else %}Caso pronto · {{ entity_count }} nós · {{ edge_count }} vínculos{% endif %}"></div>
   </div>
   <div class="canvas-tools" aria-label="Canvas">
     <div class="canvas-tools-group">

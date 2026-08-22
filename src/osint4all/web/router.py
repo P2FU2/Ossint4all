@@ -52,6 +52,7 @@ from osint4all.db.repository import (
     graph_payload,
     job_counts,
     requeue_stale_running_jobs,
+    persist_missing_previews,
     save_graph_layout,
     list_notes,
     note_tree,
@@ -1600,6 +1601,56 @@ async def graph_layout_save(
     if layout is None:
         return JSONResponse({"detail": "caso não encontrado"}, status_code=404)
     return JSONResponse({"ok": True, "nodes": len(layout.get("nodes") or {})})
+
+
+@router.get("/app/casos/{investigation_id}/entidades/{entity_id}/fonte")
+def entity_source_file(
+    investigation_id: str,
+    entity_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> Response:
+    """Proxy da fonte oficial já ligada ao nó — PDF/imagem no grafo, sem abrir outra origem."""
+    from osint4all.graph.preview import entity_source_url, is_public_http_url
+    from osint4all.http_client import RateLimitedClient
+
+    entity = session.get(Entity, entity_id)
+    if not entity or entity.investigation_id != investigation_id:
+        return JSONResponse({"detail": "não encontrado"}, status_code=404)
+    url = entity_source_url(entity)
+    if not is_public_http_url(url):
+        return JSONResponse({"detail": "fonte inválida"}, status_code=404)
+    http = RateLimitedClient(source="fonte", max_concurrency=2, timeout=20.0)
+    resp, err = http.safe_request("GET", url, max_retries=1)
+    if err or resp is None:
+        return JSONResponse({"detail": "fonte indisponível"}, status_code=502)
+    ctype = (resp.headers.get("content-type") or "application/octet-stream").split(";")[0].strip()
+    body = resp.content[: 8 * 1024 * 1024]
+    return Response(
+        content=body,
+        media_type=ctype or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=600", "X-Frame-Options": "SAMEORIGIN"},
+    )
+
+
+@router.post("/app/casos/{investigation_id}/previews")
+async def graph_previews_refresh(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+) -> JSONResponse:
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    require_csrf(request, str(data.get("csrf_token") or request.headers.get("x-csrf-token") or ""))
+    if session.get(Investigation, investigation_id) is None:
+        return JSONResponse({"detail": "caso não encontrado"}, status_code=404)
+    previews = persist_missing_previews(session, investigation_id)
+    return JSONResponse({"ok": True, "previews": previews})
 
 
 @router.get("/app/casos/{investigation_id}/status")
