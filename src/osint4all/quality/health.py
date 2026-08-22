@@ -26,9 +26,12 @@ def probe_sources(session: Session) -> list[SourceHealthCheck]:
             if not enabled:
                 ok = True
                 error = "desligada"
-            elif detail.get("api_key_configured") is False:
-                ok = False
-                error = "chave ausente"
+            elif detail.get("paid_only") and detail.get("api_key_configured") is False:
+                ok = True
+                error = "paga (não usada)"
+            elif detail.get("api_key_configured") is False and not detail.get("free_fallback"):
+                ok = True
+                error = "alternativa gratuita"
             else:
                 ok = True
         except Exception as exc:  # noqa: BLE001

@@ -21,8 +21,8 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "group": "Empresa",
         "accepts": "Nome (2+ palavras) ou CPF válido",
         "returns": "Empresas em que o nome/CPF aparece no quadro societário",
-        "how": "Brasil.IO (com token) lista pelo CPF com máscara oficial. Sem token, só busca por nome em bases públicas — nunca inventa empresa para um CPF.",
-        "key": "BRASIL_IO_API_TOKEN",
+        "how": "Casa dos Dados + QSA da Receita (gratuito). Sem Brasil.IO pago. Nunca inventa empresa só com o CPF.",
+        "key": "",
         "url": "https://brasil.io/",
     },
     "datajud": {
@@ -30,8 +30,8 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "group": "Justiça",
         "accepts": "Processo (CNJ) ou nome em capa",
         "returns": "Capa, partes e movimentos públicos",
-        "how": "API pública do CNJ. Sem DATAJUD_API_KEY a fonte fica offline — o painel não completa capa com chute.",
-        "key": "DATAJUD_API_KEY",
+        "how": "Se houver chave CNJ (cadastro gratuito) usa DataJud. Sem chave, capa pelo DJEN/Comunica — sem API paga.",
+        "key": "",
         "url": "https://datajud-wiki.cnj.jus.br/api-publica/acesso/",
     },
     "djen": {
@@ -47,8 +47,8 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "label": "TSE · candidaturas",
         "group": "Público",
         "accepts": "Pessoa ou partido (nome)",
-        "returns": "Candidatura, cargo, UF, partido",
-        "how": "DivulgaCandContas. Homônimo fica candidato até você confirmar. Sem doação privada nem urna.",
+        "returns": "Candidatura, cargo, UF, partido, situação, bens e foto se a API responder",
+        "how": "DivulgaCandContas (presidente/senador/deputado). Se o TSE bloquear (403), a fonte anota e as outras seguem. Sem doação privada nem urna.",
         "key": "",
         "url": "https://divulgacandcontas.tse.jus.br/",
     },
@@ -56,9 +56,9 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "label": "Transparência · sanções",
         "group": "Público",
         "accepts": "Pessoa ou empresa (nome, CPF, CNPJ)",
-        "returns": "CEIS, CNEP e órgãos sancionadores",
-        "how": "Portal da Transparência (CGU). Com chave rende busca na API; sem chave a fonte avisa e não fabrica sanção.",
-        "key": "TRANSPARENCIA_API_KEY",
+        "returns": "CEIS, CNEP, CEAF, CEPIM e PEP",
+        "how": "Scraper do portal público (CEIS/CNEP/CEAF/CEPIM/PEP). Chave da API é opcional e não é necessária.",
+        "key": "",
         "url": "https://portaldatransparencia.gov.br/",
     },
     "opencorporates": {
@@ -67,15 +67,15 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "accepts": "Empresa ou nome",
         "returns": "Registros societários fora do Brasil",
         "how": "Complementa a Receita quando o alvo tem firma no exterior. Token opcional sobe o limite.",
-        "key": "OPENCORPORATES_API_TOKEN",
+        "key": "",
         "url": "https://opencorporates.com/",
     },
     "wikidata": {
         "label": "Wikidata",
         "group": "Ficha",
         "accepts": "Pessoa ou empresa com nome",
-        "returns": "Ficha pública (Q-id), cargo, descrição",
-        "how": "Busca o rótulo em pt. Vira publicação ligada ao nó — não confirma identidade sozinha.",
+        "returns": "Ficha (Q-id), Wikipedia, nascimento e foto Commons se o nome bater",
+        "how": "Busca o rótulo em pt/en e lê a ficha (wbgetentities). Foto só entra com overlap ≥50%. Não confirma identidade sozinha.",
         "key": "",
         "url": "https://www.wikidata.org/",
     },
@@ -84,8 +84,8 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "group": "Menção",
         "accepts": "Nome, CNPJ, placa, e-mail, @user, processo",
         "returns": "Menções e, no painel, notícias/fotos cruzadas",
-        "how": "SearXNG público, Brave ou Google CSE. CPF não vai ao buscador. Combina pares (nome+empresa) em vez de repetir a mesma query.",
-        "key": "SEARXNG_URL / BRAVE / CSE",
+        "how": "SearXNG público e DuckDuckGo HTML (gratuito). Brave/CSE só se você já tiver. CPF não vai ao buscador.",
+        "key": "",
         "url": "https://docs.searxng.org/",
     },
     "username_public": {
@@ -122,7 +122,7 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "returns": "Edições municipais/estaduais com trecho e data",
         "how": "API do Querido Diário (OK.br). Não envia CPF. Complementa DJEN (justiça) e a busca web (jornal).",
         "key": "",
-        "url": "https://queridodiario.ok.org.br/",
+        "url": "https://api.queridodiario.ok.org.br/docs",
     },
     "geo_public": {
         "label": "Geo · endereço público",
@@ -147,8 +147,8 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "group": "Digital",
         "accepts": "Domínio da empresa (URL/e-mail) ou razão social",
         "returns": "Hostname, porta, produto e país de serviços anunciados na internet",
-        "how": "Só a API oficial (SHODAN_API_KEY). Busca hostname:dominio ou org:\"razão\". Sem scrape do site, sem CVE, sem banner de exploit. Complementa crt.sh (certificado) e RDAP (titular).",
-        "key": "SHODAN_API_KEY",
+        "how": "API Shodan é paga — esta instalação não depende dela. Hosts vêm de crt.sh, Wayback e urlscan (gratuitos).",
+        "key": "",
         "url": "https://developer.shodan.io/api",
     },
     "host_public": {
@@ -192,8 +192,8 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "group": "Digital",
         "accepts": "Domínio (URL ou e-mail próprio)",
         "returns": "Hosts e localização anunciados no índice Censys",
-        "how": "Search API oficial (estilo Uncover, sem FOFA scrape). Precisa CENSYS_API_ID e CENSYS_API_SECRET. Sem banner grab, sem ZMap/Masscan.",
-        "key": "CENSYS_API_ID / CENSYS_API_SECRET",
+        "how": "API Censys é paga — não é usada. O mesmo recorte sai de crt.sh e host_public, sem custo.",
+        "key": "",
         "url": "https://search.censys.io/api",
     },
     "host_observe": {
@@ -227,17 +227,26 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
         "label": "Congresso · dados abertos",
         "group": "Público",
         "accepts": "Pessoa (nome e sobrenome)",
-        "returns": "Mandato de deputado ou senador em exercício, partido e UF",
+        "returns": "Mandato de deputado ou senador em exercício, partido, UF e foto oficial",
         "how": "APIs públicas da Câmara e do Senado. Sem chave e sem login. Homônimo fica candidato até você confirmar.",
         "key": "",
         "url": "https://dadosabertos.camara.leg.br/",
+    },
+    "politicos_public": {
+        "label": "Políticos / PEP",
+        "group": "Público",
+        "accepts": "Pessoa (nome e sobrenome)",
+        "returns": "PEP da CGU, TCU, Ranking dos Políticos, portais TSE/Câmara/Senado/DOU",
+        "how": "Só fontes abertas. PEP pede chave da Transparência. ranking.org.br é índice público, não urna.",
+        "key": "",
+        "url": "https://ranking.org.br/",
     },
     "opensanctions_public": {
         "label": "OpenSanctions",
         "group": "Investigação",
         "accepts": "Pessoa ou empresa (nome/CNPJ)",
         "returns": "PEP e sanções internacionais em datasets públicos",
-        "how": "Busca pública da API OpenSanctions. Sem chave. Se o endpoint pedir auth, a fonte fica vazia — sem chute.",
+        "how": "Busca pública da API OpenSanctions. Se pedir chave, fica o portal de busca — sem chute de sanção.",
         "key": "",
         "url": "https://www.opensanctions.org/",
     },
@@ -256,16 +265,10 @@ SOURCE_CATALOG: dict[str, dict[str, str]] = {
 def _ready(name: str, health: dict[str, Any], settings: Settings) -> str:
     if not health.get("enabled", True):
         return "desligada"
-    if name == "datajud" and not settings.datajud_api_key:
-        return "precisa chave"
-    if name == "transparencia" and not settings.transparencia_api_key:
-        return "precisa chave"
-    if name == "socio_search" and not settings.brasil_io_api_token:
-        return "parcial"
     if name == "shodan_public" and not settings.shodan_api_key:
-        return "precisa chave"
+        return "paga (off)"
     if name == "censys_public" and not (settings.censys_api_id and settings.censys_api_secret):
-        return "precisa chave"
+        return "paga (off)"
     return "pronta"
 
 

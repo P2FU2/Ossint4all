@@ -1,9 +1,10 @@
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 from osint4all.connectors.congresso_public import parse_deputados, parse_senadores
+from osint4all.connectors.politicos_public import official_photo_attrs, parse_pep_rows, parse_ranking_hits, parse_ranking_html
 from osint4all.connectors.gleif_public import parse_gleif_records
 from osint4all.connectors.opensanctions_public import parse_opensanctions_hits
 from osint4all.connectors.pncp_public import parse_pncp_items
-from osint4all.connectors.tse import parse_tse_assets, parse_tse_donations
+from osint4all.connectors.tse import TseConnector, parse_tse_assets, parse_tse_donations
 from osint4all.connectors.web_search import classify_public_mention, parse_web_hits
 from osint4all.engines.intelligence import compare_entities
 from osint4all.engines.playbooks import CASE_STEPS, DOMAIN_STEPS, attach_playbook, infer_playbook, list_items
@@ -74,13 +75,93 @@ def test_pncp_and_gleif_and_sanctions_parsers() -> None:
     assert gleif.evidence[0].payload["lei"] == "25490011111111111111"
 
 
+def test_pep_ranking_and_official_photo() -> None:
+    pep = parse_pep_rows(
+        [
+            {"nome": "Maria Silva Souza", "descricaoFuncao": "Deputada", "nomeOrgao": "Câmara"},
+            {"nome": "João Outro", "descricaoFuncao": "Senador"},
+        ],
+        origin_key="name:maria silva souza",
+        needle="Maria Silva Souza",
+    )
+    assert any(e.display_name == "Maria Silva Souza" for e in pep.entities)
+    assert all("João" not in (e.display_name or "") for e in pep.entities)
+    rank = parse_ranking_hits(
+        [{"nome": "Maria Silva Souza", "url": "https://ranking.org.br/politicos/maria", "snippet": "nota 7"}],
+        origin_key="name:maria silva souza",
+        needle="Maria Silva Souza",
+    )
+    assert rank.entities[0].kind == "URL"
+    photo = official_photo_attrs(
+        {"urlFoto": "https://www.camara.leg.br/internet/deputado/bandep/1.jpg"},
+        needle="Maria Silva Souza",
+        nome="Maria Silva Souza",
+    )
+    assert photo["thumb"].startswith("https://")
+    assert photo["identity_match"] >= 50
+
+
+def test_camara_rejects_homonym_below_overlap() -> None:
+    deps = parse_deputados(
+        [{"id": 2, "nome": "Lula da Fonte", "siglaPartido": "PP", "siglaUf": "PE", "urlFoto": "https://www.camara.leg.br/foto.jpg"}],
+        origin_key="name:luiz inacio lula da silva",
+        needle="Luiz Inácio Lula da Silva",
+    )
+    assert not any(e.entity_type == "PERSON" for e in deps.entities)
+
+
+def test_ranking_html_picks_politician_path() -> None:
+    items = parse_ranking_html(
+        '<a href="/politicos/maria-silva-souza">Maria Silva Souza — nota 7</a>',
+        nome="Maria Silva Souza",
+    )
+    assert items
+    assert "politicos" in items[0]["url"]
+
+
+def test_web_search_empty_backends_return_notes(settings, monkeypatch) -> None:
+    from osint4all.connectors.web_search import WebSearchConnector
+
+    monkeypatch.setattr(settings, "brave_search_api_key", "")
+    monkeypatch.setattr(settings, "google_cse_api_key", "")
+    monkeypatch.setattr(settings, "google_cse_cx", "")
+    monkeypatch.setattr(settings, "searxng_enable", False)
+    conn = WebSearchConnector(settings)
+    from osint4all.connectors.base import ConnectorResult
+
+    conn._duckduckgo = lambda *a, **k: ConnectorResult(notes=["ddg off"])
+    result = conn.search("Maria Silva Souza", "name:maria silva souza")
+    assert result.entities == []
+    assert result.notes
+
+
+def test_tse_forbidden_returns_notes_not_exception(settings) -> None:
+    class FakeResp:
+        status_code = 403
+
+        def json(self):
+            return {}
+
+    conn = TseConnector(settings)
+    conn.http.request = lambda *a, **k: FakeResp()
+    from types import SimpleNamespace
+
+    from osint4all.connectors.base import ExpandContext
+
+    entity = SimpleNamespace(display_name="Maria Silva Souza", canonical_key="name:maria silva souza")
+    result = conn.collect(entity, ExpandContext(investigation=None, settings=settings, enabled=set()))
+    assert any("403" in note for note in result.notes)
+    assert result.evidence
+
+
 def test_congresso_and_tse_assets() -> None:
     deps = parse_deputados(
-        [{"id": 1, "nome": "Maria Silva Souza", "siglaPartido": "PX", "siglaUf": "SP", "uri": "https://www.camara.leg.br/deputados/1"}],
+        [{"id": 1, "nome": "Maria Silva Souza", "siglaPartido": "PX", "siglaUf": "SP", "uri": "https://www.camara.leg.br/deputados/1", "urlFoto": "https://www.camara.leg.br/foto.jpg"}],
         origin_key="name:outra",
         needle="Maria Silva",
     )
     assert any(e.entity_type == "PERSON" for e in deps.entities)
+    assert any((e.attrs or {}).get("thumb") for e in deps.entities)
     senate = parse_senadores(
         {"ListaParlamentarEmExercicio": {"Parlamentares": {"Parlamentar": [{"IdentificacaoParlamentar": {"NomeParlamentar": "Maria Silva Souza", "SiglaPartidoParlamentar": "PX", "UfParlamentar": "SP", "CodigoParlamentar": "9"}}]}}},
         origin_key="name:outra",

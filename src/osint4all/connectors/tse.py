@@ -7,15 +7,74 @@ from typing import Any
 from osint4all.config import Settings
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.db.models import Entity
-from osint4all.exceptions import FailedSource, SkippedDisabled
+from osint4all.exceptions import SkippedDisabled
 from osint4all.http_client import RateLimitedClient
-from osint4all.graph.identity import found_canonical_key
+from osint4all.graph.identity import collapse_name, found_canonical_key, name_overlap_score, name_tokens
 from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
 from osint4all.validators import validate_cnpj, validate_cpf
 
+TSE_LISTS = (
+    # ano, unidade, id da eleição, cargo numérico (não o nome)
+    ("2022", "BR", "2030602022", "1", "presidente"),
+    ("2022", "BR", "2040602022", "1", "presidente"),
+    ("2022", "BR", "2030602022", "5", "senador"),
+    ("2022", "BR", "2030602022", "6", "deputado federal"),
+    ("2018", "BR", "2022802018", "1", "presidente"),
+)
 
-def parse_tse_candidates(items: list[dict[str, Any]], *, origin_key: str) -> ConnectorResult:
+_COMMON_SURNAMES = {
+    "silva",
+    "santos",
+    "souza",
+    "sousa",
+    "oliveira",
+    "pereira",
+    "ferreira",
+    "alves",
+    "rodrigues",
+    "almeida",
+    "nunes",
+    "lima",
+    "costa",
+    "gomes",
+    "ribeiro",
+    "carvalho",
+    "araujo",
+    "melo",
+    "barbosa",
+}
+
+TSE_BROWSER_HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "pt-BR,pt;q=0.9",
+    "Referer": "https://divulgacandcontas.tse.jus.br/divulga/#/",
+    "Origin": "https://divulgacandcontas.tse.jus.br",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+}
+
+
+def tse_candidate_match(item: dict[str, Any], needle: str) -> bool:
+    blob = " ".join(
+        str(item.get(key) or "") for key in ("nomeUrna", "nomeCompleto", "nome", "nomeCandidato")
+    )
+    if name_overlap_score(blob, needle) >= 0.5:
+        return True
+    low = collapse_name(needle)
+    if low and low in collapse_name(blob):
+        return True
+    skip = {"da", "de", "do", "dos", "das", "e", "di"}
+    civil = {token for token in name_tokens(needle) if token not in skip and len(token) > 1}
+    urna = {token for token in name_tokens(blob) if token not in skip and len(token) > 1}
+    if not urna or not civil or not urna <= civil:
+        return False
+    return len(urna) >= 2 or bool(urna - _COMMON_SURNAMES)
+
+
+def parse_tse_candidates(items: list[dict[str, Any]], *, origin_key: str, needle: str = "") -> ConnectorResult:
     result = ConnectorResult()
     for item in items[:15]:
         if not isinstance(item, dict):
@@ -25,13 +84,17 @@ def parse_tse_candidates(items: list[dict[str, Any]], *, origin_key: str) -> Con
         partido = str(item.get("partido") or item.get("sg_partido") or item.get("siglaPartido") or "")
         uf = str(item.get("sg_ue") or item.get("ufSuperior") or item.get("uf") or "")
         ano = str(item.get("ano") or item.get("anoEleicao") or "")
+        situacao = str(item.get("descricaoSituacao") or item.get("descricaoSituacaoCandidato") or item.get("situacao") or "")
         if isinstance(item.get("cargo"), dict):
             cargo = str(item["cargo"].get("nome") or cargo)
         if isinstance(item.get("partido"), dict):
             partido = str(item["partido"].get("sigla") or partido)
         if not nome:
             continue
-        label = f"{nome} · {cargo} {partido} {uf} {ano}".strip()
+        label = f"{nome} · {cargo} {partido} {uf} {ano} {situacao}".strip()
+        from osint4all.connectors.politicos_public import official_photo_attrs
+
+        extra = official_photo_attrs(item, needle=needle or nome, nome=nome)
         cand = FoundEntity(
             entity_type="PERSON",
             kind="NAME",
@@ -44,9 +107,11 @@ def parse_tse_candidates(items: list[dict[str, Any]], *, origin_key: str) -> Con
                 "ano": ano,
                 "papel": "candidato",
                 "status": "unconfirmed",
+                "situacao": situacao,
                 "candidate_key": f"tse:{nome}:{uf}:{ano}",
+                **extra,
             },
-            confidence=0.4,
+            confidence=0.55 if extra.get("thumb") else 0.4,
         )
         result.entities.append(cand)
         cand_key = found_canonical_key(cand)
@@ -180,7 +245,7 @@ class TseConnector:
             source=self.name,
             max_concurrency=2,
             timeout=25.0,
-            default_headers={"Accept": "application/json", "User-Agent": "osint4all/0.1"},
+            default_headers=TSE_BROWSER_HEADERS,
         )
 
     def health(self) -> dict[str, Any]:
@@ -195,38 +260,80 @@ class TseConnector:
         nome = entity.display_name.strip()
         if len(nome.split()) < 2:
             return ConnectorResult(notes=["TSE exige nome e sobrenome"])
-        # Endpoint público de pesquisa textual do DivulgaCand (eleição municipal 2024).
-        url = "https://divulgacandcontas.tse.jus.br/divulga/rest/v1/candidatura/listar/2024/BR/20452024/prefeito/candidatos"
-        try:
-            resp = self.http.request("GET", url, max_retries=2)
-        except Exception as exc:  # noqa: BLE001
-            raise FailedSource(f"TSE indisponível: {exc}") from exc
-        if resp.status_code >= 400:
-            return ConnectorResult(notes=[f"TSE HTTP {resp.status_code}"])
-        data = resp.json()
-        candidatos = []
-        if isinstance(data, dict):
-            candidatos = data.get("candidatos") or data.get("candidatures") or []
-        elif isinstance(data, list):
-            candidatos = data
-        needle = nome.casefold()
-        matched = [
-            c
-            for c in candidatos
-            if isinstance(c, dict)
-            and needle in str(c.get("nomeUrna") or c.get("nomeCompleto") or c.get("nome") or "").casefold()
-        ]
-        if not matched:
-            return ConnectorResult(notes=["Nenhuma candidatura 2024 (prefeito/BR) com esse nome"])
-        merged = parse_tse_candidates(matched, origin_key=entity.canonical_key)
-        for cand in matched[:3]:
-            merged.merge(self._enrich_candidate(cand, entity.canonical_key, entity.display_name))
+        merged = ConnectorResult()
+        blocked = False
+        for ano, ue, eleicao, cargo, rotulo in TSE_LISTS:
+            if blocked:
+                break
+            url = f"https://divulgacandcontas.tse.jus.br/divulga/rest/v1/candidatura/listar/{ano}/{ue}/{eleicao}/{cargo}/candidatos"
+            try:
+                resp = self.http.request("GET", url, allow_forbidden=True, allow_404=True, max_retries=1)
+            except Exception as exc:  # noqa: BLE001
+                merged.notes.append(f"TSE {rotulo} {ano}: {exc}"[:160])
+                continue
+            if resp.status_code in (401, 403):
+                blocked = True
+                merged.notes.append(
+                    "TSE DivulgaCand recusou a consulta (HTTP 403). Câmara, Senado e PEP seguem nas outras fontes."
+                )
+                break
+            if resp.status_code >= 400:
+                merged.notes.append(f"TSE {rotulo} {ano}: HTTP {resp.status_code}")
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                continue
+            candidatos = []
+            if isinstance(data, dict):
+                candidatos = data.get("candidatos") or data.get("candidatures") or []
+            elif isinstance(data, list):
+                candidatos = data
+            matched = [row for row in candidatos if isinstance(row, dict) and tse_candidate_match(row, nome)]
+            if not matched:
+                continue
+            parsed = parse_tse_candidates(matched, origin_key=entity.canonical_key, needle=nome)
+            merged.merge(parsed)
+            for cand in matched[:3]:
+                merged.merge(self._enrich_candidate(cand, entity.canonical_key, nome, ano=ano, ue=ue, eleicao=eleicao))
+            if merged.entities:
+                break
+        if not merged.entities:
+            if not any("403" in note for note in merged.notes):
+                merged.notes.append("Nenhuma candidatura pública com esse nome nas listas TSE consultadas.")
+            merged.evidence.append(
+                FoundEvidence(
+                    source_label="TSE DivulgaCandContas",
+                    url="https://divulgacandcontas.tse.jus.br/",
+                    snippet=f"Consulta pública de candidatura · {nome}",
+                    payload={"nome": nome, "bloqueado": blocked},
+                    entity_ref=entity.canonical_key,
+                )
+            )
+            merged.evidence.append(
+                FoundEvidence(
+                    source_label="TSE Dados Abertos",
+                    url="https://dadosabertos.tse.jus.br/",
+                    snippet=f"Repositório oficial de candidaturas · {nome}",
+                    payload={"nome": nome},
+                    entity_ref=entity.canonical_key,
+                )
+            )
         return merged
 
-    def _enrich_candidate(self, cand: dict[str, Any], origin_key: str, owner_name: str) -> ConnectorResult:
+    def _enrich_candidate(
+        self,
+        cand: dict[str, Any],
+        origin_key: str,
+        owner_name: str,
+        *,
+        ano: str,
+        ue: str,
+        eleicao: str,
+    ) -> ConnectorResult:
         sq = str(cand.get("id") or cand.get("sqCandidato") or "").strip()
         unidade = cand.get("unidadeEleitoral") if isinstance(cand.get("unidadeEleitoral"), dict) else {}
-        sg_ue = str(unidade.get("sigla") or cand.get("sgUe") or cand.get("ufSuperior") or "").strip()
+        sg_ue = str(unidade.get("sigla") or cand.get("sgUe") or cand.get("ufSuperior") or ue).strip()
         if not sq:
             bens = cand.get("bens") if isinstance(cand.get("bens"), list) else []
             receitas = cand.get("receitas") or cand.get("doacoes") or []
@@ -234,10 +341,10 @@ class TseConnector:
             extra.merge(parse_tse_donations(receitas if isinstance(receitas, list) else [], origin_key=origin_key))
             return extra
         url = (
-            f"https://divulgacandcontas.tse.jus.br/divulga/rest/v1/candidatura/buscar/2024/{sg_ue or 'BR'}/20452024/candidato/{sq}"
+            f"https://divulgacandcontas.tse.jus.br/divulga/rest/v1/candidatura/buscar/{ano}/{sg_ue or 'BR'}/{eleicao}/candidato/{sq}"
         )
         try:
-            resp = self.http.request("GET", url, allow_404=True, max_retries=1)
+            resp = self.http.request("GET", url, allow_404=True, allow_forbidden=True, max_retries=1)
         except Exception:
             return ConnectorResult()
         if resp.status_code >= 400:
@@ -252,4 +359,18 @@ class TseConnector:
         receitas = data.get("receitas") or data.get("doacoes") or []
         extra = parse_tse_assets(bens if isinstance(bens, list) else [], origin_key=origin_key, owner_name=owner_name)
         extra.merge(parse_tse_donations(receitas if isinstance(receitas, list) else [], origin_key=origin_key))
+        from osint4all.connectors.politicos_public import official_photo_attrs
+
+        photo = official_photo_attrs(data, needle=owner_name, nome=str(data.get("nomeCompleto") or data.get("nomeUrna") or owner_name))
+        if photo.get("thumb"):
+            extra.entities.append(
+                FoundEntity(
+                    entity_type="PERSON",
+                    kind="NAME",
+                    value=owner_name,
+                    display_name=owner_name,
+                    attrs={"papel": "candidato", **photo},
+                    confidence=0.6,
+                )
+            )
         return extra

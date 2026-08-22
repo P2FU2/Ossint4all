@@ -62,14 +62,14 @@ from osint4all.db.repository import (
     update_edge,
 )
 from osint4all.connectors.base import FoundEntity
-from osint4all.graph.expand import process_pending_jobs
+from osint4all.graph.expand import process_pending_jobs, queue_search_all
 from osint4all.graph.resolve import apply_result, upsert_found_entity
 from osint4all.consult import MODES, ConsultResult, public_ficha, run_consult
 from osint4all.engines.intelligence import global_lookup
 from osint4all.graph.identity import MAX_GRAPH_DEPTH, seed_fits_profile
 from osint4all.graph.layers import ALVO_GROUPS, ALVO_KINDS, confirmed_seeds, qsa_confirms_name, run_alvo_layer
 from osint4all.graph.media import collect_target_media, fields_from_identifiers, media_picks_to_result, parse_media_picks
-from osint4all.graph.assets import add_bank_account, add_property, add_wealth_estimate
+from osint4all.graph.assets import add_bank_account, add_graph_photo, add_property, add_wealth_estimate
 from osint4all.graph.seed import add_seed_entities, attach_person_profile, attach_plate_owner, create_investigation
 from osint4all.tools_suite import (
     MassResult,
@@ -2412,6 +2412,106 @@ def search_graph_tools(
     else:
         _set_flash(request, "error", errors[0] if errors else "Marque ao menos uma ferramenta com dado já no grafo.")
     return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/pesquisar-tudo")
+def search_all_case(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    queued = queue_search_all(session, inv, max_attempts=get_settings().job_max_attempts)
+    write_audit(
+        session,
+        "investigation.search_all",
+        username=user.username,
+        investigation_id=inv.id,
+        details={"queued": queued},
+    )
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, inv.id, ok=True, queued=queued)
+    if queued:
+        _set_flash(
+            request,
+            "ok",
+            f"Pesquisar tudo: {queued} âncora(s) na fila com o dossiê inteiro (processos, PEP, TSE, diários, QSA). O grafo atualiza sozinho.",
+        )
+    else:
+        _set_flash(request, "error", "Nenhum nó do dossiê para pesquisar. Confirme o alvo ou um nó primeiro.")
+    return RedirectResponse(f"/app/casos/{inv.id}", status_code=303)
+
+
+@router.post("/app/casos/{investigation_id}/foto")
+async def add_graph_photo_route(
+    investigation_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(db_session),
+    csrf_token: str = Form(""),
+    from_id: str = Form(""),
+    title: str = Form(""),
+    source: str = Form(""),
+    note: str = Form(""),
+    photo_url: str = Form(""),
+    as_profile: str = Form(""),
+    fotos: list[UploadFile] = File(default=[]),
+) -> RedirectResponse:
+    require_csrf(request, csrf_token)
+    inv = session.get(Investigation, investigation_id)
+    if not inv:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "caso não encontrado"}, status_code=404)
+        _set_flash(request, "error", "Investigação não encontrada.")
+        return RedirectResponse("/app/casos", status_code=303)
+    host = session.get(Entity, from_id) if from_id else None
+    if host is None or host.investigation_id != inv.id:
+        host = session.scalar(select(Entity).where(Entity.investigation_id == inv.id, Entity.is_seed.is_(True)))
+    if host is None:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "sem nó para ligar a foto"}, status_code=400)
+        _set_flash(request, "error", "Não há alvo para ligar esta foto.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    photos = _photo_urls_from_text(photo_url)
+    for arquivo in (fotos or [])[:6]:
+        name = (arquivo.filename or "").strip() or "foto.jpg"
+        data = await arquivo.read(_MAX_FILE_BYTES + 1)
+        if not data or len(data) > _MAX_FILE_BYTES:
+            continue
+        stored = store_case_image(inv.id, name, data)
+        if not stored:
+            continue
+        photos.append({"url": f"/app/casos/{inv.id}/anexos/{stored['digest']}", "title": stored["name"]})
+    node = add_graph_photo(
+        session,
+        inv,
+        host,
+        title=title,
+        source=source,
+        note=note,
+        photos=photos,
+        as_profile=as_profile in {"1", "true", "on", "yes"},
+    )
+    if not node:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": "envie um arquivo ou uma URL de foto"}, status_code=400)
+        _set_flash(request, "error", "Envie um arquivo ou uma URL de foto.")
+        return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
+    write_audit(session, "investigation.add_photo", username=user.username, investigation_id=inv.id, details={"title": title})
+    session.commit()
+    if _wants_json(request):
+        return _json_case(session, investigation_id, ok=True)
+    _set_flash(request, "ok", "Foto no grafo." + (" Também virou foto de perfil." if as_profile else ""))
+    return RedirectResponse(f"/app/casos/{investigation_id}", status_code=303)
 
 
 @router.post("/app/casos/{investigation_id}/explodir")

@@ -1087,7 +1087,7 @@ def _hits_from_connector(parsed: Any, *, hit_kind: str, when: str) -> tuple[list
 
 
 def _try_datajud(settings: Settings, origin: str, display: str) -> Any | None:
-    if not (settings.datajud_enable and settings.datajud_api_key):
+    if not settings.datajud_enable:
         return None
     digits = origin.split(":", 1)[-1]
     fake = SimpleNamespace(
@@ -1122,7 +1122,7 @@ def _try_djen(settings: Settings, origin: str, display: str, entity_type: str) -
 def _try_transparencia(settings: Settings, origin: str, display: str, id_kind: str) -> Any | None:
     if id_kind not in {"CPF", "CNPJ"}:
         return None
-    if not (settings.transparencia_enable and settings.transparencia_api_key):
+    if not settings.transparencia_enable:
         return None
     digits = origin.split(":", 1)[-1]
     fake = SimpleNamespace(
@@ -1278,7 +1278,7 @@ def _consult_negativa(raw: str, settings: Settings | None = None, *, quick: bool
         summary = f"{found} registro(s) ou menção(ões) negativa(s) pública(s) para {display}."
     elif not _live_ok(settings, quick):
         summary = "Listas oficiais apontadas. CEIS/CNEP e menções em gov.br rodam ao vivo (chave da Transparência, se houver)."
-        notes.append("Com TRANSPARENCIA_API_KEY e CPF/CNPJ, a consulta pergunta CEIS e CNEP direto.")
+        notes.append("CEIS/CNEP/PEP saem do portal público (gratuito), sem chave de API.")
     else:
         summary = "Nada nas listas desta rodada. Abra CEIS, CNEP, TCU ou TSE na ficha."
     return ConsultResult(

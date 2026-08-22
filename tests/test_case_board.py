@@ -332,6 +332,33 @@ def test_add_company_links_to_target_without_becoming_seed(settings, db) -> None
     assert edge.rel_type == "EMPRESA"
 
 
+def test_search_all_and_graph_photo(settings, db) -> None:
+    from osint4all.graph.assets import add_graph_photo
+    from osint4all.graph.expand import queue_search_all
+
+    inv = _case(db)
+    person = inv.entities[0]
+    queued = queue_search_all(db, inv, max_attempts=2)
+    db.flush()
+    assert queued >= 1
+    assert "POLITICOS" in (person.attrs or {}).get("probe_kinds", [])
+    jobs = db.scalars(select(ExpansionJob).where(ExpansionJob.investigation_id == inv.id)).all()
+    assert any(job.status == "PENDING" for job in jobs)
+    shot = add_graph_photo(
+        db,
+        inv,
+        person,
+        title="Retrato",
+        source="manual",
+        photos=[{"url": "https://www.camara.leg.br/foto.jpg", "title": "oficial"}],
+        as_profile=True,
+    )
+    db.flush()
+    assert shot is not None
+    assert shot.attrs["tipo"] == "imagem"
+    assert person.attrs.get("profile_photo") == "https://www.camara.leg.br/foto.jpg"
+
+
 def test_add_bank_and_wealth_link_to_target(settings, db) -> None:
     from osint4all.graph.assets import add_bank_account, add_wealth_estimate
 

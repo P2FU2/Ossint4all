@@ -48,7 +48,7 @@
 
   function cardLabel(n) {
     const attrs = n.attrs || {};
-    if (attrs.tipo === "imagem") {
+    if (attrs.tipo === "imagem" || (n.type === "PERSON" && (attrs.thumb || attrs.profile_photo))) {
       const title = String(n.label || "Imagem").replace(/^https?:\/\/\S+/i, "Imagem").slice(0, 42);
       return title + (n.seed ? " · alvo" : "");
     }
@@ -72,7 +72,7 @@
         kind: (n.attrs || {}).kind || "",
         attrs: n.attrs || {},
         ids: n.ids || [],
-        thumb: (n.attrs || {}).thumb || "",
+        thumb: (n.attrs || {}).thumb || (n.attrs || {}).profile_photo || "",
         tipo: (n.attrs || {}).tipo || "",
         lines: 1 + Math.min(4, (n.ids || []).filter((item) => item.kind !== "NAME").length),
       },
@@ -147,6 +147,25 @@
         },
       },
       { selector: 'node[type = "PERSON"]', style: { "border-color": colors.PERSON } },
+      {
+        selector: 'node[type = "PERSON"][?thumb]',
+        style: {
+          "background-image": "data(thumb)",
+          "background-fit": "cover",
+          "background-clip": "node",
+          width: 132,
+          height: 156,
+          "text-valign": "bottom",
+          "text-margin-y": 4,
+          "font-size": 9,
+          "text-max-width": 120,
+          "background-color": "#0c1410",
+        },
+      },
+      {
+        selector: 'node[type = "PERSON"][?thumb][?seed]',
+        style: { width: 148, height: 172, "border-width": 2, "border-color": "#6f9b82" },
+      },
       { selector: 'node[type = "NOTE"]', style: { "border-color": colors.NOTE, "background-color": "#1c1a10" } },
       { selector: 'node[kind = "diagram"]', style: { width: 210, height: 64, "border-color": "#d4b45a", "background-color": "#1c1810", "text-wrap": "wrap", "text-max-width": 190 } },
       { selector: "node[?seed]", style: { width: 210, height: 58, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
@@ -692,17 +711,27 @@
     const known = new Set([...Object.keys(live), ...cy.nodes().map((node) => node.id())]);
     payload = next;
     rebuildNodeIndex();
-    if (yearInput && (payload.years || []).length && !yearInput.dataset.ready) {
-      yearInput.min = String(payload.years[0]);
-      yearInput.max = String(payload.years[payload.years.length - 1]);
-      yearInput.value = yearInput.max;
-      if (yearOut) yearOut.textContent = yearInput.value;
-      yearInput.dataset.ready = "1";
+    if ((payload.years || []).length) {
+      const first = String(payload.years[0]);
+      const last = String(payload.years[payload.years.length - 1]);
+      const targets = [yearInput, yearMin, yearMax].filter(Boolean);
+      const ready = yearMin || yearInput;
+      if (ready && !ready.dataset.ready) {
+        targets.forEach((input) => {
+          input.min = first;
+          input.max = last;
+        });
+        if (yearMin) yearMin.value = first;
+        if (yearMax) yearMax.value = last;
+        if (yearInput) yearInput.value = last;
+        if (ready) ready.dataset.ready = "1";
+        paintYearRange();
+      }
     }
     if (hadNodes) patchElements(payload);
     else {
-      cy.elements().remove();
-      cy.add(toElements(payload));
+    cy.elements().remove();
+    cy.add(toElements(payload));
     }
     const serverNodes = savedNodeMap();
     const merged = { ...serverNodes, ...live };
@@ -1112,6 +1141,12 @@
   const search = document.getElementById("graph-search");
   const yearInput = document.getElementById("graph-year");
   const yearOut = document.getElementById("graph-year-out");
+  const yearMin = document.getElementById("graph-year-min");
+  const yearMax = document.getElementById("graph-year-max");
+  const yearFrom = document.getElementById("graph-year-from");
+  const yearTo = document.getElementById("graph-year-to");
+  const yearSpan = document.getElementById("graph-year-span");
+  const yearTrack = document.getElementById("graph-year-track");
   let filterTimer = 0;
   function hiddenTypes() {
     const off = new Set();
@@ -1148,11 +1183,13 @@
       const degreeOk = seed ? degrees.has(0) : degrees.has(Math.min(depth, 4));
       node.style("display", searchOk && layerOk && degreeOk ? "element" : "none");
     });
-    const yearLimit = yearInput ? Number(yearInput.value) : 9999;
+    const yearLo = yearMin ? Number(yearMin.value) : (yearInput ? Number(yearInput.min || 0) : 0);
+    const yearHi = yearMax ? Number(yearMax.value) : (yearInput ? Number(yearInput.value) : 9999);
     cy.edges().forEach((edge) => {
       const year = Number(edge.data("year") || 0);
       const endsOn = edge.source().style("display") !== "none" && edge.target().style("display") !== "none";
-      edge.style("display", endsOn && (!year || year <= yearLimit) ? "element" : "none");
+      const yearOk = !year || (year >= yearLo && year <= yearHi);
+      edge.style("display", endsOn && yearOk ? "element" : "none");
     });
     closeBalloon();
     window.clearTimeout(filterTimer);
@@ -1172,12 +1209,40 @@
   }
   if (layerBox) layerBox.addEventListener("change", applyFilters);
   if (search) search.addEventListener("input", applyFilters);
-  if (yearInput) {
-    yearInput.addEventListener("input", () => {
-      if (yearOut) yearOut.textContent = yearInput.value;
+  function paintYearRange() {
+    if (!yearMin || !yearMax) return;
+    let lo = Number(yearMin.value);
+    let hi = Number(yearMax.value);
+    if (lo > hi) {
+      const swap = lo;
+      lo = hi;
+      hi = swap;
+      yearMin.value = String(lo);
+      yearMax.value = String(hi);
+    }
+    const min = Number(yearMin.min);
+    const max = Number(yearMin.max);
+    const span = Math.max(1, max - min);
+    if (yearFrom) yearFrom.textContent = String(lo);
+    if (yearTo) yearTo.textContent = String(hi);
+    if (yearSpan) yearSpan.textContent = lo === hi ? String(lo) : lo + " — " + hi;
+    if (yearTrack) {
+      yearTrack.style.setProperty("--year-from", ((lo - min) / span * 100) + "%");
+      yearTrack.style.setProperty("--year-span", ((hi - lo) / span * 100) + "%");
+    }
+  }
+  function bindYearInput(input) {
+    if (!input) return;
+    input.addEventListener("input", () => {
+      paintYearRange();
+      if (yearOut) yearOut.textContent = yearMax ? yearMax.value : input.value;
       applyFilters();
     });
   }
+  bindYearInput(yearInput);
+  bindYearInput(yearMin);
+  bindYearInput(yearMax);
+  paintYearRange();
 
   const DOTS_KEY = "osint4all.canvasDots";
   const viewStack = [];
@@ -1431,7 +1496,7 @@
       if (info.changed && !selectMode && Date.now() - lastLoadAt > 900) {
         try {
           await load();
-        } catch (_) {
+    } catch (_) {
           /* próximo ciclo tenta de novo */
         }
       }
@@ -1590,6 +1655,22 @@
       gcFields.appendChild(field("Fotos", "fotos", "file", "", { accept: "image/jpeg,image/png,.jpg,.jpeg,.png", multiple: true }));
       gcFields.appendChild(field("URL da foto", "photo_url", "text", "", { placeholder: "https://… miniatura pública" }));
       gcFields.appendChild(field("Nota", "note", "text", "", { placeholder: "opcional" }));
+    } else if (mode === "photo") {
+      gcKind.textContent = "foto";
+      gcTitle.textContent = "Adicionar foto ao grafo";
+      gcLead.textContent = "Arquivo ou URL pública. O mesmo recorte de foto do mapa. Sem face de leak.";
+      gcFields.appendChild(field("Título", "title", "text", "", { placeholder: "legenda" }));
+      gcFields.appendChild(field("Fotos", "fotos", "file", "", { accept: "image/jpeg,image/png,.jpg,.jpeg,.png", multiple: true }));
+      gcFields.appendChild(field("URL da foto", "photo_url", "text", "", { placeholder: "https://…" }));
+      gcFields.appendChild(field("Fonte", "source", "text", "", { placeholder: "Câmara, TSE, manual…" }));
+      const profile = document.createElement("label");
+      profile.className = "check";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.name = "as_profile";
+      box.value = "1";
+      profile.append(box, document.createTextNode(" Usar como foto de perfil"));
+      gcFields.appendChild(profile);
     } else if (mode === "diagram") {
       gcKind.textContent = "diagrama";
       gcTitle.textContent = "Adicionar diagrama";
@@ -1809,6 +1890,14 @@
           loading: "Gravando no dossiê…",
           done: composerMode === "bank" ? "Conta ligada ao nó." : "Patrimônio estimado gravado.",
         });
+      } else if (composerMode === "photo") {
+        const body = new FormData(composerForm);
+        body.set("csrf_token", csrfToken());
+        body.set("from_id", composer.dataset.entityId || seedNodeId());
+        await postMultipart(root.dataset.photoUrl, body, {
+          loading: "Colocando a foto no grafo…",
+          done: "Foto no grafo.",
+        });
       } else if (composerMode === "property") {
         const body = new FormData(composerForm);
         body.set("csrf_token", csrfToken());
@@ -1862,12 +1951,13 @@
       PROCESSOS: "Processos",
       CNJ: "Processo",
       INFO: "Dossiê",
+      POLITICOS: "Político / PEP",
     })[kind] || kind;
   }
 
   function canProbe(kind) {
     return !!({
-      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1, PROCESSOS: 1, CNJ: 1, INFO: 1,
+      NAME: 1, EMAIL: 1, USERNAME: 1, PHONE: 1, CPF: 1, CNPJ: 1, COMPANIES: 1, QSA: 1, PROCESSOS: 1, CNJ: 1, INFO: 1, POLITICOS: 1,
     })[kind];
   }
 
@@ -2114,6 +2204,7 @@
         menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar imóvel", () => openComposer("property", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar foto ao grafo", () => openComposer("photo", { entityId: node.id() })));
       } else if (type === "CASE") {
         menu.appendChild(menuButton("Buscar comunicações deste processo", () => probeKinds(node.id(), ["PROCESSOS", "CNJ"], "processos")));
       } else {
@@ -2139,6 +2230,7 @@
         menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: node.id() })));
         menu.appendChild(menuButton("Adicionar imóvel", () => openComposer("property", { entityId: node.id() })));
+        menu.appendChild(menuButton("Adicionar foto ao grafo", () => openComposer("photo", { entityId: node.id() })));
       }
       menu.appendChild(menuButton("Abrir ficha", () => {
         window.location.href = root.dataset.entityBase + node.id();
@@ -2198,6 +2290,7 @@
       menu.appendChild(menuButton("Adicionar conta bancária", () => openComposer("bank", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Adicionar patrimônio estimado", () => openComposer("wealth", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Adicionar imóvel", () => openComposer("property", { entityId: seedNodeId() })));
+      menu.appendChild(menuButton("Adicionar foto ao grafo", () => openComposer("photo", { entityId: seedNodeId() })));
       menu.appendChild(menuButton("Selecionar área e excluir", () => setSelectMode(true)));
       menu.appendChild(menuButton("Adicionar anotação", () => openComposer("note")));
       menu.appendChild(menuButton("Adicionar diagrama", () => openComposer("diagram")));
@@ -2291,6 +2384,15 @@
       postBoard(form.action, {}, {
         loading: exploding ? "Rodando QSA…" : "Rodando fila…",
         done: exploding ? "QSA na fila — o grafo atualiza sozinho." : "Lote na fila — o grafo atualiza sozinho.",
+      });
+    });
+  });
+  document.querySelectorAll('form[action*="/pesquisar-tudo"]').forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      postBoard(form.action, {}, {
+        loading: "Pesquisando o dossiê inteiro…",
+        done: "Busca total na fila — o grafo atualiza sozinho.",
       });
     });
   });

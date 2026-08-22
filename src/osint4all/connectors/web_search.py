@@ -8,7 +8,7 @@ from osint4all.config import Settings
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.connectors.plate_public import extract_owner_mentions, extract_vehicle_mentions, parse_declared_owner
 from osint4all.db.models import Entity
-from osint4all.exceptions import FailedAuthentication, SkippedDisabled
+from osint4all.exceptions import SkippedDisabled
 from osint4all.http_client import RateLimitedClient
 from osint4all.graph.public_links import is_catalog_portal
 from osint4all.identifiers import canonical_key
@@ -40,13 +40,8 @@ def searxng_bases(settings: Settings) -> list[str]:
 
 
 def web_search_ready(settings: Settings) -> bool:
-    if not settings.web_search_enable:
-        return False
-    if settings.brave_search_api_key:
-        return True
-    if settings.google_cse_api_key and settings.google_cse_cx:
-        return True
-    return bool(settings.searxng_enable and searxng_bases(settings))
+    """DuckDuckGo HTML é sempre gratuito — a busca não depende de chave paga."""
+    return bool(settings.web_search_enable)
 
 
 _DIARIO_HINTS = ("diário oficial", "diario oficial", "in.gov.br", "querido diário", "querido diario", "djen", "imprensa nacional", "dou")
@@ -204,27 +199,31 @@ class WebSearchConnector:
                 return result
         if self.settings.searxng_enable:
             result = self._searxng(query, origin_key)
-            if result.entities or result.evidence or result.notes:
+            if result.entities or result.evidence:
                 return result
-        raise FailedAuthentication(
-            "Nenhum backend de busca respondeu. Tente SEARXNG_URL (sua instância) ou BRAVE_SEARCH_API_KEY / Google CSE."
-        )
+        ddg = self._duckduckgo(query, origin_key)
+        if ddg.entities or ddg.evidence:
+            return ddg
+        return ConnectorResult(notes=["Busca web gratuita (SearXNG/DuckDuckGo) sem resultados nesta rodada."])
 
     def _brave(self, query: str, origin_key: str) -> ConnectorResult:
-        resp = self.http.request(
+        resp, err = self.http.safe_request(
             "GET",
             "https://api.search.brave.com/res/v1/web/search",
             headers={"X-Subscription-Token": self.settings.brave_search_api_key, "Accept": "application/json"},
             params={"q": query, "count": 10},
         )
-        if resp.status_code >= 400:
-            return ConnectorResult(notes=[f"Brave HTTP {resp.status_code}"])
-        data = resp.json()
+        if err or resp is None:
+            return ConnectorResult(notes=[f"Brave: {err or 'sem resposta'}"])
+        try:
+            data = resp.json()
+        except Exception:
+            return ConnectorResult(notes=["Brave JSON inválido"])
         hits = ((data.get("web") or {}).get("results")) or []
         return parse_web_hits(hits, origin_key=origin_key, source="Brave Search")
 
     def _google(self, query: str, origin_key: str) -> ConnectorResult:
-        resp = self.http.request(
+        resp, err = self.http.safe_request(
             "GET",
             "https://www.googleapis.com/customsearch/v1",
             params={
@@ -234,25 +233,26 @@ class WebSearchConnector:
                 "num": 10,
             },
         )
-        if resp.status_code >= 400:
-            return ConnectorResult(notes=[f"Google CSE HTTP {resp.status_code}"])
-        data = resp.json()
+        if err or resp is None:
+            return ConnectorResult(notes=[f"Google CSE: {err or 'sem resposta'}"])
+        try:
+            data = resp.json()
+        except Exception:
+            return ConnectorResult(notes=["Google CSE JSON inválido"])
         hits = data.get("items") or []
         return parse_web_hits(hits, origin_key=origin_key, source="Google CSE")
 
     def _searxng(self, query: str, origin_key: str) -> ConnectorResult:
         last = "nenhuma instância respondeu JSON"
-        for base in searxng_bases(self.settings)[:2]:
-            try:
-                resp = self.http.request(
-                    "GET",
-                    f"{base}/search",
-                    params={"q": query, "format": "json", "categories": "general", "language": "pt-BR"},
-                    allow_404=True,
-                    max_retries=1,
-                )
-            except Exception as exc:  # noqa: BLE001
-                last = f"{base}: {exc}"
+        for base in searxng_bases(self.settings)[:6]:
+            resp, err = self.http.safe_request(
+                "GET",
+                f"{base}/search",
+                params={"q": query, "format": "json", "categories": "general", "language": "pt-BR"},
+                max_retries=1,
+            )
+            if err or resp is None:
+                last = f"{base}: {err or 'sem resposta'}"
                 continue
             ctype = (resp.headers.get("content-type") or "").lower()
             if resp.status_code >= 400:
@@ -274,3 +274,23 @@ class WebSearchConnector:
                 return parsed
             last = f"{base} sem resultados"
         return ConnectorResult(notes=[f"SearXNG público: {last}"])
+
+    def _duckduckgo(self, query: str, origin_key: str) -> ConnectorResult:
+        from osint4all.connectors.html_public import parse_ddg_html
+
+        urls = (
+            ("https://html.duckduckgo.com/html/", {"q": query, "kl": "br-pt"}),
+            ("https://lite.duckduckgo.com/lite/", {"q": query}),
+        )
+        headers = {
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        }
+        for url, params in urls:
+            resp, err = self.http.safe_request("GET", url, params=params, headers=headers, max_retries=1)
+            if err or resp is None:
+                continue
+            hits = parse_ddg_html(resp.text or "")
+            if hits:
+                return parse_web_hits(hits, origin_key=origin_key, source="DuckDuckGo (gratuito)")
+        return ConnectorResult(notes=["DuckDuckGo HTML sem resultados nesta rodada."])

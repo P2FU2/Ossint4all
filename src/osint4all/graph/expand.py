@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from osint4all.config import Settings, get_settings
-from osint4all.connectors.base import Connector, ExpandContext
+from osint4all.connectors.base import Connector, ConnectorResult, ExpandContext
 from osint4all.connectors.registry import build_connectors
 from osint4all.db.models import Entity, ExpansionJob, Investigation
 from osint4all.db.repository import claim_next_job, consolidate_identities, utcnow
@@ -18,18 +18,94 @@ PROBE_CONNECTORS = {
     "EMAIL": frozenset({"email_public", "web_search", "username_public", "google_public"}),
     "USERNAME": frozenset({"username_public", "web_search", "google_public"}),
     "PHONE": frozenset({"phone_public", "web_search"}),
-    "NAME": frozenset({"socio_search", "web_search", "wikidata", "tse", "google_public", "congresso_public", "opensanctions_public"}),
-    "CPF": frozenset({"socio_search", "tse", "transparencia", "web_search", "opensanctions_public"}),
-    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search", "geo_public", "pncp_public", "gleif_public", "opensanctions_public"}),
+    "NAME": frozenset({"socio_search", "web_search", "wikidata", "tse", "google_public", "congresso_public", "politicos_public", "diario_oficial", "opensanctions_public", "aleph_public", "pncp_public"}),
+    "CPF": frozenset({"socio_search", "tse", "transparencia", "politicos_public", "web_search", "opensanctions_public"}),
+    "CNPJ": frozenset({"cnpj_receita", "opencorporates", "socio_search", "geo_public", "pncp_public", "gleif_public", "opensanctions_public", "aleph_public"}),
     "COMPANIES": frozenset({"socio_search", "cnpj_receita"}),
     "QSA": frozenset({"cnpj_receita", "socio_search"}),
     "PROCESSOS": frozenset({"djen", "datajud"}),
     "CNJ": frozenset({"djen", "datajud"}),
-    "INFO": frozenset({"socio_search", "djen", "transparencia", "web_search", "tse", "wikidata", "google_public", "pncp_public", "congresso_public"}),
+    "INFO": frozenset({"socio_search", "djen", "transparencia", "web_search", "tse", "wikidata", "google_public", "pncp_public", "congresso_public", "politicos_public", "diario_oficial", "aleph_public", "opensanctions_public"}),
     "URL": frozenset({"host_public", "crtsh", "rdap_public", "host_observe", "web_search"}),
-    "SANCTIONS": frozenset({"transparencia", "tse", "web_search", "opensanctions_public"}),
+    "SANCTIONS": frozenset({"transparencia", "tse", "web_search", "opensanctions_public", "politicos_public"}),
     "CONTRACTS": frozenset({"pncp_public", "web_search"}),
+    "POLITICOS": frozenset({"tse", "congresso_public", "politicos_public", "transparencia", "diario_oficial", "wikidata", "google_public", "web_search"}),
+    "NEGATIVA": frozenset({"transparencia", "opensanctions_public", "politicos_public", "web_search", "aleph_public"}),
+    "IMOVEL": frozenset({"tse", "diario_oficial", "web_search", "geo_public"}),
+    "DIARIO": frozenset({"diario_oficial", "djen", "web_search"}),
 }
+
+SEARCH_ALL_KINDS = (
+    "NAME",
+    "CPF",
+    "CNPJ",
+    "EMAIL",
+    "USERNAME",
+    "PHONE",
+    "COMPANIES",
+    "QSA",
+    "PROCESSOS",
+    "CNJ",
+    "SANCTIONS",
+    "INFO",
+    "POLITICOS",
+    "NEGATIVA",
+    "IMOVEL",
+    "DIARIO",
+)
+
+SEARCH_ALL_CONNECTORS = (
+    "tse",
+    "transparencia",
+    "congresso_public",
+    "politicos_public",
+    "diario_oficial",
+    "djen",
+    "datajud",
+    "socio_search",
+    "wikidata",
+    "web_search",
+    "opensanctions_public",
+    "aleph_public",
+    "pncp_public",
+    "google_public",
+)
+
+
+def queue_search_all(session, investigation, *, max_attempts: int = 3) -> int:
+    """Enfileira expansão combinando o que já está no dossiê."""
+    from sqlalchemy import select
+
+    from osint4all.db.models import Entity
+    from osint4all.db.repository import enqueue_expand
+
+    kinds = list(SEARCH_ALL_KINDS)
+    current = list(investigation.connectors or [])
+    if current:
+        investigation.connectors = list(dict.fromkeys([*current, *SEARCH_ALL_CONNECTORS]))
+    queued = 0
+    entities = session.scalars(select(Entity).where(Entity.investigation_id == investigation.id)).all()
+    for entity in entities:
+        if entity.entity_type not in {"PERSON", "ORG", "CASE"}:
+            continue
+        status = str((entity.attrs or {}).get("status") or "")
+        if not entity.is_seed and status in {"false", "contested"}:
+            continue
+        if not entity.is_seed and entity.entity_type == "PERSON" and status == "unconfirmed":
+            continue
+        attrs = dict(entity.attrs or {})
+        attrs["probe_kinds"] = kinds
+        entity.attrs = attrs
+        if enqueue_expand(
+            session,
+            investigation=investigation,
+            entity=entity,
+            depth=entity.depth or 0,
+            max_attempts=max_attempts,
+            force=True,
+        ):
+            queued += 1
+    return queued
 
 
 def connectors_for_kinds(kinds: list[str] | tuple[str, ...] | None) -> set[str] | None:
@@ -106,6 +182,17 @@ class ExpansionEngine:
                     latency_ms=int((time.perf_counter() - started) * 1000),
                     version=getattr(connector, "version", "1"),
                     failed=True,
+                )
+                apply_result(
+                    session,
+                    investigation,
+                    entity,
+                    ConnectorResult(notes=[f"{connector.name}: {exc}"[:200]]),
+                    connector=connector.name,
+                    depth=depth,
+                    enqueue_children=False,
+                    max_attempts=self.settings.job_max_attempts,
+                    consolidate=False,
                 )
                 continue
             from osint4all.engines.discovery import log_query

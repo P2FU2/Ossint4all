@@ -606,7 +606,7 @@
       <section id="fontes" class="manual-section">
         <p class="type-tag">admin</p>
         <h2>Fontes</h2>
-        <p>Só administrador. Cada card diz <em>quando dispara</em>, <em>o que devolve</em> e se está pronta, parcial (sócio sem Brasil.IO), precisa chave ou desligada. A fila e a auditoria ficam abaixo.</p>
+        <p>Só administrador. Cada card diz <em>quando dispara</em>, <em>o que devolve</em> e se está pronta, gratuita (scraper) ou paga (Shodan/Censys, off). A fila e a auditoria ficam abaixo.</p>
         <p class="section-kicker">saúde das fontes</p>
         <p><strong>Checar agora</strong> sonda o <code>health()</code> de cada conector (chave ausente, desligado, erro). Sem scan, sem lista de hosts. Alerta no Quadro do caso também aparece quando um job daquele caso falhou.</p>
         <ul>
@@ -622,7 +622,7 @@
           <li><strong>Diários oficiais</strong> — Querido Diário (município/estado). Complementa DJEN (justiça) e a busca web (jornal). Sem CPF.</li>
           <li><strong>Geo</strong> — ViaCEP + Nominatim no endereço já publicado no QSA, para o Mapa deixar o centro da UF.</li>
         </ul>
-        <p>Chaves opcionais: <code>DATAJUD_API_KEY</code>, <code>TRANSPARENCIA_API_KEY</code>, <code>BRASIL_IO_API_TOKEN</code>, <code>SHODAN_API_KEY</code>, <code>CENSYS_API_ID</code> / <code>CENSYS_API_SECRET</code>, <code>SEARXNG_URL</code>, Brave / Google CSE. Sem elas a fonte some ou fica parcial — o painel não completa com chute.</p>
+        <p>Não precisa pagar API. Transparência, PEP, busca web e processos usam portal público ou scraper. Shodan e Censys são pagos e não entram. O painel não completa com chute.</p>
         <p>Consulta vazia grava evidência negativa e aparece em Investigar → Reprodutibilidade (fonte, N, vazio, versão). Isso permite repetir o resultado depois.</p>
       </section>
 

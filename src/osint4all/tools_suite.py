@@ -641,7 +641,7 @@ def _consult_web(raw: str, settings: Settings, *, live: bool) -> ConsultResult:
             query=text,
             title=text,
             summary="Nenhum backend de busca ativo.",
-            notes=["SEARXNG_URL, BRAVE_SEARCH_API_KEY ou GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX."],
+            notes=["Busca web gratuita: SearXNG público ou DuckDuckGo HTML."],
         )
     conn = WebSearchConnector(settings)
     fake = SimpleNamespace(

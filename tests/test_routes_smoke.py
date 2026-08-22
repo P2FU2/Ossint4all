@@ -136,6 +136,9 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "criado" in created.text.lower()
     assert "Editar" in created.text
     assert "Buscar" in created.text
+    assert "Pesquisar tudo" in created.text
+    assert "pesquisar-tudo" in created.text
+    assert "graph-year-min" in created.text
     assert "Explodir QSA" in created.text
     assert "Fila das fontes" in created.text
     investigar = client.get(f"/app/casos/{created.url.path.split('/')[3]}/investigar")

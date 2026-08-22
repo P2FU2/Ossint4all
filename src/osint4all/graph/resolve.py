@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from osint4all.connectors.base import ConnectorResult, FoundEntity
 from osint4all.db.models import Edge, Entity, Evidence, Identifier, Investigation
@@ -23,6 +24,72 @@ from osint4all.db.repository import (
 )
 from osint4all.graph.identity import bind_found_to_profile, found_canonical_key, is_unconfirmed, should_enqueue_child
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
+
+
+def _attach_profile_photo(attrs: dict[str, Any], found: FoundEntity, existing: Entity | None) -> None:
+    host_person = (existing is not None and existing.entity_type == "PERSON") or found.entity_type == "PERSON"
+    if not host_person:
+        return
+    incoming = dict(found.attrs or {})
+    thumb = str(incoming.get("profile_photo") or incoming.get("thumb") or "").strip()
+    if not thumb.startswith(("http://", "https://", "/app/casos/")):
+        return
+    raw_match = incoming.get("identity_match")
+    try:
+        match_n = int(raw_match) if raw_match not in (None, "") else int(round(float(found.confidence or 0) * 100))
+    except (TypeError, ValueError):
+        match_n = int(round(float(found.confidence or 0) * 100))
+    if match_n < 50 and float(found.confidence or 0) < 0.5:
+        return
+    if attrs.get("profile_photo"):
+        return
+    attrs.setdefault("thumb", thumb)
+    attrs["profile_photo"] = thumb
+    if incoming.get("profile_photo_source"):
+        attrs.setdefault("profile_photo_source", incoming["profile_photo_source"])
+    attrs["identity_match"] = max(int(attrs.get("identity_match") or 0), match_n)
+
+
+_PROFILE_MERGE_ATTRS = (
+    "cargo",
+    "partido",
+    "uf",
+    "ano",
+    "camara_id",
+    "senado_id",
+    "thumb",
+    "profile_photo",
+    "profile_photo_source",
+    "papel",
+    "orgao",
+    "nascimento",
+    "situacao",
+    "rede_social",
+    "email_oficial",
+)
+
+
+def _fill_target_from_found(entity: Entity, found: FoundEntity) -> None:
+    """Remap do mesmo alvo deve copiar cargo, partido e foto — não só o identificador."""
+    attrs = dict(entity.attrs or {})
+    incoming = found.attrs or {}
+    for key in _PROFILE_MERGE_ATTRS:
+        val = incoming.get(key)
+        if val in (None, "", [], {}):
+            continue
+        if not attrs.get(key):
+            attrs[key] = val
+    raw_match = incoming.get("identity_match")
+    try:
+        match_n = int(raw_match) if raw_match not in (None, "") else 0
+    except (TypeError, ValueError):
+        match_n = 0
+    if match_n:
+        attrs["identity_match"] = max(int(attrs.get("identity_match") or 0), match_n)
+    _attach_profile_photo(attrs, found, entity)
+    entity.attrs = attrs
+    flag_modified(entity, "attrs")
+    entity.confidence = max(float(entity.confidence or 0), float(found.confidence or 0))
 
 
 def upsert_found_entity(
@@ -76,6 +143,7 @@ def upsert_found_entity(
         else:
             attrs.update(incoming)
         attrs["grau"] = existing.depth
+        _attach_profile_photo(attrs, found, existing)
         existing.attrs = attrs
         add_identifier(existing, found.kind, found.value, key)
         _merge_same_as(session, investigation, existing, found)
@@ -103,6 +171,7 @@ def upsert_found_entity(
 
     attrs = dict(found.attrs or {})
     attrs["grau"] = depth
+    _attach_profile_photo(attrs, found, None)
     entity = Entity(
         investigation_id=investigation.id,
         entity_type=found.entity_type,
@@ -192,11 +261,15 @@ def apply_result(
         action = bind_found_to_profile(found, profile)
         if action == "skip":
             continue
-        if action == "remap" and target is not None:
-            ref_map[key] = target
-            ref_map[canonical_key(found.kind, found.value)] = target
+        host = target
+        if host is None and action == "remap" and origin.entity_type == "PERSON":
+            host = origin
+        if action == "remap" and host is not None:
+            ref_map[key] = host
+            ref_map[canonical_key(found.kind, found.value)] = host
             if found.kind in {"CPF", "EMAIL", "PHONE", "USERNAME", "BIRTHDATE"}:
-                add_identifier(target, found.kind, found.value, canonical_key(found.kind, found.value))
+                add_identifier(host, found.kind, found.value, canonical_key(found.kind, found.value))
+            _fill_target_from_found(host, found)
             continue
         entity = upsert_found_entity(session, investigation, found, depth=depth + 1, fill_only=fill_only)
         ref_map[found_canonical_key(found)] = entity
@@ -267,6 +340,21 @@ def apply_result(
             raw_path=getattr(ev, "raw_path", None),
         )
         _index_host_payload(session, investigation, ev_target, connector, ev.payload)
+
+    for note in result.notes:
+        text = str(note or "").strip()
+        if not text:
+            continue
+        _add_evidence(
+            session,
+            investigation,
+            origin,
+            connector,
+            f"{connector} · status",
+            None,
+            text[:400],
+            {"status": "note"},
+        )
 
     _annotate_identity(session, investigation, created)
 

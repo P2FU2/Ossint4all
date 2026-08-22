@@ -103,6 +103,7 @@ class ShodanPublicConnector:
             "source": self.name,
             "enabled": self.settings.shodan_enable,
             "api_key_configured": bool(self.settings.shodan_api_key),
+            "paid_only": True,
             "via": "api.shodan.io",
         }
 

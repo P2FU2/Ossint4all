@@ -147,32 +147,57 @@ class PncpPublicConnector:
         query = _query_from_entity(entity)
         if not query:
             return ConnectorResult()
-        try:
-            resp = self.http.request(
-                "GET",
-                "https://pncp.gov.br/api/search/",
-                params={"q": query, "ordenacao": "-data", "pagina": 0, "tam_pagina": 10, "status": "divulgada"},
-                allow_404=True,
-                max_retries=1,
-            )
-        except Exception:
-            return ConnectorResult(notes=["PNCP indisponível nesta rodada"])
-        if resp.status_code >= 400:
-            return ConnectorResult(notes=[f"PNCP HTTP {resp.status_code}"])
-        try:
-            data = resp.json()
-        except Exception:
-            return ConnectorResult(notes=["PNCP JSON inválido"])
-        rows: list[Any] = []
-        if isinstance(data, list):
-            rows = data
-        elif isinstance(data, dict):
-            for key in ("items", "content", "data", "results"):
-                value = data.get(key)
-                if isinstance(value, list):
-                    rows = value
-                    break
+        notes: list[str] = []
+        rows = self._search_rows(query, notes)
+        cnpj = _cnpj_from_entity(entity)
+        if not rows and cnpj:
+            rows = self._contratos_cnpj(cnpj, notes)
         parsed = parse_pncp_items(rows, origin_key=entity.canonical_key)
+        parsed.notes.extend(notes)
         if not parsed.entities:
             parsed.notes.append("Nenhum contrato/edital PNCP com esse termo nesta rodada.")
         return parsed
+
+    def _rows_from_data(self, data: Any) -> list[Any]:
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("items", "content", "data", "results"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
+
+    def _search_rows(self, query: str, notes: list[str]) -> list[Any]:
+        resp, err = self.http.safe_request(
+            "GET",
+            "https://pncp.gov.br/api/search/",
+            params={"q": query, "ordenacao": "-data", "pagina": 0, "tam_pagina": 10, "status": "divulgada"},
+            max_retries=1,
+        )
+        if err or resp is None:
+            notes.append(f"PNCP busca: {err or 'sem resposta'}")
+            return []
+        try:
+            data = resp.json()
+        except Exception:
+            notes.append("PNCP JSON inválido")
+            return []
+        return self._rows_from_data(data)
+
+    def _contratos_cnpj(self, cnpj: str, notes: list[str]) -> list[Any]:
+        resp, err = self.http.safe_request(
+            "GET",
+            f"https://pncp.gov.br/api/consulta/v1/orgaos/{cnpj}/contratos",
+            params={"pagina": 1, "tamanhoPagina": 10},
+            max_retries=1,
+        )
+        if err or resp is None:
+            notes.append(f"PNCP contratos: {err or 'sem resposta'}")
+            return []
+        try:
+            data = resp.json()
+        except Exception:
+            notes.append("PNCP contratos: JSON inválido")
+            return []
+        return self._rows_from_data(data)

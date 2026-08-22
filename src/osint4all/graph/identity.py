@@ -66,6 +66,15 @@ def bind_found_to_profile(found: FoundEntity, profile: TargetProfile | None) -> 
         return "keep"
     if kind == "NAME" and same_name:
         return "remap"
+    attrs = getattr(found, "attrs", None) or {}
+    overlap = name_overlap_score(label, profile.name) if profile.name else 0.0
+    papel = str(attrs.get("papel") or "").strip().lower()
+    try:
+        match_n = int(attrs.get("identity_match") or 0)
+    except (TypeError, ValueError):
+        match_n = 0
+    if kind == "NAME" and overlap >= 0.5 and (papel in {"parlamentar", "candidato", "pep"} or match_n >= 50):
+        return "remap"
     if kind in {"EMAIL", "PHONE", "USERNAME", "BIRTHDATE"} and same_name:
         return "remap"
     return "keep"
@@ -99,6 +108,33 @@ def name_tokens(value: str) -> list[str]:
 def names_match(left: str, right: str) -> bool:
     a, b = collapse_name(left), collapse_name(right)
     return bool(a) and a == b
+
+
+def name_search_variants(nome: str) -> list[str]:
+    """Consultas curtas para APIs que não aceitam o nome civil inteiro."""
+    skip = {"da", "de", "do", "dos", "das", "e", "di"}
+    tokens = [t for t in name_tokens(nome) if t not in skip and len(t) > 1]
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in (nome.strip(), " ".join(tokens[-2:]) if len(tokens) >= 2 else "", " ".join(tokens[:2]) if len(tokens) >= 2 else ""):
+        key = collapse_name(item)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def name_overlap_score(left: str, right: str) -> float:
+    """0–1: fração de tokens (sem da/de/do) em comum. ≥0.5 costuma ser a mesma pessoa."""
+    skip = {"da", "de", "do", "dos", "das", "e", "di"}
+    a = {t for t in name_tokens(left) if t not in skip and len(t) > 1}
+    b = {t for t in name_tokens(right) if t not in skip and len(t) > 1}
+    if not a or not b:
+        return 0.0
+    if names_match(left, right) or names_same_person(left, right):
+        return 1.0
+    return len(a & b) / max(len(a), len(b))
 
 
 def names_same_person(left: str, right: str) -> bool:

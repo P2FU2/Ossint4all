@@ -247,3 +247,71 @@ def add_property(
         note=source or "Imóvel acrescentado no dossiê",
     )
     return node
+
+
+def add_graph_photo(
+    session,
+    investigation: Investigation,
+    host: Entity,
+    *,
+    title: str = "",
+    source: str = "",
+    note: str = "",
+    photos: list[dict] | None = None,
+    as_profile: bool = False,
+) -> Entity | None:
+    shots: list[dict] = []
+    seen: set[str] = set()
+    for raw in photos or []:
+        if not isinstance(raw, dict):
+            continue
+        url = _clean(str(raw.get("url") or ""))
+        if not url or url in seen:
+            continue
+        if not (url.startswith("http://") or url.startswith("https://") or url.startswith("/app/casos/")):
+            continue
+        seen.add(url)
+        shots.append({"url": url[:800], "title": _clean(str(raw.get("title") or title))[:160]})
+        if len(shots) >= 6:
+            break
+    if not shots:
+        return None
+    thumb = shots[0]["url"]
+    label = _clean(title) or shots[0]["title"] or "Foto"
+    if as_profile and host.entity_type == "PERSON":
+        attrs = dict(host.attrs or {})
+        attrs["thumb"] = thumb
+        attrs["profile_photo"] = thumb
+        attrs["profile_photo_source"] = _clean(source) or "manual"
+        attrs["fotos"] = list(attrs.get("fotos") or []) + shots
+        host.attrs = attrs
+    node = upsert_found_entity(
+        session,
+        investigation,
+        FoundEntity(
+            entity_type="PUBLICATION",
+            kind="URL",
+            value=thumb,
+            display_name=label[:180],
+            attrs={
+                "thumb": thumb,
+                "tipo": "imagem",
+                "fonte": _clean(source),
+                "nota": _clean(note),
+                "fotos": shots,
+                "status": "unconfirmed",
+            },
+            confidence=0.4,
+        ),
+        depth=max(1, int(host.depth or 0) + 1),
+        is_seed=False,
+    )
+    create_manual_edge(
+        session,
+        investigation,
+        from_id=host.id,
+        to_id=node.id,
+        rel_type="MENCAO",
+        note=_clean(source) or "Foto acrescentada no grafo",
+    )
+    return node

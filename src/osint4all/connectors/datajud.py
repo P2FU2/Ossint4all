@@ -216,6 +216,7 @@ class DatajudConnector:
             "enabled": self.settings.datajud_enable,
             "api_key_configured": bool(self.settings.datajud_api_key),
             "api_key_url": self.settings.datajud_api_key_url,
+            "free_fallback": True,
         }
 
     def accepts(self, entity: Entity) -> bool:
@@ -224,26 +225,52 @@ class DatajudConnector:
     def collect(self, entity: Entity, ctx: ExpandContext) -> ConnectorResult:
         if not self.settings.datajud_enable:
             raise SkippedDisabled("DataJud desabilitado")
-        if not self.settings.datajud_api_key:
-            raise FailedAuthentication(
-                f"DATAJUD_API_KEY ausente. Chave pública: {self.settings.datajud_api_key_url}"
-            )
         cnj = _cnj_from_entity(entity)
         if not cnj:
             return ConnectorResult()
+        if not self.settings.datajud_api_key:
+            return self._free_capa(entity, ctx, cnj)
         alias = alias_for_cnj(cnj)
         if not alias:
             return ConnectorResult(notes=["Tribunal sem endpoint DataJud (ex.: STF) ou alias desconhecido"])
         url = f"{self.settings.datajud_base_url.rstrip('/')}/{alias}/_search"
         body = {"size": 5, "query": {"match": {"numeroProcesso": cnj}}}
-        resp = self.http.request("POST", url, json=body)
-        if resp.status_code >= 400:
-            raise FailedSource(f"DataJud HTTP {resp.status_code}")
-        data = resp.json()
+        resp, err = self.http.safe_request("POST", url, json=body, max_retries=1)
+        if err or resp is None:
+            extra = self._free_capa(entity, ctx, cnj)
+            extra.notes.append(f"DataJud API: {err or 'sem resposta'}")
+            return extra
+        try:
+            data = resp.json()
+        except Exception:
+            return self._free_capa(entity, ctx, cnj)
         hits = (((data or {}).get("hits") or {}).get("hits")) or []
         merged = ConnectorResult()
         for h in hits:
             src = h.get("_source") if isinstance(h, dict) else None
             if isinstance(src, dict):
                 merged.merge(parse_datajud_hit(src, cnj))
+        if not merged.entities:
+            merged.merge(self._free_capa(entity, ctx, cnj))
         return merged
+
+    def _free_capa(self, entity, ctx, cnj: str) -> ConnectorResult:
+        from osint4all.connectors.djen import DjenConnector
+
+        out = ConnectorResult(
+            notes=["DataJud sem chave — capa pelo DJEN/Comunica (gratuito)."],
+            evidence=[
+                FoundEvidence(
+                    source_label="CNJ · consulta pública",
+                    url="https://www.cnj.jus.br/sistemas/datajud/",
+                    snippet=f"Processo {cnj} — busca pública sem API paga",
+                    payload={"cnj": cnj, "via": "scraper"},
+                    entity_ref=entity.canonical_key,
+                )
+            ],
+        )
+        try:
+            out.merge(DjenConnector(self.settings).collect(entity, ctx))
+        except Exception as exc:  # noqa: BLE001
+            out.notes.append(f"DJEN: {exc}"[:160])
+        return out

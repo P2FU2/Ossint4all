@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     google_public_enable: bool = True
     pncp_public_enable: bool = True
     congresso_public_enable: bool = True
+    politicos_public_enable: bool = True
     opensanctions_public_enable: bool = True
     gleif_public_enable: bool = True
 
@@ -146,6 +147,7 @@ ALL_CONNECTORS = (
     "google_public",
     "pncp_public",
     "congresso_public",
+    "politicos_public",
     "opensanctions_public",
     "gleif_public",
 )

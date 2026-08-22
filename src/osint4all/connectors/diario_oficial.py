@@ -83,7 +83,7 @@ class DiarioOficialConnector:
         )
 
     def health(self) -> dict[str, Any]:
-        return {"source": self.name, "enabled": self.settings.diario_oficial_enable, "api": "queridodiario.ok.org.br"}
+        return {"source": self.name, "enabled": self.settings.diario_oficial_enable, "api": "api.queridodiario.ok.org.br"}
 
     def accepts(self, entity: Entity) -> bool:
         return entity.entity_type in {"PERSON", "ORG"} and _query_from_entity(entity) is not None
@@ -94,19 +94,46 @@ class DiarioOficialConnector:
         query = _query_from_entity(entity)
         if not query:
             return ConnectorResult()
-        resp = self.http.request(
-            "GET",
+        notes: list[str] = []
+        rows: list[Any] = []
+        for endpoint in (
+            "https://api.queridodiario.ok.org.br/gazettes",
             "https://queridodiario.ok.org.br/api/gazettes",
-            params={"querystring": query, "size": 8},
-            allow_404=True,
-        )
-        if resp.status_code >= 400:
-            return ConnectorResult()
-        try:
-            data = resp.json()
-        except Exception:
-            return ConnectorResult()
-        rows = data.get("gazettes") if isinstance(data, dict) else data
-        if not isinstance(rows, list):
-            return ConnectorResult()
-        return parse_gazette_rows(rows, origin_key=entity.canonical_key, query=query)
+        ):
+            resp, err = self.http.safe_request(
+                "GET",
+                endpoint,
+                params={"querystring": query, "size": 8, "excerpt_size": 180, "number_of_excerpts": 1},
+            )
+            if err or resp is None:
+                notes.append(f"Querido Diário: {err or 'sem resposta'}")
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                notes.append("Querido Diário: resposta inválida")
+                continue
+            raw = data.get("gazettes") if isinstance(data, dict) else data
+            if isinstance(raw, list) and raw:
+                rows = raw
+                break
+            if isinstance(raw, list):
+                rows = raw
+        parsed = parse_gazette_rows(rows, origin_key=entity.canonical_key, query=query)
+        if not parsed.entities:
+            from urllib.parse import quote_plus
+
+            portal = f"https://www.in.gov.br/consulta/-/buscar/dou?q={quote_plus(query)}"
+            parsed.evidence.append(
+                FoundEvidence(
+                    source_label="DOU · Imprensa Nacional",
+                    url=portal,
+                    snippet=f"Busca pública no Diário Oficial da União · {query}",
+                    payload={"query": query, "fallback": "in.gov.br"},
+                    entity_ref=entity.canonical_key,
+                )
+            )
+            if not notes:
+                notes.append("Nenhuma edição no Querido Diário; ficou a busca do DOU.")
+        parsed.notes.extend(notes)
+        return parsed

@@ -80,6 +80,7 @@ class CensysPublicConnector:
             "source": self.name,
             "enabled": self.settings.censys_enable,
             "api_key_configured": bool(self.settings.censys_api_id and self.settings.censys_api_secret),
+            "paid_only": True,
             "via": "search.censys.io",
         }
 

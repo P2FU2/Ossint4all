@@ -90,21 +90,20 @@ class AlephPublicConnector:
         query = _query_from_entity(entity)
         if not query:
             return ConnectorResult()
-        try:
-            resp = self.http.request(
-                "GET",
-                "https://aleph.occrp.org/api/2/entities",
-                params={"q": query, "limit": 8},
-                allow_404=True,
-                max_retries=1,
-            )
-        except Exception:
-            return ConnectorResult()
-        if resp.status_code >= 400:
-            return ConnectorResult()
+        resp, err = self.http.safe_request(
+            "GET",
+            "https://aleph.occrp.org/api/2/entities",
+            params={"q": query, "limit": 8},
+            max_retries=1,
+        )
+        if err or resp is None:
+            return ConnectorResult(notes=[f"Aleph: {err or 'sem resposta'}"])
         try:
             data = resp.json()
         except Exception:
-            return ConnectorResult()
+            return ConnectorResult(notes=["Aleph: resposta inválida"])
         rows = data.get("results") if isinstance(data, dict) else None
-        return parse_aleph_results(rows if isinstance(rows, list) else [], origin_key=entity.canonical_key)
+        parsed = parse_aleph_results(rows if isinstance(rows, list) else [], origin_key=entity.canonical_key)
+        if not parsed.entities:
+            parsed.notes.append("Nenhum documento Aleph/OCCRP com esse termo.")
+        return parsed

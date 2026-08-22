@@ -66,6 +66,11 @@ def test_connectors_for_kinds_scopes_sources() -> None:
     assert "djen" in info
     assert "transparencia" in info
     assert "socio_search" in info
+    assert "aleph_public" in info
+    name = connectors_for_kinds(["NAME"])
+    assert name is not None
+    assert "aleph_public" in name
+    assert "pncp_public" in name
     mixed = connectors_for_kinds(["EMAIL", "QSA"])
     assert mixed is not None
     assert "email_public" in mixed

@@ -1,4 +1,4 @@
-from osint4all.connectors.base import FoundEntity
+from osint4all.connectors.base import ConnectorResult, FoundEntity
 from osint4all.connectors.cnpj_receita import parse_cnpj_payload
 from osint4all.db.models import Entity
 from osint4all.db.models import Edge
@@ -11,6 +11,8 @@ from osint4all.graph.identity import (
     is_unconfirmed,
     name_search_blocked,
     names_match,
+    name_overlap_score,
+    name_search_variants,
     names_same_person,
     profile_from_fields,
     seed_fits_profile,
@@ -20,6 +22,15 @@ from osint4all.graph.layers import confirmed_seeds, run_alvo_layer
 from osint4all.graph.resolve import apply_result
 from osint4all.graph.seed import create_investigation
 from osint4all.identifiers import parse_seed
+
+
+def test_name_overlap_score_flags_same_politician() -> None:
+    assert name_overlap_score("Luiz Inácio Lula da Silva", "Lula da Silva") >= 0.5
+    assert name_overlap_score("Maria Silva Souza", "João Outro") < 0.5
+    assert name_overlap_score("Lula da Fonte", "Luiz Inácio Lula da Silva") < 0.5
+    variants = name_search_variants("Luiz Inácio Lula da Silva")
+    assert variants[0] == "Luiz Inácio Lula da Silva"
+    assert any("lula" in item.casefold() and "silva" in item.casefold() for item in variants)
 
 
 def test_homonym_does_not_share_key() -> None:
@@ -620,6 +631,73 @@ def test_apply_result_drops_homonym_and_remaps_alias(settings, db) -> None:
     people = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON")).all()
     assert all(not (e.canonical_key or "").endswith("39053344705") for e in people)
     assert any(e.canonical_key.startswith("cnpj:") for e in db.scalars(select(Entity).where(Entity.investigation_id == inv.id)))
+
+
+def test_apply_result_remap_keeps_cargo_and_photo(settings, db) -> None:
+    name = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db,
+        title="Alvo",
+        hypothesis="teste",
+        seeds=[name],
+        connectors=[],
+        max_depth=2,
+        monitor=False,
+        created_by="tester",
+    )
+    origin = next(e for e in inv.entities if e.entity_type == "PERSON")
+    from sqlalchemy import select
+
+    apply_result(
+        db,
+        inv,
+        origin,
+        ConnectorResult(
+            entities=[
+                FoundEntity(
+                    entity_type="PERSON",
+                    kind="NAME",
+                    value="Maria Silva Souza",
+                    display_name="Maria Silva Souza",
+                    attrs={
+                        "status": "unconfirmed",
+                        "papel": "parlamentar",
+                        "cargo": "deputado federal",
+                        "partido": "PX",
+                        "thumb": "https://www.camara.leg.br/foto.jpg",
+                        "profile_photo": "https://www.camara.leg.br/foto.jpg",
+                        "identity_match": 88,
+                    },
+                    confidence=0.7,
+                )
+            ]
+        ),
+        connector="congresso_public",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=3,
+    )
+    db.flush()
+    db.refresh(origin)
+    assert (origin.attrs or {}).get("cargo") == "deputado federal"
+    apply_result(
+        db,
+        inv,
+        origin,
+        ConnectorResult(notes=["Câmara HTTP 403"]),
+        connector="congresso_public",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=3,
+    )
+    db.flush()
+    from osint4all.db.models import Evidence
+
+    notes = db.scalars(select(Evidence).where(Evidence.investigation_id == inv.id, Evidence.source_label.contains("status"))).all()
+    assert any("403" in (row.snippet or "") for row in notes)
+    assert str((origin.attrs or {}).get("profile_photo") or "").startswith("https://")
+    people = db.scalars(select(Entity).where(Entity.investigation_id == inv.id, Entity.entity_type == "PERSON")).all()
+    assert len(people) == 1
 
 
 def test_enqueue_skips_company_off_the_target(settings, db) -> None:

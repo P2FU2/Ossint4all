@@ -233,7 +233,7 @@ class SocioSearchConnector:
             return ConnectorResult()
         if not self.settings.brasil_io_api_token:
             return ConnectorResult(
-                notes=["Índice oficial de sócios por CPF (Brasil.IO) não está configurado. Não atribuímos empresas a este documento."]
+                notes=["Brasil.IO (pago) não é usado. Empresas só entram se o nome bater no QSA gratuito da Receita."]
             )
         return self._brasil_io_cpf(digits, origin_key)
 
@@ -421,7 +421,7 @@ class SocioSearchConnector:
 
         search = WebSearchConnector(self.settings)
         if not web_search_ready(self.settings):
-            return ConnectorResult(notes=["Configure SearXNG, busca web ou BRASIL_IO_API_TOKEN para achar empresas pelo nome"])
+            return ConnectorResult(notes=["Busca web gratuita indisponível para achar empresas pelo nome."])
         query = f'"{name}" (sócio OR CNPJ OR "quadro societário")'
         try:
             hits = search.search(query, origin)

@@ -37,6 +37,7 @@ class RateLimitedClient:
         params: dict[str, Any] | None = None,
         max_retries: int = 3,
         allow_404: bool = False,
+        allow_forbidden: bool = False,
     ) -> httpx.Response:
         hdrs = {**self.default_headers, **(headers or {})}
         last_exc: Exception | None = None
@@ -49,6 +50,8 @@ class RateLimitedClient:
                 with httpx.Client(**client_kwargs) as client:
                     resp = client.request(method, url, headers=hdrs, json=json, params=params)
                 if resp.status_code in (401, 403):
+                    if allow_forbidden:
+                        return resp
                     raise FailedAuthentication(f"{self.source} auth failed: {resp.status_code}")
                 if resp.status_code == 404 and allow_404:
                     return resp
@@ -81,6 +84,34 @@ class RateLimitedClient:
             finally:
                 self._thread_sem.release()
         raise last_exc or FailedSource(f"{self.source} request failed")
+
+    def safe_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        max_retries: int = 2,
+    ) -> tuple[httpx.Response | None, str]:
+        """GET/POST que não levanta: devolve (resposta, nota). 401/403/404 entram como nota."""
+        try:
+            resp = self.request(
+                method,
+                url,
+                headers=headers,
+                json=json,
+                params=params,
+                max_retries=max_retries,
+                allow_404=True,
+                allow_forbidden=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return None, str(exc)[:180]
+        if resp.status_code >= 400:
+            return resp, f"HTTP {resp.status_code}"
+        return resp, ""
 
 
 def _parse_retry_after(resp: httpx.Response) -> float | None:

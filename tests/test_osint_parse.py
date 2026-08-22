@@ -16,15 +16,15 @@ from osint4all.connectors.plate_public import (
 )
 from osint4all.connectors.crtsh import parse_crtsh_rows
 from osint4all.connectors.opencorporates import parse_opencorporates
-from osint4all.connectors.transparencia import parse_transparencia_rows
-from osint4all.connectors.tse import parse_tse_candidates
+from osint4all.connectors.transparencia import parse_transparencia_rows, transparencia_params
+from osint4all.connectors.tse import parse_tse_candidates, tse_candidate_match
 from osint4all.connectors.username_public import (
     is_reserved_username,
     parse_public_hits,
     username_from_entity,
 )
 from osint4all.connectors.web_search import parse_searxng_payload, parse_web_hits, searxng_bases, web_search_ready
-from osint4all.connectors.wikidata import parse_wikidata_search
+from osint4all.connectors.wikidata import commons_file_url, parse_wikidata_entity, parse_wikidata_search
 
 
 def test_tse_candidates() -> None:
@@ -34,6 +34,20 @@ def test_tse_candidates() -> None:
     )
     assert any(e.rel_type == "CANDIDATO" for e in result.edges)
     assert result.evidence
+
+
+def test_tse_matches_urna_not_full_string() -> None:
+    assert tse_candidate_match({"nomeUrna": "LULA", "nomeCompleto": "LUIZ INACIO LULA DA SILVA"}, "Luiz Inácio Lula da Silva")
+    assert not tse_candidate_match({"nomeUrna": "LULA DA FONTE", "nomeCompleto": "LULA DA FONTE"}, "Luiz Inácio Lula da Silva")
+    assert not tse_candidate_match({"nomeUrna": "SILVA"}, "Luiz Inácio Lula da Silva")
+
+
+def test_transparencia_params_per_list() -> None:
+    assert transparencia_params("CEIS", "52998224725") == {"codigoSancionado": "52998224725", "pagina": 1}
+    assert transparencia_params("CEAF", "52998224725") == {"cpfSancionado": "52998224725", "pagina": 1}
+    assert transparencia_params("CEAF", "33000167000101") is None
+    assert transparencia_params("CEPIM", "33000167000101") == {"cnpjSancionado": "33000167000101", "pagina": 1}
+    assert transparencia_params("PEP", "52998224725") == {"cpf": "52998224725", "pagina": 1}
 
 
 def test_transparencia_ceis() -> None:
@@ -61,6 +75,46 @@ def test_opencorporates_and_web_and_wiki() -> None:
         origin_key="name:universo",
     )
     assert wiki.evidence[0].url.endswith("Q1")
+    assert commons_file_url("File:Foto teste.jpg").startswith("https://commons.wikimedia.org/")
+    entity = parse_wikidata_entity(
+        {
+            "entities": {
+                "Q87": {
+                    "labels": {"pt": {"value": "Maria Silva Souza"}},
+                    "claims": {
+                        "P18": [{"mainsnak": {"datavalue": {"value": "Maria.jpg"}}}],
+                        "P569": [{"mainsnak": {"datavalue": {"value": {"time": "+1970-01-02T00:00:00Z"}}}}],
+                    },
+                    "sitelinks": {"ptwiki": {"title": "Maria Silva Souza"}},
+                }
+            }
+        },
+        origin_key="name:maria silva souza",
+        needle="Maria Silva Souza",
+    )
+    assert any((e.attrs or {}).get("profile_photo") for e in entity.entities)
+    assert any(e.entity_type == "PUBLICATION" for e in entity.entities)
+
+
+def test_free_html_parsers() -> None:
+    from osint4all.connectors.html_public import parse_ddg_html, parse_opensanctions_html, parse_portal_payload
+
+    ddg = parse_ddg_html(
+        '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexemplo.gov.br%2Fx">Portal público</a>'
+    )
+    assert ddg
+    assert ddg[0]["url"].startswith("https://exemplo.gov.br")
+    osanc = parse_opensanctions_html(
+        '<a href="/entities/br-pep-1">Maria Silva Souza</a>',
+        origin_key="name:maria silva souza",
+    )
+    assert osanc.entities
+    portal = parse_portal_payload(
+        {"data": [{"nome": "Empresa X", "cpfCnpj": "33000167000101", "orgao": "CGU"}]},
+        origin_key="cnpj:33000167000101",
+        lista="CEIS",
+    )
+    assert portal.entities
 
 
 def test_username_public_hits() -> None:

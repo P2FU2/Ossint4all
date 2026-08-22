@@ -25,6 +25,7 @@ from osint4all.connectors.host_observe import HostObserveConnector
 from osint4all.connectors.google_public import GooglePublicConnector
 from osint4all.connectors.pncp_public import PncpPublicConnector
 from osint4all.connectors.congresso_public import CongressoPublicConnector
+from osint4all.connectors.politicos_public import PoliticosPublicConnector
 from osint4all.connectors.opensanctions_public import OpensanctionsPublicConnector
 from osint4all.connectors.gleif_public import GleifPublicConnector
 from osint4all.connectors.socio_search import SocioSearchConnector
@@ -58,6 +59,7 @@ _BUILDERS = {
     "google_public": GooglePublicConnector,
     "pncp_public": PncpPublicConnector,
     "congresso_public": CongressoPublicConnector,
+    "politicos_public": PoliticosPublicConnector,
     "opensanctions_public": OpensanctionsPublicConnector,
     "gleif_public": GleifPublicConnector,
 }
@@ -96,6 +98,7 @@ def enabled_connector_names(settings: Settings | None = None) -> list[str]:
         "google_public": settings.google_public_enable,
         "pncp_public": settings.pncp_public_enable,
         "congresso_public": settings.congresso_public_enable,
+        "politicos_public": getattr(settings, "politicos_public_enable", True),
         "opensanctions_public": settings.opensanctions_public_enable,
         "gleif_public": settings.gleif_public_enable,
     }

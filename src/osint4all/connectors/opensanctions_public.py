@@ -115,25 +115,42 @@ class OpensanctionsPublicConnector:
         query = _query_from_entity(entity)
         if not query:
             return ConnectorResult()
-        try:
-            resp = self.http.request(
-                "GET",
-                "https://api.opensanctions.org/search/default",
-                params={"q": query, "limit": 8},
-                allow_404=True,
-                max_retries=1,
-            )
-        except Exception:
-            return ConnectorResult(notes=["OpenSanctions indisponível nesta rodada"])
-        if resp.status_code in (401, 403):
-            return ConnectorResult(notes=["OpenSanctions pediu autenticação nesta rodada — a busca pública ficou vazia."])
-        if resp.status_code >= 400:
-            return ConnectorResult(notes=[f"OpenSanctions HTTP {resp.status_code}"])
+        resp, err = self.http.safe_request(
+            "GET",
+            "https://api.opensanctions.org/search/default",
+            params={"q": query, "limit": 8},
+            max_retries=1,
+        )
+        if err or resp is None or (resp is not None and resp.status_code in (401, 403)):
+            return self._html_search(query, entity.canonical_key, note=err or "API pediu chave")
         try:
             data = resp.json()
         except Exception:
-            return ConnectorResult()
+            return ConnectorResult(notes=["OpenSanctions: resposta inválida"])
         parsed = parse_opensanctions_hits(_rows_from_payload(data), origin_key=entity.canonical_key)
         if not parsed.entities:
-            parsed.notes.append("Nenhum registro OpenSanctions com esse termo.")
+            parsed.merge(self._html_search(query, entity.canonical_key, note="API vazia"))
         return parsed
+
+    def _html_search(self, query: str, origin_key: str, *, note: str = "") -> ConnectorResult:
+        from urllib.parse import quote_plus
+
+        from osint4all.connectors.html_public import parse_opensanctions_html
+
+        portal = f"https://www.opensanctions.org/search/?q={quote_plus(query)}"
+        resp, err = self.http.safe_request("GET", portal, max_retries=1)
+        if resp is not None and resp.status_code < 400:
+            parsed = parse_opensanctions_html(resp.text or "", origin_key=origin_key)
+            if parsed.entities:
+                return parsed
+        out = ConnectorResult(notes=[f"OpenSanctions: {note or err or 'sem resultados'}"])
+        out.evidence.append(
+            FoundEvidence(
+                source_label="OpenSanctions",
+                url=portal,
+                snippet=f"Busca pública gratuita · {query}",
+                payload={"query": query, "via": "scraper"},
+                entity_ref=origin_key,
+            )
+        )
+        return out
