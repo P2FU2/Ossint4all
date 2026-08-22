@@ -161,7 +161,10 @@ class WikidataConnector:
             source=self.name,
             max_concurrency=2,
             timeout=25.0,
-            default_headers={"User-Agent": "osint4all/0.1 (investigative journalism)"},
+            default_headers={
+                "Accept": "application/json",
+                "User-Agent": "osint4all/0.3 (https://github.com/P2FU2/Ossint4all; public OSINT research)",
+            },
         )
 
     def health(self) -> dict[str, Any]:
@@ -241,5 +244,108 @@ class WikidataConnector:
                 parsed.merge(parse_wikidata_entity(payload if isinstance(payload, dict) else {}, origin_key=entity.canonical_key, needle=nome))
         parsed.notes.extend(notes)
         if not parsed.entities:
-            parsed.notes.append("Wikidata sem ficha pública para este nome.")
+            parsed.merge(self._wikipedia(nome, entity.canonical_key))
+        if not parsed.entities:
+            parsed.notes.append("Wikidata/Wikipedia sem ficha pública para este nome.")
         return parsed
+
+    def _wikipedia(self, nome: str, origin_key: str) -> ConnectorResult:
+        out = ConnectorResult()
+        for lang in ("pt", "en"):
+            resp, err = self.http.safe_request(
+                "GET",
+                f"https://{lang}.wikipedia.org/w/api.php",
+                params={"action": "opensearch", "search": nome, "limit": 5, "namespace": 0, "format": "json"},
+            )
+            if err or resp is None:
+                out.notes.append(f"Wikipedia {lang}: {err or 'sem resposta'}")
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                continue
+            titles = data[1] if isinstance(data, list) and len(data) > 1 else []
+            urls = data[3] if isinstance(data, list) and len(data) > 3 else []
+            descs = data[2] if isinstance(data, list) and len(data) > 2 else []
+            for idx, title in enumerate(titles[:5]):
+                label = str(title or "").strip()
+                if not label:
+                    continue
+                if len(name_tokens(nome)) >= 2 and name_overlap_score(label, nome) < 0.4:
+                    continue
+                url = str(urls[idx] if idx < len(urls) else f"https://{lang}.wikipedia.org/wiki/{quote(label.replace(' ', '_'))}")
+                desc = str(descs[idx] if idx < len(descs) else "")
+                out.entities.append(
+                    FoundEntity(
+                        entity_type="PUBLICATION",
+                        kind="URL",
+                        value=url,
+                        display_name=label[:160],
+                        attrs={"fonte": "wikipedia", "description": desc},
+                        confidence=0.52,
+                    )
+                )
+                ref = canonical_key("URL", url)
+                out.edges.append(FoundEdge(from_ref=origin_key, to_ref=ref, rel_type="MENCAO", confidence=0.5))
+                out.evidence.append(
+                    FoundEvidence(
+                        source_label="Wikipedia",
+                        url=url,
+                        snippet=(desc or label)[:400],
+                        payload={"title": label, "lang": lang},
+                        entity_ref=ref,
+                    )
+                )
+            if out.entities:
+                photo = self._wikipedia_photo(str(titles[0]), lang, nome)
+                if photo:
+                    out.entities.append(
+                        FoundEntity(
+                            entity_type="PERSON",
+                            kind="NAME",
+                            value=nome,
+                            display_name=str(titles[0]),
+                            attrs={"papel": "wikidata", "status": "unconfirmed", **photo},
+                            confidence=0.58,
+                        )
+                    )
+                break
+        return out
+
+    def _wikipedia_photo(self, title: str, lang: str, needle: str) -> dict[str, Any]:
+        resp, err = self.http.safe_request(
+            "GET",
+            f"https://{lang}.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "pageimages|pageprops",
+                "titles": title,
+                "pithumbsize": 400,
+                "ppprop": "wikibase_item",
+                "format": "json",
+            },
+        )
+        if err or resp is None:
+            return {}
+        try:
+            data = resp.json()
+        except Exception:
+            return {}
+        pages = ((data.get("query") or {}).get("pages") or {}) if isinstance(data, dict) else {}
+        if not isinstance(pages, dict):
+            return {}
+        attrs: dict[str, Any] = {}
+        score = name_overlap_score(title, needle)
+        attrs["identity_match"] = int(round(score * 100))
+        for page in pages.values():
+            if not isinstance(page, dict):
+                continue
+            props = page.get("pageprops") if isinstance(page.get("pageprops"), dict) else {}
+            if props.get("wikibase_item"):
+                attrs["wikidata_id"] = str(props["wikibase_item"])
+            thumb = ((page.get("thumbnail") or {}).get("source") if isinstance(page.get("thumbnail"), dict) else "")
+            if thumb and score >= 0.5:
+                attrs["thumb"] = thumb
+                attrs["profile_photo"] = thumb
+                attrs["profile_photo_source"] = "wikipedia"
+        return attrs

@@ -837,6 +837,17 @@ def graph_payload(session: Session, investigation_id: str) -> dict[str, Any]:
                     "maps_url",
                     "embed_url",
                     "geo_label",
+                    "orgao",
+                    "camara_id",
+                    "senado_id",
+                    "wikidata_id",
+                    "rede_social",
+                    "email_oficial",
+                    "email",
+                    "telefone",
+                    "bairro",
+                    "cnae_codigo",
+                    "description",
                 )
                 if e.attrs and e.attrs.get(k) not in (None, "", [])
             },

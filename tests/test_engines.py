@@ -198,6 +198,30 @@ def test_graph_payload_reads_year_from_period(db) -> None:
     assert any(link.get("year") == 2019 for link in payload["edges"])
 
 
+def test_graph_payload_keeps_contact_and_office_attrs(db) -> None:
+    seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db, title="Attrs", hypothesis=None, seeds=[seed], connectors=[], max_depth=1, monitor=False, created_by="t"
+    )
+    person = inv.entities[0]
+    person.attrs = {
+        **(person.attrs or {}),
+        "email": "contato@exemplo.gov.br",
+        "telefone": "1132212000",
+        "orgao": "Câmara",
+        "camara_id": "1",
+        "wikidata_id": "Q1",
+        "cargo": "deputado federal",
+    }
+    db.flush()
+    payload = graph_payload(db, inv.id)
+    attrs = next(n["attrs"] for n in payload["nodes"] if n["id"] == person.id)
+    assert attrs["email"] == "contato@exemplo.gov.br"
+    assert attrs["orgao"] == "Câmara"
+    assert attrs["camara_id"] == "1"
+    assert attrs["cargo"] == "deputado federal"
+
+
 def test_failed_query_skips_negative_finding(db) -> None:
     seed = parse_seed("Maria Silva Souza")
     inv = create_investigation(

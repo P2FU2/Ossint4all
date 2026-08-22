@@ -252,6 +252,8 @@ class CnpjReceitaConnector:
         if not cnpj:
             return ConnectorResult()
         data = self._fetch(cnpj)
+        if not data:
+            return ConnectorResult(notes=["CNPJ: Minha Receita e BrasilAPI sem resposta nesta rodada."])
         result = parse_cnpj_payload(data)
         geo = self._geocode_cep(str(data.get("cep") or ""))
         if geo:
@@ -266,33 +268,27 @@ class CnpjReceitaConnector:
             providers = [_brasilapi_url(cnpj), _minhareceita_url(cnpj)]
         else:
             providers = [_minhareceita_url(cnpj), _brasilapi_url(cnpj)]
-        last: Exception | None = None
         for url in providers:
-            try:
-                resp = self.http.request("GET", url, allow_404=True)
-                if resp.status_code == 404:
-                    last = FailedSource(f"CNPJ não encontrado: {cnpj}")
-                    continue
-                if resp.status_code >= 400:
-                    last = FailedSource(f"HTTP {resp.status_code} em {url}")
-                    continue
-                data = resp.json()
-                if isinstance(data, dict):
-                    data.setdefault("cnpj", cnpj)
-                    return data
-            except Exception as exc:  # noqa: BLE001
-                last = exc
+            resp, err = self.http.safe_request("GET", url, max_retries=2)
+            if err or resp is None:
                 continue
-        raise FailedSource(str(last) if last else "falha na consulta de CNPJ")
+            try:
+                data = resp.json()
+            except Exception:
+                continue
+            if isinstance(data, dict) and (data.get("razao_social") or data.get("nome") or data.get("cnpj")):
+                data.setdefault("cnpj", cnpj)
+                return data
+        return {}
 
     def _geocode_cep(self, cep: str) -> dict[str, Any]:
         digits = only_digits(cep)
         if len(digits) != 8:
             return {}
+        resp, err = self.http.safe_request("GET", f"https://brasilapi.com.br/api/cep/v2/{digits}", max_retries=1)
+        if err or resp is None:
+            return {}
         try:
-            resp = self.http.request("GET", f"https://brasilapi.com.br/api/cep/v2/{digits}", allow_404=True)
-            if resp.status_code >= 400:
-                return {}
             data = resp.json()
         except Exception:
             return {}
