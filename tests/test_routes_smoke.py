@@ -137,6 +137,8 @@ def test_consult_tools_assign_edit(settings) -> None:
     assert "Editar" in created.text
     assert "Buscar" in created.text
     assert "Pesquisar tudo" in created.text
+    assert "Ordenar" in created.text
+    assert 'data-view="ordenar"' in created.text
     assert "pesquisar-tudo" in created.text
     assert "graph-year-min" in created.text
     assert "Explodir QSA" in created.text

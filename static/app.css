@@ -1502,8 +1502,42 @@ fieldset { border: 1px solid var(--line); border-radius: 2px; padding: 16px; }
   padding: 14px 16px;
   box-shadow: var(--glow), var(--shadow);
 }
-.graph-balloon.is-open:has(.graph-balloon-map) {
-  width: min(420px, calc(100vw - 24px));
+.graph-balloon.is-open:has(.graph-balloon-map),
+.graph-balloon.is-open:has(.graph-balloon-preview) {
+  width: min(440px, calc(100vw - 24px));
+}
+.graph-balloon-preview {
+  margin: 0 0 10px;
+}
+.graph-balloon-kicker {
+  margin: 0 0 6px;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.graph-balloon-story-title {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  color: var(--text);
+}
+.graph-balloon-desc {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.graph-balloon-embed {
+  display: block;
+  width: 100%;
+  height: 228px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #020604;
+}
+.graph-balloon-pdf {
+  height: 260px;
 }
 .graph-balloon h2 {
   margin: 4px 0 6px;

@@ -10,6 +10,7 @@ from osint4all.connectors.plate_public import extract_owner_mentions, extract_ve
 from osint4all.db.models import Entity
 from osint4all.exceptions import SkippedDisabled
 from osint4all.http_client import RateLimitedClient
+from osint4all.graph.preview import preview_kind_for_url
 from osint4all.graph.public_links import is_catalog_portal
 from osint4all.identifiers import canonical_key
 from osint4all.validators import format_plate
@@ -74,21 +75,33 @@ def parse_web_hits(hits: list[dict[str, Any]], *, origin_key: str, source: str =
         if not url or is_catalog_portal(url):
             continue
         tipo = classify_public_mention(title, snippet, url)
+        kind = preview_kind_for_url(url)
         entity_type = "ASSET" if tipo == "imovel" else "PUBLICATION"
         rel = "PATRIMONIO" if tipo == "imovel" else ("CONTRATO" if tipo == "contrato" else "MENCAO")
+        attrs = {
+            "snippet": snippet,
+            "engine": hit.get("engine") or "",
+            "fonte": url,
+            "page_url": url,
+            "tipo": tipo,
+            "preview_kind": kind,
+            "og_title": title[:220],
+            "description": snippet[:500] if snippet else "",
+            "tipo_imovel": "menção pública" if tipo == "imovel" else "",
+        }
+        if kind == "pdf":
+            attrs["tipo"] = "pdf"
+        elif kind == "image":
+            attrs["tipo"] = "imagem"
+            attrs["thumb"] = url
+        elif kind == "social":
+            attrs["tipo"] = "social"
         found = FoundEntity(
             entity_type=entity_type,
             kind="URL",
             value=url,
             display_name=title[:160],
-            attrs={
-                "snippet": snippet,
-                "engine": hit.get("engine") or "",
-                "fonte": url,
-                "page_url": url,
-                "tipo": tipo,
-                "tipo_imovel": "menção pública" if tipo == "imovel" else "",
-            },
+            attrs=attrs,
             confidence=0.42 if tipo != "mencao" else 0.4,
         )
         out.entities.append(found)

@@ -950,6 +950,9 @@ def media_picks_to_result(origin_key: str, news: list[NewsItem], images: list[Im
                     "via": item.via,
                     "tipo": "noticia",
                     "page_url": url,
+                    "preview_kind": "article",
+                    "og_title": (item.title or "")[:220],
+                    "description": (item.snippet or "")[:500],
                 },
                 confidence=0.4,
             )

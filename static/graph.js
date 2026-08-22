@@ -46,10 +46,65 @@
     return (kind ? kind + " " : "") + raw;
   }
 
+  function previewKindOf(n) {
+    const attrs = (n && n.attrs) || {};
+    return String(attrs.preview_kind || attrs.tipo || "");
+  }
+
+  function officialSourceUrl(n) {
+    const attrs = (n && n.attrs) || {};
+    for (const key of ["page_url", "fonte", "maps_url"]) {
+      const val = String(attrs[key] || "");
+      if (/^https?:\/\//i.test(val)) return val;
+    }
+    const key = String((n && n.key) || "");
+    return key.indexOf("url:") === 0 ? key.slice(4) : "";
+  }
+
+  function urlLooksPdf(url) {
+    return /\.pdf(\b|$)/i.test(url || "") || /\/pdf\//i.test(url || "");
+  }
+
+  function pdfPlaceholder(url, label) {
+    const raw = String(url || label || "documento.pdf");
+    let name = raw.split("/").pop() || "documento.pdf";
+    try { name = decodeURIComponent(name.split("?")[0]); } catch (err) {}
+    name = name.replace(/[<>&"']/g, "").slice(0, 26) || "documento.pdf";
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="148">' +
+      '<rect width="128" height="148" fill="#120e08"/>' +
+      '<rect x="16" y="14" width="96" height="120" rx="3" fill="#1c140c" stroke="#d4b45a" stroke-width="1.5"/>' +
+      '<text x="64" y="72" text-anchor="middle" fill="#d4b45a" font-size="20" font-family="IBM Plex Mono,monospace">PDF</text>' +
+      '<text x="64" y="118" text-anchor="middle" fill="#d7e4dc" font-size="8" font-family="IBM Plex Mono,monospace">' +
+      name +
+      "</text></svg>";
+    return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+  }
+
+  function nodeThumb(n) {
+    const attrs = n.attrs || {};
+    const thumb = attrs.thumb || attrs.profile_photo || "";
+    if (thumb) return thumb;
+    const url = officialSourceUrl(n);
+    if (previewKindOf(n) === "pdf" || urlLooksPdf(url) || urlLooksPdf(n.key || "")) {
+      return pdfPlaceholder(url || n.key || n.label, n.label);
+    }
+    return "";
+  }
+
+  function isPhotoCard(n) {
+    const attrs = n.attrs || {};
+    if (attrs.tipo === "imagem" || attrs.tipo === "pdf" || attrs.preview_kind === "pdf") return true;
+    if (attrs.thumb || attrs.profile_photo) {
+      return n.type === "PERSON" || n.type === "PUBLICATION" || n.type === "PROFILE";
+    }
+    return false;
+  }
+
   function cardLabel(n) {
     const attrs = n.attrs || {};
-    if (attrs.tipo === "imagem" || (n.type === "PERSON" && (attrs.thumb || attrs.profile_photo))) {
-      const title = String(n.label || "Imagem").replace(/^https?:\/\/\S+/i, "Imagem").slice(0, 42);
+    if (isPhotoCard(n)) {
+      const title = String(attrs.og_title || n.label || "Imagem").replace(/^https?:\/\/\S+/i, "Imagem").slice(0, 42);
       return title + (n.seed ? " · alvo" : "");
     }
     const title = n.seed ? n.label + " · alvo" : n.label + " · g" + (n.depth || 0);
@@ -72,8 +127,8 @@
         kind: (n.attrs || {}).kind || "",
         attrs: n.attrs || {},
         ids: n.ids || [],
-        thumb: (n.attrs || {}).thumb || (n.attrs || {}).profile_photo || "",
-        tipo: (n.attrs || {}).tipo || "",
+        thumb: nodeThumb(n),
+        tipo: (n.attrs || {}).tipo || (n.attrs || {}).preview_kind || "",
         lines: 1 + Math.min(4, (n.ids || []).filter((item) => item.kind !== "NAME").length),
       },
     }));
@@ -168,6 +223,23 @@
       },
       { selector: 'node[type = "NOTE"]', style: { "border-color": colors.NOTE, "background-color": "#1c1a10" } },
       { selector: 'node[kind = "diagram"]', style: { width: 210, height: 64, "border-color": "#d4b45a", "background-color": "#1c1810", "text-wrap": "wrap", "text-max-width": 190 } },
+      {
+        selector: 'node[kind = "category"]',
+        style: {
+          width: 200,
+          height: 30,
+          shape: "round-rectangle",
+          "background-color": "#14180c",
+          "border-color": "#d4b45a",
+          "border-width": 1,
+          "font-size": 10,
+          "font-weight": 600,
+          color: "#d4b45a",
+          "text-valign": "center",
+          "text-max-width": 188,
+          padding: "4px",
+        },
+      },
       { selector: "node[?seed]", style: { width: 210, height: 58, "border-color": "#6f9b82", "border-width": 2, "background-color": "#15241c" } },
       { selector: "node[lines > 1]", style: { height: 72 } },
       { selector: "node[lines > 2]", style: { height: 90 } },
@@ -177,6 +249,37 @@
       { selector: 'node[status = "probable"]', style: { "border-style": "dotted", "border-color": "#5eead4" } },
       { selector: 'node[status = "contested"]', style: { "border-color": "#ffe14a" } },
       { selector: 'node[status = "false"]', style: { "border-color": "#ff5c7a", "opacity": 0.45 } },
+      {
+        selector: 'node[?thumb][type = "PUBLICATION"], node[?thumb][type = "PROFILE"]',
+        style: {
+          "background-image": "data(thumb)",
+          "background-fit": "cover",
+          "background-clip": "node",
+          width: 132,
+          height: 156,
+          "text-valign": "bottom",
+          "text-margin-y": 4,
+          "font-size": 9,
+          "text-max-width": 120,
+          "background-color": "#0c1410",
+        },
+      },
+      {
+        selector: 'node[tipo = "pdf"]',
+        style: {
+          "background-image": "data(thumb)",
+          "background-fit": "cover",
+          "background-clip": "node",
+          width: 128,
+          height: 148,
+          "text-valign": "bottom",
+          "text-margin-y": 4,
+          "font-size": 9,
+          "text-max-width": 118,
+          "background-color": "#1a1208",
+          "border-color": "#d4b45a",
+        },
+      },
       { selector: "node:selected", style: { "border-color": "#00ff9c", "border-width": 2.4, "background-color": "#163024" } },
       {
         selector: "edge",
@@ -230,7 +333,7 @@
   }
 
   function unoverlapNodes() {
-    const nodes = cy.nodes(":visible").toArray();
+    const nodes = cy.nodes(":visible").filter((node) => !isCategoryLabel(node)).toArray();
     if (nodes.length < 2 || nodes.length > 140) return false;
     const pad = 22;
     let moved = false;
@@ -280,6 +383,7 @@
   function capturePositions() {
     const nodes = {};
     cy.nodes().forEach((node) => {
+      if (node.data("kind") === "category") return;
       const pos = node.position();
       nodes[node.id()] = { x: pos.x, y: pos.y };
     });
@@ -343,7 +447,10 @@
     const view = activeView();
     const pan = cy.pan();
     const prev = payload.layout || {};
-    const nodes = view === "arvore" ? { ...savedNodeMap(), ...((prev.nodes) || {}) } : capturePositions();
+    const nodes =
+      view === "arvore" || view === "ordenar"
+        ? { ...savedNodeMap(), ...((prev.nodes) || {}) }
+        : capturePositions();
     const snap = {
       view,
       zoom: cy.zoom(),
@@ -384,9 +491,121 @@
     }
   }
 
+  const CATEGORY_ORDER = [
+    { id: "person", label: "Pessoa" },
+    { id: "org", label: "Empresa" },
+    { id: "social", label: "Rede social" },
+    { id: "news", label: "Matéria" },
+    { id: "doc", label: "Documento" },
+    { id: "image", label: "Imagem" },
+    { id: "case", label: "Processo" },
+    { id: "asset", label: "Ativo" },
+    { id: "vehicle", label: "Veículo" },
+    { id: "note", label: "Anotação" },
+    { id: "other", label: "Outro" },
+  ];
+
+  function isCategoryLabel(node) {
+    return node.data("kind") === "category";
+  }
+
+  function nodeCategory(node) {
+    const type = node.data("type") || "";
+    const attrs = node.data("attrs") || {};
+    const tipo = String(attrs.tipo || attrs.preview_kind || "").toLowerCase();
+    if (type === "PERSON") return "person";
+    if (type === "ORG") return "org";
+    if (type === "PROFILE" || tipo === "social") return "social";
+    if (tipo === "pdf" || tipo === "diario") return "doc";
+    if (tipo === "imagem" || tipo === "image") return "image";
+    if (type === "PUBLICATION" || tipo === "noticia" || tipo === "article" || tipo === "mencao") return "news";
+    if (type === "CASE") return "case";
+    if (type === "ASSET") return "asset";
+    if (type === "VEHICLE") return "vehicle";
+    if (type === "NOTE") return "note";
+    return "other";
+  }
+
+  function removeCategoryLabels() {
+    const labels = cy.nodes().filter(isCategoryLabel);
+    if (labels.length) labels.remove();
+  }
+
+  function applyCategoryLayout() {
+    removeCategoryLabels();
+    const nodes = cy
+      .nodes()
+      .filter((node) => !isCategoryLabel(node) && node.style("display") !== "none")
+      .toArray();
+    if (!nodes.length) return;
+    const groups = new Map(CATEGORY_ORDER.map((cat) => [cat.id, []]));
+    nodes.forEach((node) => {
+      const id = nodeCategory(node);
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(node);
+    });
+    const colW = 236;
+    const catGap = 88;
+    const rowGap = 22;
+    const wrapAfter = 14;
+    let cursorX = 0;
+    CATEGORY_ORDER.forEach((cat) => {
+      const list = groups.get(cat.id) || [];
+      if (!list.length) return;
+      list.sort((a, b) => {
+        if (!!a.data("seed") !== !!b.data("seed")) return a.data("seed") ? -1 : 1;
+        return String(a.data("name") || a.data("label") || "").localeCompare(
+          String(b.data("name") || b.data("label") || ""),
+          "pt"
+        );
+      });
+      const cols = Math.max(1, Math.ceil(list.length / wrapAfter));
+      const heights = Array.from({ length: cols }, () => 58);
+      cy.add({
+        group: "nodes",
+        selectable: false,
+        grabbable: false,
+        data: {
+          id: "cat:" + cat.id,
+          name: cat.label,
+          label: cat.label,
+          type: "NOTE",
+          kind: "category",
+          cat: cat.id,
+          attrs: {},
+          ids: [],
+          thumb: "",
+          tipo: "",
+          seed: false,
+          status: "confirmed",
+          depth: 0,
+          key: "",
+        },
+        position: { x: cursorX + ((cols - 1) * colW) / 2, y: 0 },
+      });
+      list.forEach((node, index) => {
+        const col = Math.floor(index / wrapAfter);
+        const h = node.outerHeight();
+        const x = cursorX + col * colW;
+        const y = heights[col] + h / 2;
+        node.position({ x, y });
+        heights[col] += h + rowGap;
+      });
+      cursorX += cols * colW + catGap;
+    });
+    const box = visibleElements();
+    if (box.nodes().length) cy.fit(box, 56);
+    laidOnce = true;
+  }
+
   function applyLayout(view) {
+    if (view !== "ordenar") removeCategoryLabels();
     const eles = visibleElements();
     if (!eles.nodes().length) return;
+    if (view === "ordenar") {
+      applyCategoryLayout();
+      return;
+    }
     if (view === "arvore") {
       const seeds = eles.nodes().filter((node) => node.data("seed"));
       eles.layout({
@@ -658,9 +877,16 @@
     if (view === "mapa" && typeof setSelectMode === "function") setSelectMode(false);
     if (view === "split") renderSplit();
     if (view === "mapa") renderMap();
-    if (view === "arvore") applyLayout("arvore");
-    else if (view !== "mapa" && hasLockedLayout()) applySavedPositions(savedNodeMap());
-    else if (view !== "mapa") applyLayout(view);
+    const sortBtn = document.getElementById("ct-sort");
+    if (sortBtn) sortBtn.setAttribute("aria-pressed", view === "ordenar" ? "true" : "false");
+    if (view === "arvore" || view === "ordenar") applyLayout(view);
+    else if (view !== "mapa") {
+      removeCategoryLabels();
+      if (hasLockedLayout()) applySavedPositions(savedNodeMap());
+      else applyLayout(view);
+    } else {
+      removeCategoryLabels();
+    }
   }
 
   function patchElements(data) {
@@ -750,7 +976,7 @@
       if (nextView === "mapa") renderMap();
     } else {
       setView(nextView);
-      if (layoutLocked && nextView !== "arvore") {
+      if (layoutLocked && nextView !== "arvore" && nextView !== "ordenar") {
         const layout = payload.layout || {};
         if (layout.zoom) {
           applySnapshot({ kind: "cy", zoom: layout.zoom, x: (layout.pan || {}).x || 0, y: (layout.pan || {}).y || 0 });
@@ -813,6 +1039,8 @@
     patrimonio_fonte: "fonte do patrimônio",
     tipo_imovel: "tipo do imóvel",
     matricula: "matrícula (informada)",
+    network: "rede",
+    preview_kind: "prévia",
   };
   const balloon = document.getElementById("graph-balloon");
   const gbKind = document.getElementById("gb-kind");
@@ -843,6 +1071,80 @@
     const key = (rec && rec.key) || (el && el.data && el.data("key")) || "";
     if (String(key).indexOf("url:") === 0) return String(key).slice(4);
     return "";
+  }
+
+  function buildSourcePreview(attrs, sourceUrl, type, fallbackThumb) {
+    const wrap = document.createElement("div");
+    wrap.className = "graph-balloon-preview";
+    const kind = String(attrs.preview_kind || attrs.tipo || (urlLooksPdf(sourceUrl) ? "pdf" : "") || "");
+    const thumb = String(attrs.thumb || fallbackThumb || "");
+    const embed = String(attrs.embed_url || "");
+    const title = String(attrs.og_title || "").trim();
+    const desc = String(attrs.description || attrs.snippet || "").trim();
+    const isStory = kind === "article" || kind === "noticia" || kind === "mencao" || kind === "diario" || type === "PUBLICATION";
+    const isSocial = kind === "social" || type === "PROFILE";
+    const isPdf = kind === "pdf" || urlLooksPdf(sourceUrl);
+    const isImage = kind === "image" || kind === "imagem";
+
+    if (isSocial) {
+      const kicker = document.createElement("p");
+      kicker.className = "graph-balloon-kicker";
+      kicker.textContent = "Prévia do perfil" + (attrs.network ? " · " + attrs.network : "");
+      wrap.appendChild(kicker);
+    } else if (isPdf) {
+      const kicker = document.createElement("p");
+      kicker.className = "graph-balloon-kicker";
+      kicker.textContent = "Prévia do documento";
+      wrap.appendChild(kicker);
+    } else if (isStory) {
+      const kicker = document.createElement("p");
+      kicker.className = "graph-balloon-kicker";
+      kicker.textContent = "Matéria";
+      wrap.appendChild(kicker);
+    } else if (isImage) {
+      const kicker = document.createElement("p");
+      kicker.className = "graph-balloon-kicker";
+      kicker.textContent = "Imagem da fonte";
+      wrap.appendChild(kicker);
+    }
+
+    if (isPdf && sourceUrl) {
+      const frame = document.createElement("iframe");
+      frame.className = "graph-balloon-embed graph-balloon-pdf";
+      frame.src = sourceUrl;
+      frame.title = "Prévia do PDF";
+      wrap.appendChild(frame);
+    } else if (embed) {
+      const frame = document.createElement("iframe");
+      frame.className = "graph-balloon-embed";
+      frame.src = embed;
+      frame.title = "Prévia";
+      frame.allow = "accelerometer; autoplay; encrypted-media; picture-in-picture";
+      wrap.appendChild(frame);
+    } else if (thumb && /^https?:\/\//i.test(thumb)) {
+      const pic = document.createElement("img");
+      pic.className = "graph-balloon-thumb";
+      pic.src = thumb;
+      pic.alt = title || "";
+      pic.referrerPolicy = "no-referrer";
+      wrap.appendChild(pic);
+    }
+
+    if (isStory || isSocial) {
+      if (title) {
+        const heading = document.createElement("p");
+        heading.className = "graph-balloon-story-title";
+        heading.textContent = title;
+        wrap.appendChild(heading);
+      }
+      if (desc) {
+        const body = document.createElement("p");
+        body.className = "graph-balloon-desc";
+        body.textContent = desc;
+        wrap.appendChild(body);
+      }
+    }
+    return wrap;
   }
 
   let nodeIndex = new Map();
@@ -894,31 +1196,48 @@
       }
       return;
     }
+    if (isCategoryLabel(el)) {
+      const cat = el.data("cat");
+      const count = cy.nodes().filter((node) => !isCategoryLabel(node) && nodeCategory(node) === cat && node.style("display") !== "none").length;
+      gbKind.textContent = "categoria";
+      gbTitle.textContent = el.data("label") || "Grupo";
+      gbLead.textContent = count + (count === 1 ? " item nesta faixa" : " itens nesta faixa");
+      gbFacts.replaceChildren();
+      gbFacts.hidden = true;
+      gbActions.hidden = !full;
+      gbActions.replaceChildren();
+      if (full) {
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "btn";
+        close.textContent = "Fechar";
+        close.addEventListener("click", closeBalloon);
+        gbActions.appendChild(close);
+      }
+      return;
+    }
     const rec = nodeRecord(el);
     const attrs = rec.attrs || el.data("attrs") || {};
     const type = el.data("type") || rec.type || "";
     const status = el.data("status") || rec.status || "confirmed";
     const neighbors = el.neighborhood("node").map((n) => n.data("name") || n.data("label")).filter(Boolean);
+    const sourceUrl = officialUrl(rec, el);
+    const kind = String(attrs.preview_kind || attrs.tipo || (urlLooksPdf(sourceUrl) ? "pdf" : "") || "");
+    const storyTitle = String(attrs.og_title || "").trim();
     gbKind.textContent = TYPE_LABEL[type] || type || "nó";
-    gbTitle.textContent = el.data("name") || rec.label || "nó";
+    gbTitle.textContent = storyTitle || el.data("name") || rec.label || "nó";
     const labels = { unconfirmed: "Candidato", probable: "Provável", contested: "Contestado", false: "Falso", confirmed: "" };
-    gbLead.textContent = labels[status] || "";
+    gbLead.textContent = labels[status] || (kind === "social" && attrs.network ? "Perfil · " + attrs.network : "");
     gbFacts.replaceChildren();
     gbFacts.hidden = !full;
-    const sourceUrl = officialUrl(rec, el);
     if (full) {
       destroyPlaceMap();
       const lat = Number(attrs.lat);
       const lng = Number(attrs.lng);
       const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
-      const thumb = String(attrs.thumb || el.data("thumb") || "");
-      if (!hasGeo && thumb && /^https?:\/\//i.test(thumb)) {
-        const pic = document.createElement("img");
-        pic.className = "graph-balloon-thumb";
-        pic.src = thumb;
-        pic.alt = "";
-        pic.referrerPolicy = "no-referrer";
-        gbFacts.appendChild(pic);
+      if (!hasGeo) {
+        const preview = buildSourcePreview(attrs, sourceUrl, type, el.data("thumb") || "");
+        if (preview.childNodes.length) gbFacts.appendChild(preview);
       }
       if (hasGeo) {
         const box = document.createElement("div");
@@ -942,7 +1261,7 @@
         gbFacts.appendChild(factRow(item.kind || "dado", formatCardId(item)));
       });
       Object.keys(ATTR_LABEL).forEach((keyName) => {
-        if (["fonte", "page_url", "thumb", "tipo"].indexOf(keyName) >= 0) return;
+        if (["fonte", "page_url", "thumb", "tipo", "snippet", "og_title", "description", "preview_kind", "embed_url"].indexOf(keyName) >= 0) return;
         if (attrs[keyName] == null || attrs[keyName] === "") return;
         gbFacts.appendChild(factRow(ATTR_LABEL[keyName], String(attrs[keyName])));
       });
@@ -1173,6 +1492,10 @@
     const degrees = filterDegrees();
     const q = search ? search.value.trim().toLowerCase() : "";
     cy.nodes().forEach((node) => {
+      if (isCategoryLabel(node)) {
+        node.style("display", activeView() === "ordenar" ? "element" : "none");
+        return;
+      }
       const type = node.data("type");
       const depth = Number(node.data("depth") || 0);
       const seed = !!node.data("seed");
@@ -1183,6 +1506,15 @@
       const degreeOk = seed ? degrees.has(0) : degrees.has(Math.min(depth, 4));
       node.style("display", searchOk && layerOk && degreeOk ? "element" : "none");
     });
+    if (activeView() === "ordenar") {
+      cy.nodes().filter(isCategoryLabel).forEach((label) => {
+        const cat = label.data("cat");
+        const any = cy.nodes().filter(
+          (node) => !isCategoryLabel(node) && nodeCategory(node) === cat && node.style("display") !== "none"
+        ).length;
+        label.style("display", any ? "element" : "none");
+      });
+    }
     const yearLo = yearMin ? Number(yearMin.value) : (yearInput ? Number(yearInput.min || 0) : 0);
     const yearHi = yearMax ? Number(yearMax.value) : (yearInput ? Number(yearInput.value) : 9999);
     cy.edges().forEach((edge) => {
@@ -1194,7 +1526,7 @@
     closeBalloon();
     window.clearTimeout(filterTimer);
     filterTimer = window.setTimeout(() => {
-      if (activeView() === "arvore" || !hasLockedLayout()) applyLayout(activeView());
+      if (activeView() === "arvore" || activeView() === "ordenar" || !hasLockedLayout()) applyLayout(activeView());
     }, 160);
   }
   const filterBox = document.getElementById("graph-filters");
@@ -1368,6 +1700,13 @@
     if (zoomIn) zoomIn.addEventListener("click", () => zoomStep(1));
     if (zoomOut) zoomOut.addEventListener("click", () => zoomStep(-1));
     if (fitBtn) fitBtn.addEventListener("click", fitCanvas);
+    const sortBtn = document.getElementById("ct-sort");
+    if (sortBtn) {
+      sortBtn.addEventListener("click", () => {
+        if (activeView() === "ordenar") applyCategoryLayout();
+        else setView("ordenar");
+      });
+    }
     if (undoBtn) {
       undoBtn.addEventListener("click", () => {
         if (viewIdx <= 0) return;

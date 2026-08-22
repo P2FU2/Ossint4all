@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/graph.js?v=41" defer></script>
+<script src="/static/graph.js?v=43" defer></script>
 {% endblock %}
 {% block content %}
 <header class="graph-bar">
@@ -207,6 +207,7 @@
   <div class="view-tabs track-group" role="tablist">
     <button type="button" class="view-tab track-item is-active" data-view="rede" data-tip="Layout de rede: quem se liga a quem">Rede</button>
     <button type="button" class="view-tab track-item" data-view="arvore" data-tip="Árvore a partir das sementes">Árvore</button>
+    <button type="button" class="view-tab track-item" data-view="ordenar" data-tip="Empilha por tipo: matéria, rede social, empresa, pessoa…">Ordenar</button>
     <button type="button" class="view-tab track-item" data-view="split" data-tip="Grafo + lista de empresas">Split</button>
     <button type="button" class="view-tab track-item" data-view="mapa" data-tip="Grid geográfico das empresas — mesmo visual do painel">Mapa</button>
   </div>
@@ -290,6 +291,9 @@
       </button>
       <button type="button" class="canvas-btn" id="ct-fit" data-tip="Enquadrar" aria-label="Enquadrar">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M17 8V3h-5M3 12v5h5M17 12v5h-5"/></svg>
+      </button>
+      <button type="button" class="canvas-btn" id="ct-sort" data-tip="Ordenar por tipo: matéria, rede social, empresa…" aria-label="Ordenar por tipo" aria-pressed="false">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M4 10h8M4 15h10"/></svg>
       </button>
     </div>
     <div class="canvas-tools-group">

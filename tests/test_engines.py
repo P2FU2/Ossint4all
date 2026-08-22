@@ -222,6 +222,46 @@ def test_graph_payload_keeps_contact_and_office_attrs(db) -> None:
     assert attrs["cargo"] == "deputado federal"
 
 
+def test_graph_payload_keeps_preview_attrs(db) -> None:
+    seed = parse_seed("Maria Silva Souza", forced_kind="NAME")
+    inv = create_investigation(
+        db, title="Preview", hypothesis=None, seeds=[seed], connectors=[], max_depth=1, monitor=False, created_by="t"
+    )
+    apply_result(
+        db,
+        inv,
+        inv.entities[0],
+        ConnectorResult(
+            entities=[
+                FoundEntity(
+                    entity_type="PUBLICATION",
+                    kind="URL",
+                    value="https://g1.exemplo/materia",
+                    display_name="Matéria",
+                    attrs={
+                        "preview_kind": "article",
+                        "og_title": "Título da matéria",
+                        "description": "Lead da reportagem.",
+                        "thumb": "https://img.exemplo/foto.jpg",
+                        "page_url": "https://g1.exemplo/materia",
+                    },
+                )
+            ]
+        ),
+        connector="web_search",
+        depth=0,
+        enqueue_children=False,
+        max_attempts=1,
+    )
+    db.flush()
+    payload = graph_payload(db, inv.id)
+    attrs = next(n["attrs"] for n in payload["nodes"] if n["type"] == "PUBLICATION")
+    assert attrs["preview_kind"] == "article"
+    assert attrs["og_title"] == "Título da matéria"
+    assert attrs["description"] == "Lead da reportagem."
+    assert attrs["thumb"] == "https://img.exemplo/foto.jpg"
+
+
 def test_failed_query_skips_negative_finding(db) -> None:
     seed = parse_seed("Maria Silva Souza")
     inv = create_investigation(

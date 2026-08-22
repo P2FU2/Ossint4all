@@ -8,6 +8,7 @@ from osint4all.config import Settings
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.db.models import Entity
 from osint4all.exceptions import SkippedDisabled
+from osint4all.graph.preview import preview_kind_for_url
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
 from osint4all.security import only_digits
@@ -45,12 +46,24 @@ def parse_gazette_rows(rows: list[dict[str, Any]], *, origin_key: str, query: st
         when = str(row.get("date") or "").strip()
         excerpt = str(row.get("excerpt") or row.get("txt_url") or "").strip()
         title = " · ".join(part for part in (place, uf, when) if part) or query
+        kind = preview_kind_for_url(url)
         found = FoundEntity(
             entity_type="PUBLICATION",
             kind="URL",
             value=url,
             display_name=title[:180],
-            attrs={"municipio": place, "uf": uf, "when": when, "edicao": row.get("edition"), "fonte": "querido_diario"},
+            attrs={
+                "municipio": place,
+                "uf": uf,
+                "when": when,
+                "edicao": row.get("edition"),
+                "fonte": url,
+                "page_url": url,
+                "preview_kind": kind,
+                "tipo": "pdf" if kind == "pdf" else "diario",
+                "og_title": title[:220],
+                "description": excerpt[:500] if excerpt else "",
+            },
             confidence=0.55,
         )
         out.entities.append(found)

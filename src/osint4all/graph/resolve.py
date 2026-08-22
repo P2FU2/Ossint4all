@@ -23,6 +23,7 @@ from osint4all.db.repository import (
     utcnow,
 )
 from osint4all.graph.identity import bind_found_to_profile, found_canonical_key, is_unconfirmed, should_enqueue_child
+from osint4all.graph.preview import enrich_found_entities
 from osint4all.identifiers import STRONG_ID_KINDS, canonical_key
 
 
@@ -254,6 +255,7 @@ def apply_result(
     if target is None and profile.name:
         target = find_person_by_name(session, investigation.id, profile.name)
 
+    enrich_found_entities(result.entities)
     for found in result.entities:
         key = found_canonical_key(found)
         if key in blocked or canonical_key(found.kind, found.value) in blocked:

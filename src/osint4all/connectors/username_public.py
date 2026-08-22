@@ -9,6 +9,7 @@ from osint4all.config import Settings
 from osint4all.connectors.base import ConnectorResult, ExpandContext, FoundEdge, FoundEntity, FoundEvidence
 from osint4all.db.models import Entity
 from osint4all.exceptions import SkippedDisabled
+from osint4all.graph.preview import preview_from_html
 from osint4all.http_client import RateLimitedClient
 from osint4all.identifiers import canonical_key
 
@@ -211,26 +212,46 @@ def is_reserved_username(value: str | None) -> bool:
     return user in RESERVED_USERNAMES or compact in RESERVED_USERNAMES
 
 
-def parse_public_hits(hits: list[tuple[str, str]], *, origin_key: str, user: str = "") -> ConnectorResult:
+def parse_public_hits(
+    hits: list[tuple[str, str] | tuple[str, str, str]],
+    *,
+    origin_key: str,
+    user: str = "",
+) -> ConnectorResult:
     handle = normalize_username(user) or normalize_username(
         origin_key.split(":", 1)[1] if origin_key.startswith("username:") else ""
     )
     out = ConnectorResult()
     if handle and is_reserved_username(handle):
         return out
-    for label, url in hits:
+    for item in hits:
+        label, url = item[0], item[1]
+        html = item[2] if len(item) > 2 else ""
         slug = normalize_username(url.rstrip("/").rsplit("/", 1)[-1])
         network = normalize_username(label)
         if is_reserved_username(slug) or (network and slug == network):
             continue
         if handle and slug and slug != handle:
             continue
+        attrs: dict[str, Any] = {
+            "network": label,
+            "username": handle,
+            "status": "confirmed",
+            "page_url": url,
+            "preview_kind": "social",
+            "tipo": "social",
+        }
+        if html:
+            extra = preview_from_html(html, url)
+            extra["preview_kind"] = "social"
+            extra["tipo"] = "social"
+            attrs.update({key: val for key, val in extra.items() if val not in (None, "", [], {})})
         found = FoundEntity(
             entity_type="PROFILE",
             kind="URL",
             value=url,
             display_name=f"{label} · @{handle}" if handle else label,
-            attrs={"network": label, "username": handle, "status": "confirmed"},
+            attrs=attrs,
             confidence=0.7,
         )
         out.entities.append(found)
@@ -292,7 +313,7 @@ class UsernamePublicConnector:
         if not user:
             return ConnectorResult()
         templates = CORE_PROFILE_TEMPLATES if getattr(ctx, "core_only", False) else PUBLIC_PROFILE_TEMPLATES
-        hits: list[tuple[str, str]] = []
+        hits: list[tuple[str, str] | tuple[str, str, str]] = []
         for label, template in templates:
             if normalize_username(label) == user or is_reserved_username(user):
                 continue
@@ -302,5 +323,5 @@ class UsernamePublicConnector:
             except Exception:
                 continue
             if resp.status_code == 200:
-                hits.append((label, url))
+                hits.append((label, url, (resp.text or "")[:80000]))
         return parse_public_hits(hits, origin_key=entity.canonical_key, user=user)
